@@ -7,6 +7,7 @@ import (
 )
 
 // Status 状态类型，使用位运算支持多状态叠加，最多支持63种状态，比uint64少一位
+// TODO:GG 测试数据库里走不走索引
 type Status int64
 
 // 预定义的常用状态位
