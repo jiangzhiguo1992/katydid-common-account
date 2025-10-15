@@ -53,14 +53,14 @@ func TestExtras_ComplexTypes(t *testing.T) {
 	e := NewExtras()
 
 	// 测试数组
-	tags := []interface{}{"go", "database", "api"}
+	tags := []any{"go", "database", "api"}
 	e.Set("tags", tags)
 	if val, ok := e.GetSlice("tags"); !ok || len(val) != 3 {
 		t.Errorf("Expected slice with 3 elements, got %v", val)
 	}
 
 	// 测试对象
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"version": "1.0",
 		"author":  "Admin",
 	}
@@ -75,7 +75,7 @@ func TestExtras_JSONSerialization(t *testing.T) {
 	e.Set("name", "Test")
 	e.Set("count", 42)
 	e.Set("enabled", true)
-	e.Set("tags", []interface{}{"a", "b", "c"})
+	e.Set("tags", []any{"a", "b", "c"})
 
 	// 序列化
 	data, err := json.Marshal(e)
