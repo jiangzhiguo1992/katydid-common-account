@@ -42,14 +42,14 @@ func (s *Status) Unset(flag Status) {
 	*s &^= flag
 }
 
-// Merge 保留与指定状态位相同的部分，其他位清除
-func (s *Status) Merge(flag Status) {
-	*s &= flag
-}
-
 // Toggle 切换指定的状态位
 func (s *Status) Toggle(flag Status) {
 	*s ^= flag
+}
+
+// Merge 保留与指定状态位相同的部分，其他位清除
+func (s *Status) Merge(flag Status) {
+	*s &= flag
 }
 
 // Contain 检查是否包含指定的状态位
