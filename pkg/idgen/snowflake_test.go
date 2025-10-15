@@ -2,6 +2,7 @@ package idgen
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func TestSnowflake_NextID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, ids[id], "ID should be unique")
 		ids[id] = true
+		fmt.Println(id)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 const (
 	// Epoch 起始时间戳 (2026-01-01 00:00:00 UTC)
-	Epoch int64 = 1767196800000
+	Epoch int64 = 1767196800000 // 1735660800000
 
 	// 位数分配
 	WorkerIDBits     = 5  // 工作机器ID位数
