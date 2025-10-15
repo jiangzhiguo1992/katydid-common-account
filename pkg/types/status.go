@@ -121,9 +121,19 @@ func (s Status) IsUnverified() bool {
 	return s.HasAny(StatusSysUnverified, StatusAdmUnverified, StatusUserUnverified)
 }
 
-// IsNormal 是否为正常状态
-func (s Status) IsNormal() bool {
-	return !s.IsDisable() && !s.IsDeleted() && !s.IsHidden() && !s.IsUnverified()
+// CanEnable 是否为启用状态
+func (s Status) CanEnable() bool {
+	return !s.IsDeleted() && !s.IsDisable()
+}
+
+// CanVisible 是否为可见状态
+func (s Status) CanVisible() bool {
+	return s.CanEnable() && !s.IsHidden()
+}
+
+// CanVerified 是否为已验证状态
+func (s Status) CanVerified() bool {
+	return s.CanVisible() && !s.IsUnverified()
 }
 
 // Value 实现 driver.Valuer 接口，用于数据库存储

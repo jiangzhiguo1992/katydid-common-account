@@ -384,16 +384,276 @@ ADD COLUMN status BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX idx_status ON your_table(status);
 ```
 
-## 常见问题
+## 数据库索引与位运算查询优化
 
-**Q: 为什么默认值是0（StatusNone）？**  
-A: 0 表示没有任何标记，即正常状态。这样设计更符合直觉，且数据库默认值为0。
+### MySQL 和 PostgreSQL 对位运算索引的支持
 
-**Q: 如何判断是否被系统禁用？**  
-A: 使用 `status.Contain(types.StatusSysDisabled)` 方法，它只检查系统级别的禁用标志。
+**重要提示**：直接在 `status` 字段上创建普通 B-Tree 索引**对位运算查询帮助有限**，因为：
 
-**Q: 软删除如何实现？**  
-A: 推荐组合使用 `StatusSysDeleted | StatusSysHidden`，既标记删除又隐藏内容。
+1. **MySQL**：
+   - 普通 B-Tree 索引不支持位运算表达式（`status & flags = 0`）
+   - 查询时会进行全表扫描，无法有效利用索引
 
-**Q: 如何检查是否正常状态？**  
-A: 使用 `status.IsNormal()` 方法，它检查未被禁用、未删除、未隐藏、已验证。
+2. **PostgreSQL**：
+   - 普通 B-Tree 索引同样不支持位运算表达式
+   - 但可以创建**表达式索引**来优化特定查询
+
+### 推荐的索引优化方案
+
+#### 方案1：表达式索引（仅 PostgreSQL）
+
+PostgreSQL 支持为表达式创建索引：
+
+```sql
+-- PostgreSQL: 为常用查询创建表达式索引
+
+-- 创建"未禁用"的表达式索引
+CREATE INDEX idx_users_not_disabled ON users ((status & 56) = 0);
+-- 56 = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
+
+-- 创建"未删除"的表达式索引
+CREATE INDEX idx_users_not_deleted ON users ((status & 7) = 0);
+-- 7 = StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted
+
+-- 创建"未隐藏"的表达式索引
+CREATE INDEX idx_users_not_hidden ON users ((status & 448) = 0);
+-- 448 = StatusSysHidden | StatusAdmHidden | StatusUserHidden
+
+-- 创建"正常状态"的表达式索引（组合条件）
+CREATE INDEX idx_users_normal ON users ((status & 4095) = 0);
+-- 4095 = 所有 12 个状态位的组合
+```
+
+使用示例：
+```go
+// 这个查询会使用 idx_users_not_disabled 索引
+db.Where("status & ? = 0", disabledFlags).Find(&users)
+```
+
+#### 方案2：添加计算字段 + 普通索引（MySQL 和 PostgreSQL 通用）
+
+为常用查询添加布尔计算字段，这种方式**对所有数据库都有效**：
+
+```sql
+-- 添加计算字段
+ALTER TABLE users 
+  ADD COLUMN is_disabled BOOLEAN GENERATED ALWAYS AS ((status & 56) != 0) STORED,
+  ADD COLUMN is_deleted BOOLEAN GENERATED ALWAYS AS ((status & 7) != 0) STORED,
+  ADD COLUMN is_hidden BOOLEAN GENERATED ALWAYS AS ((status & 448) != 0) STORED,
+  ADD COLUMN is_normal BOOLEAN GENERATED ALWAYS AS ((status & 4095) = 0) STORED;
+
+-- 为计算字段创建索引
+CREATE INDEX idx_users_is_disabled ON users(is_disabled);
+CREATE INDEX idx_users_is_deleted ON users(is_deleted);
+CREATE INDEX idx_users_is_hidden ON users(is_hidden);
+CREATE INDEX idx_users_is_normal ON users(is_normal);
+
+-- 组合索引（常用查询组合）
+CREATE INDEX idx_users_status_flags ON users(is_disabled, is_deleted, is_hidden);
+```
+
+使用示例：
+```go
+// 查询未禁用的用户 - 使用 is_disabled 索引
+db.Where("is_disabled = ?", false).Find(&users)
+
+// 查询正常用户 - 使用 is_normal 索引
+db.Where("is_normal = ?", true).Find(&users)
+```
+
+#### 方案3：部分索引/过滤索引（PostgreSQL 最优）
+
+PostgreSQL 支持部分索引，只为满足条件的行创建索引：
+
+```sql
+-- PostgreSQL: 只为正常状态的用户创建索引
+CREATE INDEX idx_users_normal_only ON users(id) 
+WHERE (status & 4095) = 0;
+
+-- 只为未删除的用户创建索引
+CREATE INDEX idx_users_not_deleted_only ON users(id, created_at) 
+WHERE (status & 7) = 0;
+
+-- 组合条件：未禁用且未删除
+CREATE INDEX idx_users_active ON users(id, updated_at) 
+WHERE (status & 63) = 0;
+```
+
+使用示例：
+```go
+// 这个查询会自动使用 idx_users_normal_only 索引
+db.Where("(status & ?) = 0", 4095).Order("id DESC").Find(&users)
+```
+
+### 推荐的实际方案
+
+#### 对于 MySQL 项目
+
+**推荐使用方案2（计算字段）**：
+
+```sql
+-- MySQL 8.0+ 支持 GENERATED 列
+ALTER TABLE users 
+  ADD COLUMN is_disabled TINYINT(1) GENERATED ALWAYS AS (
+    IF((status & 56) != 0, 1, 0)
+  ) STORED,
+  ADD COLUMN is_deleted TINYINT(1) GENERATED ALWAYS AS (
+    IF((status & 7) != 0, 1, 0)
+  ) STORED,
+  ADD COLUMN is_hidden TINYINT(1) GENERATED ALWAYS AS (
+    IF((status & 448) != 0, 1, 0)
+  ) STORED;
+
+CREATE INDEX idx_users_is_disabled ON users(is_disabled);
+CREATE INDEX idx_users_is_deleted ON users(is_deleted);
+CREATE INDEX idx_users_is_hidden ON users(is_hidden);
+```
+
+在 GORM 模型中添加这些字段：
+
+```go
+type User struct {
+    models.BaseModel
+    Username   string `json:"username"`
+    Email      string `json:"email"`
+    
+    // 计算字段（只读，由数据库自动维护）
+    IsDisabled bool `gorm:"column:is_disabled;->;type:GENERATED ALWAYS AS ((status & 56) != 0) STORED" json:"-"`
+    IsDeleted  bool `gorm:"column:is_deleted;->;type:GENERATED ALWAYS AS ((status & 7) != 0) STORED" json:"-"`
+    IsHidden   bool `gorm:"column:is_hidden;->;type:GENERATED ALWAYS AS ((status & 448) != 0) STORED" json:"-"`
+}
+
+// 使用计算字段查询
+db.Where("is_disabled = ?", false).Find(&users)
+```
+
+#### 对于 PostgreSQL 项目
+
+**推荐组合使用方案1和方案3**：
+
+```sql
+-- 创建表达式索引（用于位运算查询）
+CREATE INDEX idx_users_not_disabled ON users ((status & 56) = 0);
+CREATE INDEX idx_users_not_deleted ON users ((status & 7) = 0);
+CREATE INDEX idx_users_not_hidden ON users ((status & 448) = 0);
+
+-- 创建部分索引（用于常见查询优化）
+CREATE INDEX idx_users_active_list ON users(created_at DESC) 
+WHERE (status & 63) = 0;  -- 未禁用且未删除
+
+CREATE INDEX idx_users_normal_list ON users(id DESC) 
+WHERE (status & 4095) = 0;  -- 完全正常状态
+```
+
+### Repository 层的查询优化示例
+
+```go
+package repository
+
+import (
+    "katydid-common-account/pkg/types"
+    "gorm.io/gorm"
+)
+
+// 状态标志常量（用于位运算）
+const (
+    DisabledFlags = int64(types.StatusSysDisabled | types.StatusAdmDisabled | types.StatusUserDisabled)  // 56
+    DeletedFlags  = int64(types.StatusSysDeleted | types.StatusAdmDeleted | types.StatusUserDeleted)    // 7
+    HiddenFlags   = int64(types.StatusSysHidden | types.StatusAdmHidden | types.StatusUserHidden)      // 448
+    UnverifiedFlags = int64(types.StatusSysUnverified | types.StatusAdmUnverified | types.StatusUserUnverified) // 3584
+    AllBadFlags   = DisabledFlags | DeletedFlags | HiddenFlags | UnverifiedFlags  // 4095
+)
+
+// MySQL 使用计算字段的 Scope
+func WithNotDisabledMySQL(db *gorm.DB) *gorm.DB {
+    return db.Where("is_disabled = ?", false)
+}
+
+func WithNotDeletedMySQL(db *gorm.DB) *gorm.DB {
+    return db.Where("is_deleted = ?", false)
+}
+
+// PostgreSQL 使用位运算的 Scope（会利用表达式索引）
+func WithNotDisabledPG(db *gorm.DB) *gorm.DB {
+    return db.Where("(status & ?) = 0", DisabledFlags)
+}
+
+func WithNotDeletedPG(db *gorm.DB) *gorm.DB {
+    return db.Where("(status & ?) = 0", DeletedFlags)
+}
+
+func WithNotHiddenPG(db *gorm.DB) *gorm.DB {
+    return db.Where("(status & ?) = 0", HiddenFlags)
+}
+
+func WithNormalPG(db *gorm.DB) *gorm.DB {
+    return db.Where("(status & ?) = 0", AllBadFlags)
+}
+
+// 通用方法（自动检测数据库类型）
+func WithNotDisabled(db *gorm.DB) *gorm.DB {
+    dialect := db.Dialector.Name()
+    if dialect == "mysql" {
+        // 如果有计算字段，使用计算字段
+        var hasColumn bool
+        db.Raw("SELECT COUNT(*) > 0 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_disabled'").Scan(&hasColumn)
+        if hasColumn {
+            return db.Where("is_disabled = ?", false)
+        }
+    }
+    // 默认使用位运算（PostgreSQL 会使用表达式索引）
+    return db.Where("(status & ?) = 0", DisabledFlags)
+}
+
+// 使用示例
+func (r *UserRepository) FindActiveUsers() ([]User, error) {
+    var users []User
+    err := r.db.
+        Scopes(WithNotDisabled, WithNotDeleted).
+        Order("created_at DESC").
+        Limit(100).
+        Find(&users).Error
+    return users, err
+}
+```
+
+### 性能对比
+
+| 方案 | MySQL 支持 | PostgreSQL 支持 | 查询性能 | 维护成本 |
+|------|-----------|----------------|---------|---------|
+| 普通索引 | ✅ | ✅ | ❌ 低（全表扫描） | ✅ 低 |
+| 表达式索引 | ❌ | ✅ | ✅ 高 | ✅ 低 |
+| 计算字段 | ✅ | ✅ | ✅✅ 最高 | ⚠️ 中（需修改模型） |
+| 部分索引 | ❌ | ✅ | ✅✅ 最高 | ✅ 低 |
+
+### 查询性能测试建议
+
+```sql
+-- 检查查询是否使用了索引
+-- MySQL
+EXPLAIN SELECT * FROM users WHERE (status & 56) = 0;
+EXPLAIN SELECT * FROM users WHERE is_disabled = false;
+
+-- PostgreSQL
+EXPLAIN ANALYZE SELECT * FROM users WHERE (status & 56) = 0;
+EXPLAIN ANALYZE SELECT * FROM users WHERE is_disabled = false;
+```
+
+### 最佳实践建议
+
+1. **小型应用（< 10万行）**：
+   - 直接使用位运算查询，不需要额外优化
+   - 普通 status 字段索引足够
+
+2. **中型应用（10万 - 100万行）**：
+   - MySQL: 使用计算字段方案
+   - PostgreSQL: 使用表达式索引方案
+
+3. **大型应用（> 100万行）**：
+   - MySQL: 计算字段 + 组合索引
+   - PostgreSQL: 表达式索引 + 部分索引
+
+4. **超大型应用**：
+   - 考虑分区表
+   - 使用读写分离
+   - 添加缓存层
