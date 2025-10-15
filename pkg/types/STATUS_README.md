@@ -4,47 +4,35 @@
 
 `Status` 类型是一个基于位运算的状态管理系统，支持多个状态的叠加和组合。适用于需要同时跟踪多个状态标志的场景。
 
+该系统采用**分级状态设计**，每种状态都有三个级别：
+- **系统级别（Sys）**：系统控制的状态，优先级最高
+- **管理员级别（Adm）**：管理员控制的状态
+- **用户级别（User）**：用户自己控制的状态
+
 ## 特性
 
-- ✅ 使用位运算实现高效的状态管理
-- ✅ 支持多状态叠加（如：启用 + 可见 + 活跃）
+- ✅ 使用 int64 位运算实现高效的状态管理（最多支持63种状态）
+- ✅ 支持多状态叠加（如：系统禁用 + 管理员隐藏）
+- ✅ 分级状态控制，权限清晰
 - ✅ 提供丰富的 API 进行状态操作
 - ✅ 支持数据库存储（实现了 `driver.Valuer` 和 `sql.Scanner`）
 - ✅ 支持 JSON 序列化
-- ✅ 内置常用状态组合
 
 ## 预定义状态
 
-### 基础状态
+### 基础状态（分级设计）
 
-| 状态 | 描述 |
-|-----|------|
-| `StatusNone` | 无状态（0） |
-| `StatusEnabled` | 启用状态 |
-| `StatusVisible` | 可见状态 |
-| `StatusLocked` | 锁定状态 |
-| `StatusDeleted` | 删除状态 |
-| `StatusActive` | 活跃状态 |
-| `StatusVerified` | 已验证状态 |
-| `StatusPublished` | 已发布状态 |
-| `StatusArchived` | 已归档状态 |
-| `StatusFeatured` | 特色/推荐状态 |
-| `StatusPinned` | 置顶状态 |
-| `StatusHidden` | 隐藏状态 |
-| `StatusSuspended` | 暂停/冻结状态 |
-| `StatusPending` | 待处理状态 |
-| `StatusApproved` | 已批准状态 |
-| `StatusRejected` | 已拒绝状态 |
-| `StatusDraft` | 草稿状态 |
+| 状态类型 | 系统级别 | 管理员级别 | 用户级别 |
+|---------|---------|-----------|---------|
+| **删除** | `StatusSysDeleted` | `StatusAdmDeleted` | `StatusUserDeleted` |
+| **禁用** | `StatusSysDisabled` | `StatusAdmDisabled` | `StatusUserDisabled` |
+| **隐藏** | `StatusSysHidden` | `StatusAdmHidden` | `StatusUserHidden` |
+| **未验证** | `StatusSysUnverified` | `StatusAdmUnverified` | `StatusUserUnverified` |
 
-### 状态组合
-
-| 组合 | 包含的状态 | 描述 |
-|-----|-----------|------|
-| `StatusNormal` | `StatusEnabled` + `StatusVisible` | 正常状态 |
-| `StatusPublicActive` | `StatusEnabled` + `StatusVisible` + `StatusActive` + `StatusPublished` | 公开活跃状态 |
-| `StatusPendingReview` | `StatusEnabled` + `StatusPending` | 待审核状态 |
-| `StatusSoftDeleted` | `StatusDeleted` + `StatusHidden` | 软删除状态 |
+**位使用情况**：
+- 当前使用了 12 个状态位（0-11位）
+- 还有 51 个位可用（12-62位）
+- 第 63 位是符号位，不使用
 
 ## 基本用法
 
@@ -56,24 +44,24 @@ import "katydid-common-account/pkg/types"
 var status types.Status
 
 // 设置单个状态
-status.Set(types.StatusEnabled)
-status.Set(types.StatusVisible)
+status.Set(types.StatusUserDisabled)
+status.Set(types.StatusSysHidden)
 
 // 批量设置多个状态
-status.SetMultiple(types.StatusEnabled, types.StatusVisible, types.StatusActive)
+status.SetMultiple(types.StatusUserDisabled, types.StatusSysHidden, types.StatusAdmDisabled)
 
-// 使用预定义组合
-status = types.StatusNormal // 等同于 StatusEnabled | StatusVisible
+// 常用组合示例
+status = types.StatusSysDeleted | types.StatusSysHidden // 软删除状态
 ```
 
 ### 取消状态
 
 ```go
 // 取消单个状态
-status.Unset(types.StatusEnabled)
+status.Unset(types.StatusUserDisabled)
 
 // 批量取消多个状态
-status.UnsetMultiple(types.StatusEnabled, types.StatusVisible)
+status.UnsetMultiple(types.StatusUserDisabled, types.StatusSysHidden)
 
 // 清除所有状态
 status.Clear()
@@ -83,45 +71,53 @@ status.Clear()
 
 ```go
 // 如果有该状态则取消，没有则设置
-status.Toggle(types.StatusEnabled)
+status.Toggle(types.StatusUserDisabled)
 ```
 
 ### 检查状态
 
 ```go
 // 检查是否包含指定状态
-if status.Has(types.StatusEnabled) {
-    // 状态包含 Enabled
+if status.Contain(types.StatusUserDisabled) {
+    // 状态包含 UserDisabled
 }
 
 // 检查是否包含任意一个状态
-if status.HasAny(types.StatusEnabled, types.StatusVisible) {
-    // 至少有一个状态
+if status.HasAny(types.StatusUserDisabled, types.StatusAdmDisabled) {
+    // 至少有一个禁用状态
 }
 
 // 检查是否包含所有指定状态
-if status.HasAll(types.StatusEnabled, types.StatusVisible) {
+if status.HasAll(types.StatusSysDeleted, types.StatusSysHidden) {
     // 同时包含两个状态
 }
 
 // 检查是否完全匹配
-if status.Is(types.StatusNormal) {
-    // 完全等于 StatusNormal
+if status.Equal(types.StatusNone) {
+    // 完全等于 StatusNone
 }
 ```
 
 ### 便捷方法
 
 ```go
-// 内置的便捷检查方法
-status.IsEnabled()    // 是否启用
-status.IsVisible()    // 是否可见
-status.IsLocked()     // 是否锁定
-status.IsDeleted()    // 是否删除
-status.IsActive()     // 是否活跃
-status.IsVerified()   // 是否已验证
-status.IsPublished()  // 是否已发布
-status.IsNormal()     // 是否正常（启用+可见）
+// 禁用相关
+status.IsDisable()        // 是否被任意级别禁用
+status.Contain(types.StatusUserDisabled)   // 是否被用户禁用
+status.Contain(types.StatusAdmDisabled)    // 是否被管理员禁用
+status.Contain(types.StatusSysDisabled)    // 是否被系统禁用
+
+// 隐藏相关
+status.IsHidden()         // 是否被任意级别隐藏
+
+// 删除相关
+status.IsDeleted()        // 是否被任意级别删除
+
+// 验证相关
+status.IsUnverified()     // 是否未验证
+
+// 综合判断
+status.IsNormal()         // 是否正常（未禁用、未删除、未隐藏、已验证）
 ```
 
 ## 在模型中使用
@@ -149,30 +145,36 @@ type User struct {
     Email    string `json:"email"`
 }
 
-// 创建用户
+// 创建用户 - 默认为正常状态（Status = 0）
 user := &User{
     Username: "john",
     Email:    "john@example.com",
 }
-// BaseModel.BeforeCreate 会自动设置 Status 为 StatusNormal
+// Status 默认为 0，即正常状态
 
-// 用户完成邮箱验证
-user.Status.Set(types.StatusVerified)
+// 用户自己禁用账号
+user.Status.Set(types.StatusUserDisabled)
 
-// 用户发布内容，成为活跃用户
-user.Status.Set(types.StatusActive)
+// 管理员禁用用户
+user.Status.Set(types.StatusAdmDisabled)
+
+// 系统禁用用户
+user.Status.Set(types.StatusSysDisabled)
 
 // 检查用户状态
-if user.Status.IsNormal() && user.Status.IsVerified() {
-    // 正常且已验证的用户
+if !user.Status.IsDisable() {
+    // 用户可以登录
 }
 
-// 暂停用户
-user.Status.Unset(types.StatusEnabled)
-user.Status.Set(types.StatusSuspended)
+if user.Status.IsDisable() {
+    // 用户被某个级别禁用了
+}
 
-// 软删除用户
-user.Status = types.StatusSoftDeleted
+// 用户隐藏自己的资料
+user.Status.Set(types.StatusUserHidden)
+
+// 软删除用户（系统删除+隐藏）
+user.Status.SetMultiple(types.StatusSysDeleted, types.StatusSysHidden)
 ```
 
 ## 数据库查询
@@ -180,34 +182,49 @@ user.Status = types.StatusSoftDeleted
 ### 查询特定状态的记录
 
 ```go
-// 查询所有启用的用户
+// 查询所有未被禁用的用户
 var users []User
-db.Where("status & ? = ?", types.StatusEnabled, types.StatusEnabled).Find(&users)
+disabledFlags := types.StatusSysDisabled | types.StatusAdmDisabled | types.StatusUserDisabled
+db.Where("status & ? = 0", disabledFlags).Find(&users)
 
-// 查询正常状态的用户（启用+可见）
-db.Where("status & ? = ?", types.StatusNormal, types.StatusNormal).Find(&users)
+// 查询被任意级别禁用的用户
+db.Where("status & ? != 0", disabledFlags).Find(&users)
 
 // 查询未删除的用户
-db.Where("status & ? = 0", types.StatusDeleted).Find(&users)
+deletedFlags := types.StatusSysDeleted | types.StatusAdmDeleted | types.StatusUserDeleted
+db.Where("status & ? = 0", deletedFlags).Find(&users)
+
+// 查询正常状态的用户（未禁用、未删除、未隐藏）
+allBadFlags := disabledFlags | deletedFlags | 
+    (types.StatusSysHidden | types.StatusAdmHidden | types.StatusUserHidden)
+db.Where("status & ? = 0", allBadFlags).Find(&users)
 ```
 
-### Scope 辅助方法（可选实现）
+### Scope 辅助方法（推荐）
 
-可以在 repository 中创建辅助方法：
+在 repository 中创建辅助方法：
 
 ```go
-// 查询启用的记录
-func WithEnabled(db *gorm.DB) *gorm.DB {
-    return db.Where("status & ? = ?", types.StatusEnabled, types.StatusEnabled)
+// 查询未禁用的记录
+func WithNotDisabled(db *gorm.DB) *gorm.DB {
+    disabledFlags := types.StatusSysDisabled | types.StatusAdmDisabled | types.StatusUserDisabled
+    return db.Where("status & ? = 0", disabledFlags)
 }
 
-// 查询可见的记录
-func WithVisible(db *gorm.DB) *gorm.DB {
-    return db.Where("status & ? = ?", types.StatusVisible, types.StatusVisible)
+// 查询未隐藏的记录
+func WithNotHidden(db *gorm.DB) *gorm.DB {
+    hiddenFlags := types.StatusSysHidden | types.StatusAdmHidden | types.StatusUserHidden
+    return db.Where("status & ? = 0", hiddenFlags)
+}
+
+// 查询未删除的记录
+func WithNotDeleted(db *gorm.DB) *gorm.DB {
+    deletedFlags := types.StatusSysDeleted | types.StatusAdmDeleted | types.StatusUserDeleted
+    return db.Where("status & ? = 0", deletedFlags)
 }
 
 // 使用
-db.Scopes(WithEnabled, WithVisible).Find(&users)
+db.Scopes(WithNotDisabled, WithNotHidden, WithNotDeleted).Find(&users)
 ```
 
 ## 实际应用场景
@@ -215,62 +232,72 @@ db.Scopes(WithEnabled, WithVisible).Find(&users)
 ### 1. 用户状态管理
 
 ```go
-// 新用户注册
-user.Status = types.StatusNormal
+// 新用户注册 - 默认正常状态
+user.Status = types.StatusNone
 
-// 邮箱验证后
-user.Status.Set(types.StatusVerified)
+// 用户自己禁用账号（注销）
+user.Status.Set(types.StatusUserDisabled)
 
-// 用户活跃
-user.Status.Set(types.StatusActive)
+// 用户重新启用账号
+user.Status.Unset(types.StatusUserDisabled)
 
-// 违规暂停
-user.Status.Unset(types.StatusEnabled)
-user.Status.Set(types.StatusSuspended)
+// 管理员禁用违规用户
+user.Status.Set(types.StatusAdmDisabled)
 
-// 软删除
-user.Status.Set(types.StatusDeleted)
-user.Status.Set(types.StatusHidden)
+// 系统自动禁用长期不活跃用户
+user.Status.Set(types.StatusSysDisabled)
+
+// 完全禁用（所有级别）
+user.Status.SetMultiple(types.StatusSysDisabled, types.StatusAdmDisabled, types.StatusUserDisabled)
+
+// 用户隐藏自己的资料
+user.Status.Set(types.StatusUserHidden)
+
+// 软删除用户
+user.Status.SetMultiple(types.StatusSysDeleted, types.StatusSysHidden)
 ```
 
-### 2. 文章/内容管理
+### 2. 内容管理
 
 ```go
-// 草稿
-article.Status = types.StatusDraft
+// 文章发布
+article.Status = types.StatusNone
 
-// 提交审核
-article.Status.Set(types.StatusPending)
+// 作者隐藏文章
+article.Status.Set(types.StatusUserHidden)
 
-// 审核通过并发布
-article.Status.UnsetMultiple(types.StatusDraft, types.StatusPending)
-article.Status.SetMultiple(types.StatusApproved, types.StatusPublished, types.StatusVisible)
+// 管理员隐藏违规文章
+article.Status.Set(types.StatusAdmHidden)
 
-// 设为推荐
-article.Status.Set(types.StatusFeatured)
+// 系统隐藏敏感内容
+article.Status.Set(types.StatusSysHidden)
 
-// 置顶
-article.Status.Set(types.StatusPinned)
-
-// 归档
-article.Status.Set(types.StatusArchived)
-article.Status.Unset(types.StatusVisible)
+// 软删除文章
+article.Status.SetMultiple(types.StatusSysDeleted, types.StatusSysHidden)
 ```
 
-### 3. 商品状态管理
+### 3. 权限控制示例
 
 ```go
-// 上架商品
-product.Status.SetMultiple(types.StatusEnabled, types.StatusVisible, types.StatusPublished)
+// 检查是否可以显示给用户
+func CanDisplay(status types.Status) bool {
+    return !status.IsDisable() && !status.IsHidden() && !status.IsDeleted()
+}
 
-// 库存不足，暂时下架
-product.Status.Unset(types.StatusVisible)
+// 检查管理员是否可以编辑
+func CanAdminEdit(status types.Status) bool {
+    // 系统级别的状态管理员也不能改
+    return !status.Contain(types.StatusSysDisabled) && !status.Contain(types.StatusSysDeleted)
+}
 
-// 锁定商品（禁止修改）
-product.Status.Set(types.StatusLocked)
-
-// 特色商品
-product.Status.Set(types.StatusFeatured)
+// 检查用户是否可以编辑自己的内容
+func CanUserEdit(status types.Status) bool {
+    // 被管理员或系统禁用/删除的内容用户不能编辑
+    return !status.HasAny(
+        types.StatusSysDisabled, types.StatusAdmDisabled,
+        types.StatusSysDeleted, types.StatusAdmDeleted,
+    )
+}
 ```
 
 ## JSON 序列化
@@ -278,19 +305,20 @@ product.Status.Set(types.StatusFeatured)
 ```go
 // 序列化
 data, _ := json.Marshal(user)
-// {"id":123,"status":3,"username":"john",...}
+// {"id":123,"status":4,"username":"john",...}
 
 // 反序列化
 json.Unmarshal(data, &user)
 ```
 
-状态值以整数形式存储，前端可以使用位运算进行判断。
+状态值以整数形式存储在JSON中。
 
 ## 性能优势
 
-- **存储效率**：使用单个 uint64 字段存储最多 64 个状态标志
+- **存储效率**：使用单个 int64 字段存储最多 63 个状态标志
 - **查询效率**：使用位运算进行状态过滤，数据库索引友好
 - **内存效率**：相比使用多个 bool 字段，大大减少内存占用
+- **扩展性强**：目前仅使用 12 位，还有 51 位可供扩展
 
 ## 扩展自定义状态
 
@@ -298,18 +326,35 @@ json.Unmarshal(data, &user)
 
 ```go
 const (
-    StatusCustom1 types.Status = 1 << 20  // 从较大的位开始
-    StatusCustom2 types.Status = 1 << 21
-    StatusCustom3 types.Status = 1 << 22
+    StatusCustom1 types.Status = 1 << 12  // 从第12位开始
+    StatusCustom2 types.Status = 1 << 13
+    StatusCustom3 types.Status = 1 << 14
+    // ... 最多到第62位
 )
 ```
 
 ## 注意事项
 
-1. **位运算范围**：使用 `uint64`，最多支持 64 个状态位
-2. **数据库类型**：建议使用 `BIGINT` 或 `UNSIGNED BIGINT` 类型
+1. **位运算范围**：使用 `int64`，最多支持 63 个状态位（0-62位）
+2. **数据库类型**：使用 `BIGINT` 类型（所有主流数据库都支持）
 3. **向后兼容**：添加新状态时使用新的位，不要修改已有状态的位值
-4. **组合使用**：可以灵活组合多个状态，但要注意业务逻辑的一致性
+4. **分级设计**：合理使用系统、管理员、用户三个级别，明确权限边界
+5. **状态组合**：可以灵活组合多个状态，但要注意业务逻辑的一致性
+
+## 分级状态设计理念
+
+### 为什么要分级？
+
+1. **权限分离**：不同级别的管理员/用户只能操作对应级别的状态
+2. **审计追踪**：可以明确知道是谁（系统/管理员/用户）设置的状态
+3. **灵活控制**：支持多级别同时存在，如系统禁用+用户隐藏
+
+### 级别优先级
+
+虽然技术上没有优先级（位运算是平等的），但业务上建议：
+- **系统级别** > **管理员级别** > **用户级别**
+- 系统级别的状态通常不允许管理员修改
+- 管理员级别的状态不允许普通用户修改
 
 ## 测试
 
@@ -325,3 +370,30 @@ go test -v katydid-common-account/pkg/types -run TestStatus
 go test -v -cover katydid-common-account/pkg/types -run TestStatus
 ```
 
+## 数据库迁移建议
+
+```sql
+-- MySQL
+ALTER TABLE your_table 
+ADD COLUMN status BIGINT NOT NULL DEFAULT 0,
+ADD INDEX idx_status (status);
+
+-- PostgreSQL
+ALTER TABLE your_table 
+ADD COLUMN status BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX idx_status ON your_table(status);
+```
+
+## 常见问题
+
+**Q: 为什么默认值是0（StatusNone）？**  
+A: 0 表示没有任何标记，即正常状态。这样设计更符合直觉，且数据库默认值为0。
+
+**Q: 如何判断是否被系统禁用？**  
+A: 使用 `status.Contain(types.StatusSysDisabled)` 方法，它只检查系统级别的禁用标志。
+
+**Q: 软删除如何实现？**  
+A: 推荐组合使用 `StatusSysDeleted | StatusSysHidden`，既标记删除又隐藏内容。
+
+**Q: 如何检查是否正常状态？**  
+A: 使用 `status.IsNormal()` 方法，它检查未被禁用、未删除、未隐藏、已验证。
