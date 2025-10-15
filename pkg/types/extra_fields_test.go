@@ -5,57 +5,57 @@ import (
 	"testing"
 )
 
-func TestExtraFields_BasicOperations(t *testing.T) {
-	ef := NewExtraFields()
+func TestExtras_BasicOperations(t *testing.T) {
+	e := NewExtras()
 
 	// 测试设置和获取字符串
-	ef.Set("name", "John Doe")
-	if val, ok := ef.GetString("name"); !ok || val != "John Doe" {
+	e.Set("name", "John Doe")
+	if val, ok := e.GetString("name"); !ok || val != "John Doe" {
 		t.Errorf("Expected 'John Doe', got '%s'", val)
 	}
 
 	// 测试设置和获取整数
-	ef.Set("age", 30)
-	if val, ok := ef.GetInt("age"); !ok || val != 30 {
+	e.Set("age", 30)
+	if val, ok := e.GetInt("age"); !ok || val != 30 {
 		t.Errorf("Expected 30, got %d", val)
 	}
 
 	// 测试设置和获取布尔值
-	ef.Set("active", true)
-	if val, ok := ef.GetBool("active"); !ok || !val {
+	e.Set("active", true)
+	if val, ok := e.GetBool("active"); !ok || !val {
 		t.Errorf("Expected true, got %v", val)
 	}
 
 	// 测试设置和获取浮点数
-	ef.Set("price", 99.99)
-	if val, ok := ef.GetFloat64("price"); !ok || val != 99.99 {
+	e.Set("price", 99.99)
+	if val, ok := e.GetFloat64("price"); !ok || val != 99.99 {
 		t.Errorf("Expected 99.99, got %f", val)
 	}
 
 	// 测试Has方法
-	if !ef.Has("name") {
+	if !e.Has("name") {
 		t.Error("Expected 'name' key to exist")
 	}
 
 	// 测试Len方法
-	if ef.Len() != 4 {
-		t.Errorf("Expected length 4, got %d", ef.Len())
+	if e.Len() != 4 {
+		t.Errorf("Expected length 4, got %d", e.Len())
 	}
 
 	// 测试Delete方法
-	ef.Delete("age")
-	if ef.Has("age") {
+	e.Delete("age")
+	if e.Has("age") {
 		t.Error("Expected 'age' key to be deleted")
 	}
 }
 
-func TestExtraFields_ComplexTypes(t *testing.T) {
-	ef := NewExtraFields()
+func TestExtras_ComplexTypes(t *testing.T) {
+	e := NewExtras()
 
 	// 测试数组
 	tags := []interface{}{"go", "database", "api"}
-	ef.Set("tags", tags)
-	if val, ok := ef.GetSlice("tags"); !ok || len(val) != 3 {
+	e.Set("tags", tags)
+	if val, ok := e.GetSlice("tags"); !ok || len(val) != 3 {
 		t.Errorf("Expected slice with 3 elements, got %v", val)
 	}
 
@@ -64,104 +64,104 @@ func TestExtraFields_ComplexTypes(t *testing.T) {
 		"version": "1.0",
 		"author":  "Admin",
 	}
-	ef.Set("metadata", metadata)
-	if val, ok := ef.GetMap("metadata"); !ok || val["version"] != "1.0" {
+	e.Set("metadata", metadata)
+	if val, ok := e.GetMap("metadata"); !ok || val["version"] != "1.0" {
 		t.Errorf("Expected map with version '1.0', got %v", val)
 	}
 }
 
-func TestExtraFields_JSONSerialization(t *testing.T) {
-	ef := NewExtraFields()
-	ef.Set("name", "Test")
-	ef.Set("count", 42)
-	ef.Set("enabled", true)
-	ef.Set("tags", []interface{}{"a", "b", "c"})
+func TestExtras_JSONSerialization(t *testing.T) {
+	e := NewExtras()
+	e.Set("name", "Test")
+	e.Set("count", 42)
+	e.Set("enabled", true)
+	e.Set("tags", []interface{}{"a", "b", "c"})
 
 	// 序列化
-	data, err := json.Marshal(ef)
+	data, err := json.Marshal(e)
 	if err != nil {
 		t.Fatalf("Failed to marshal: %v", err)
 	}
 
 	// 反序列化
-	var ef2 ExtraFields
-	err = json.Unmarshal(data, &ef2)
+	var e2 Extras
+	err = json.Unmarshal(data, &e2)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
 	// 验证数据
-	if name, ok := ef2.GetString("name"); !ok || name != "Test" {
+	if name, ok := e2.GetString("name"); !ok || name != "Test" {
 		t.Errorf("Expected 'Test', got '%s'", name)
 	}
 
-	if count, ok := ef2.GetInt("count"); !ok || count != 42 {
+	if count, ok := e2.GetInt("count"); !ok || count != 42 {
 		t.Errorf("Expected 42, got %d", count)
 	}
 
-	if enabled, ok := ef2.GetBool("enabled"); !ok || !enabled {
+	if enabled, ok := e2.GetBool("enabled"); !ok || !enabled {
 		t.Errorf("Expected true, got %v", enabled)
 	}
 }
 
-func TestExtraFields_DatabaseScan(t *testing.T) {
-	ef := NewExtraFields()
-	ef.Set("key1", "value1")
-	ef.Set("key2", 123)
+func TestExtras_DatabaseScan(t *testing.T) {
+	e := NewExtras()
+	e.Set("key1", "value1")
+	e.Set("key2", 123)
 
 	// 模拟数据库Value操作
-	val, err := ef.Value()
+	val, err := e.Value()
 	if err != nil {
 		t.Fatalf("Value() failed: %v", err)
 	}
 
 	// 模拟数据库Scan操作
-	var ef2 ExtraFields
-	err = ef2.Scan(val)
+	var e2 Extras
+	err = e2.Scan(val)
 	if err != nil {
 		t.Fatalf("Scan() failed: %v", err)
 	}
 
 	// 验证数据
-	if str, ok := ef2.GetString("key1"); !ok || str != "value1" {
+	if str, ok := e2.GetString("key1"); !ok || str != "value1" {
 		t.Errorf("Expected 'value1', got '%s'", str)
 	}
 
-	if num, ok := ef2.GetInt("key2"); !ok || num != 123 {
+	if num, ok := e2.GetInt("key2"); !ok || num != 123 {
 		t.Errorf("Expected 123, got %d", num)
 	}
 }
 
-func TestExtraFields_NilAndEmpty(t *testing.T) {
-	// 测试空ExtraFields
-	var ef ExtraFields
+func TestExtras_NilAndEmpty(t *testing.T) {
+	// 测试空Extras
+	var e Extras
 
 	// Value应该返回nil
-	val, err := ef.Value()
+	val, err := e.Value()
 	if err != nil {
 		t.Fatalf("Value() failed: %v", err)
 	}
 	if val != nil {
-		t.Errorf("Expected nil value for empty ExtraFields, got %v", val)
+		t.Errorf("Expected nil value for empty Extras, got %v", val)
 	}
 
 	// Scan nil
-	err = ef.Scan(nil)
+	err = e.Scan(nil)
 	if err != nil {
 		t.Fatalf("Scan(nil) failed: %v", err)
 	}
 }
 
-func TestExtraFields_Clone(t *testing.T) {
-	ef := NewExtraFields()
-	ef.Set("key1", "value1")
-	ef.Set("key2", 42)
+func TestExtras_Clone(t *testing.T) {
+	e := NewExtras()
+	e.Set("key1", "value1")
+	e.Set("key2", 42)
 
 	// 克隆
-	clone := ef.Clone()
+	clone := e.Clone()
 
 	// 修改原始对象
-	ef.Set("key3", "value3")
+	e.Set("key3", "value3")
 
 	// 验证克隆对象不受影响
 	if clone.Has("key3") {
@@ -173,55 +173,55 @@ func TestExtraFields_Clone(t *testing.T) {
 	}
 }
 
-func TestExtraFields_Merge(t *testing.T) {
-	ef1 := NewExtraFields()
-	ef1.Set("key1", "value1")
-	ef1.Set("key2", "value2")
+func TestExtras_Merge(t *testing.T) {
+	e1 := NewExtras()
+	e1.Set("key1", "value1")
+	e1.Set("key2", "value2")
 
-	ef2 := NewExtraFields()
-	ef2.Set("key2", "new_value2")
-	ef2.Set("key3", "value3")
+	e2 := NewExtras()
+	e2.Set("key2", "new_value2")
+	e2.Set("key3", "value3")
 
 	// 合并
-	ef1.Merge(ef2)
+	e1.Merge(e2)
 
 	// 验证合并结果
-	if val, ok := ef1.GetString("key2"); !ok || val != "new_value2" {
+	if val, ok := e1.GetString("key2"); !ok || val != "new_value2" {
 		t.Errorf("Expected 'new_value2', got '%s'", val)
 	}
 
-	if !ef1.Has("key3") {
+	if !e1.Has("key3") {
 		t.Error("Expected key3 to exist after merge")
 	}
 
-	if ef1.Len() != 3 {
-		t.Errorf("Expected length 3, got %d", ef1.Len())
+	if e1.Len() != 3 {
+		t.Errorf("Expected length 3, got %d", e1.Len())
 	}
 }
 
-func TestExtraFields_Clear(t *testing.T) {
-	ef := NewExtraFields()
-	ef.Set("key1", "value1")
-	ef.Set("key2", "value2")
+func TestExtras_Clear(t *testing.T) {
+	e := NewExtras()
+	e.Set("key1", "value1")
+	e.Set("key2", "value2")
 
-	ef.Clear()
+	e.Clear()
 
-	if !ef.IsEmpty() {
-		t.Error("Expected ExtraFields to be empty after Clear()")
+	if !e.IsEmpty() {
+		t.Error("Expected Extras to be empty after Clear()")
 	}
 
-	if ef.Len() != 0 {
-		t.Errorf("Expected length 0, got %d", ef.Len())
+	if e.Len() != 0 {
+		t.Errorf("Expected length 0, got %d", e.Len())
 	}
 }
 
-func TestExtraFields_Keys(t *testing.T) {
-	ef := NewExtraFields()
-	ef.Set("key1", "value1")
-	ef.Set("key2", "value2")
-	ef.Set("key3", "value3")
+func TestExtras_Keys(t *testing.T) {
+	e := NewExtras()
+	e.Set("key1", "value1")
+	e.Set("key2", "value2")
+	e.Set("key3", "value3")
 
-	keys := ef.Keys()
+	keys := e.Keys()
 	if len(keys) != 3 {
 		t.Errorf("Expected 3 keys, got %d", len(keys))
 	}

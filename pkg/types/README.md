@@ -2,9 +2,9 @@
 
 提供通用的数据类型定义，可被内部和外部项目使用。
 
-## ExtraFields
+## Extras
 
-`ExtraFields` 是一个灵活的键值对数据结构，用于存储扩展字段到数据库模型中。
+`Extras` 是一个灵活的键值对数据结构，用于存储扩展字段到数据库模型中。
 
 ### 特性
 
@@ -22,9 +22,9 @@
 import "katydid-common-account/pkg/types"
 
 type User struct {
-    ID       int64         `gorm:"primarykey" json:"id"`
-    Username string        `gorm:"column:username" json:"username"`
-    Extra    types.ExtraFields `gorm:"column:extra;type:json" json:"extra,omitempty"`
+    ID       int64        `gorm:"primarykey" json:"id"`
+    Username string       `gorm:"column:username" json:"username"`
+    Extra    types.Extras `gorm:"column:extra;type:json" json:"extra,omitempty"`
 }
 ```
 
@@ -33,7 +33,7 @@ type User struct {
 ```go
 user := &User{
     Username: "john",
-    Extra:    types.NewExtraFields(),
+    Extra:    types.NewExtras(),
 }
 
 // 设置各种类型的值
@@ -85,30 +85,30 @@ db.Save(&u)
 #### 工具方法
 
 ```go
-ef := types.NewExtraFields()
+e := types.NewExtras()
 
 // 检查键是否存在
-if ef.Has("key") {
+if e.Has("key") {
     // ...
 }
 
 // 获取所有键
-keys := ef.Keys()
+keys := e.Keys()
 
 // 获取键值对数量
-count := ef.Len()
+count := e.Len()
 
 // 检查是否为空
-isEmpty := ef.IsEmpty()
+isEmpty := e.IsEmpty()
 
 // 克隆
-clone := ef.Clone()
+clone := e.Clone()
 
 // 合并
-ef1.Merge(ef2)
+e1.Merge(e2)
 
 // 清空
-ef.Clear()
+e.Clear()
 ```
 
 ### 数据库字段类型
@@ -121,14 +121,14 @@ ef.Clear()
 
 GORM 示例：
 ```go
-Extra types.ExtraFields `gorm:"column:extra;type:json"`        // MySQL
-Extra types.ExtraFields `gorm:"column:extra;type:jsonb"`       // PostgreSQL
-Extra types.ExtraFields `gorm:"column:extra;type:text"`        // SQLite
+Extra types.Extras `gorm:"column:extra;type:json"`        // MySQL
+Extra types.Extras `gorm:"column:extra;type:jsonb"`       // PostgreSQL
+Extra types.Extras `gorm:"column:extra;type:text"`        // SQLite
 ```
 
 ### API 响应
 
-`ExtraFields` 实现了 `json.Marshaler` 和 `json.Unmarshaler` 接口，可以直接用于 API 响应：
+`Extras` 实现了 `json.Marshaler` 和 `json.Unmarshaler` 接口，可以直接用于 API 响应：
 
 ```go
 // 自动序列化为 JSON
@@ -142,4 +142,3 @@ Extra types.ExtraFields `gorm:"column:extra;type:text"`        // SQLite
   }
 }
 ```
-

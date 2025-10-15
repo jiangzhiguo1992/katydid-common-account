@@ -6,29 +6,29 @@ import (
 	"errors"
 )
 
-// ExtraFields 扩展字段，用于存储键值对形式的额外数据
+// Extras 扩展字段，用于存储键值对形式的额外数据
 // 支持存储各种类型的值（string, number, bool, array, object等）
-type ExtraFields map[string]interface{}
+type Extras map[string]interface{}
 
-// NewExtraFields 创建一个新的扩展字段实例
-func NewExtraFields() ExtraFields {
-	return make(ExtraFields)
+// NewExtras 创建一个新的扩展字段实例
+func NewExtras() Extras {
+	return make(Extras)
 }
 
 // Set 设置键值对
-func (ef ExtraFields) Set(key string, value interface{}) {
-	ef[key] = value
+func (e Extras) Set(key string, value interface{}) {
+	e[key] = value
 }
 
 // Get 获取指定键的值
-func (ef ExtraFields) Get(key string) (interface{}, bool) {
-	value, exists := ef[key]
+func (e Extras) Get(key string) (interface{}, bool) {
+	value, exists := e[key]
 	return value, exists
 }
 
 // GetString 获取字符串类型的值
-func (ef ExtraFields) GetString(key string) (string, bool) {
-	value, exists := ef[key]
+func (e Extras) GetString(key string) (string, bool) {
+	value, exists := e[key]
 	if !exists {
 		return "", false
 	}
@@ -37,8 +37,8 @@ func (ef ExtraFields) GetString(key string) (string, bool) {
 }
 
 // GetInt 获取整数类型的值
-func (ef ExtraFields) GetInt(key string) (int, bool) {
-	value, exists := ef[key]
+func (e Extras) GetInt(key string) (int, bool) {
+	value, exists := e[key]
 	if !exists {
 		return 0, false
 	}
@@ -57,8 +57,8 @@ func (ef ExtraFields) GetInt(key string) (int, bool) {
 }
 
 // GetInt64 获取int64类型的值
-func (ef ExtraFields) GetInt64(key string) (int64, bool) {
-	value, exists := ef[key]
+func (e Extras) GetInt64(key string) (int64, bool) {
+	value, exists := e[key]
 	if !exists {
 		return 0, false
 	}
@@ -76,8 +76,8 @@ func (ef ExtraFields) GetInt64(key string) (int64, bool) {
 }
 
 // GetFloat64 获取浮点数类型的值
-func (ef ExtraFields) GetFloat64(key string) (float64, bool) {
-	value, exists := ef[key]
+func (e Extras) GetFloat64(key string) (float64, bool) {
+	value, exists := e[key]
 	if !exists {
 		return 0, false
 	}
@@ -97,8 +97,8 @@ func (ef ExtraFields) GetFloat64(key string) (float64, bool) {
 }
 
 // GetBool 获取布尔类型的值
-func (ef ExtraFields) GetBool(key string) (bool, bool) {
-	value, exists := ef[key]
+func (e Extras) GetBool(key string) (bool, bool) {
+	value, exists := e[key]
 	if !exists {
 		return false, false
 	}
@@ -107,8 +107,8 @@ func (ef ExtraFields) GetBool(key string) (bool, bool) {
 }
 
 // GetSlice 获取切片类型的值
-func (ef ExtraFields) GetSlice(key string) ([]interface{}, bool) {
-	value, exists := ef[key]
+func (e Extras) GetSlice(key string) ([]interface{}, bool) {
+	value, exists := e[key]
 	if !exists {
 		return nil, false
 	}
@@ -117,8 +117,8 @@ func (ef ExtraFields) GetSlice(key string) ([]interface{}, bool) {
 }
 
 // GetMap 获取map类型的值
-func (ef ExtraFields) GetMap(key string) (map[string]interface{}, bool) {
-	value, exists := ef[key]
+func (e Extras) GetMap(key string) (map[string]interface{}, bool) {
+	value, exists := e[key]
 	if !exists {
 		return nil, false
 	}
@@ -127,72 +127,72 @@ func (ef ExtraFields) GetMap(key string) (map[string]interface{}, bool) {
 }
 
 // Delete 删除指定的键
-func (ef ExtraFields) Delete(key string) {
-	delete(ef, key)
+func (e Extras) Delete(key string) {
+	delete(e, key)
 }
 
 // Has 检查是否存在指定的键
-func (ef ExtraFields) Has(key string) bool {
-	_, exists := ef[key]
+func (e Extras) Has(key string) bool {
+	_, exists := e[key]
 	return exists
 }
 
 // Keys 返回所有的键
-func (ef ExtraFields) Keys() []string {
-	keys := make([]string, 0, len(ef))
-	for k := range ef {
+func (e Extras) Keys() []string {
+	keys := make([]string, 0, len(e))
+	for k := range e {
 		keys = append(keys, k)
 	}
 	return keys
 }
 
 // Len 返回键值对的数量
-func (ef ExtraFields) Len() int {
-	return len(ef)
+func (e Extras) Len() int {
+	return len(e)
 }
 
 // IsEmpty 检查是否为空
-func (ef ExtraFields) IsEmpty() bool {
-	return len(ef) == 0
+func (e Extras) IsEmpty() bool {
+	return len(e) == 0
 }
 
 // Clear 清空所有键值对
-func (ef ExtraFields) Clear() {
-	for k := range ef {
-		delete(ef, k)
+func (e Extras) Clear() {
+	for k := range e {
+		delete(e, k)
 	}
 }
 
 // Clone 创建一个副本
-func (ef ExtraFields) Clone() ExtraFields {
-	clone := make(ExtraFields, len(ef))
-	for k, v := range ef {
+func (e Extras) Clone() Extras {
+	clone := make(Extras, len(e))
+	for k, v := range e {
 		clone[k] = v
 	}
 	return clone
 }
 
-// Merge 合并另一个ExtraFields，相同的键会被覆盖
-func (ef ExtraFields) Merge(other ExtraFields) {
+// Merge 合并另一个Extras，相同的键会被覆盖
+func (e Extras) Merge(other Extras) {
 	for k, v := range other {
-		ef[k] = v
+		e[k] = v
 	}
 }
 
 // Value 实现 driver.Valuer 接口，用于数据库写入
-// 将ExtraFields序列化为JSON存储到数据库
-func (ef ExtraFields) Value() (driver.Value, error) {
-	if ef == nil || len(ef) == 0 {
+// 将Extras序列化为JSON存储到数据库
+func (e Extras) Value() (driver.Value, error) {
+	if e == nil || len(e) == 0 {
 		return nil, nil
 	}
-	return json.Marshal(ef)
+	return json.Marshal(e)
 }
 
 // Scan 实现 sql.Scanner 接口，用于数据库读取
-// 从数据库读取JSON并反序列化为ExtraFields
-func (ef *ExtraFields) Scan(value interface{}) error {
+// 从数据库读取JSON并反序列化为Extras
+func (e *Extras) Scan(value interface{}) error {
 	if value == nil {
-		*ef = nil
+		*e = nil
 		return nil
 	}
 
@@ -203,36 +203,36 @@ func (ef *ExtraFields) Scan(value interface{}) error {
 	case string:
 		bytes = []byte(v)
 	default:
-		return errors.New("failed to scan ExtraFields: unsupported type")
+		return errors.New("failed to scan Extras: unsupported type")
 	}
 
 	if len(bytes) == 0 {
-		*ef = nil
+		*e = nil
 		return nil
 	}
 
-	result := make(ExtraFields)
+	result := make(Extras)
 	err := json.Unmarshal(bytes, &result)
 	if err != nil {
 		return err
 	}
 
-	*ef = result
+	*e = result
 	return nil
 }
 
 // MarshalJSON 实现 json.Marshaler 接口
-func (ef ExtraFields) MarshalJSON() ([]byte, error) {
-	if ef == nil {
+func (e Extras) MarshalJSON() ([]byte, error) {
+	if e == nil {
 		return []byte("null"), nil
 	}
-	return json.Marshal(map[string]interface{}(ef))
+	return json.Marshal(map[string]interface{}(e))
 }
 
 // UnmarshalJSON 实现 json.Unmarshaler 接口
-func (ef *ExtraFields) UnmarshalJSON(data []byte) error {
+func (e *Extras) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
-		*ef = nil
+		*e = nil
 		return nil
 	}
 
@@ -241,6 +241,6 @@ func (ef *ExtraFields) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	*ef = ExtraFields(m)
+	*e = Extras(m)
 	return nil
 }
