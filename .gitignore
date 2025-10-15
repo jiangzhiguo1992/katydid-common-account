@@ -2,6 +2,7 @@
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
 # Binaries for programs and plugins
+bin/
 *.exe
 *.exe~
 *.dll
@@ -18,15 +19,39 @@ coverage.*
 profile.cov
 
 # Dependency directories (remove the comment below to include it)
-# vendor/
+vendor/
 
 # Go workspace file
 go.work
 go.work.sum
 
+# IDE
+Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Config (保留示例配置)
+config/config.yaml
+!config/config.yaml.example
+
+# Temp files
+tmp/
+temp/
+
+# Swagger docs (可以重新生成)
+docs/
+
 # env file
 .env
-
-# Editor/IDE
-# .idea/
-# .vscode/
+.env.local
