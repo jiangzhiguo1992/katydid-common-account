@@ -10,7 +10,7 @@ var (
 // Init 初始化默认的ID生成器
 // datacenterID: 数据中心ID (0-31)
 // workerID: 工作机器ID (0-31)
-// TODO:GG 需要初始化调用
+// TODO:GG 需要初始化调用，需要随机分配吗？还是各docker固定两个id
 func Init(datacenterID, workerID int64) error {
 	var err error
 	once.Do(func() {
