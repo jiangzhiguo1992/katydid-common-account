@@ -12,13 +12,6 @@ import (
 // ValidateScene 验证场景
 type ValidateScene string
 
-const (
-	SceneCreate ValidateScene = "create" // 创建场景
-	SceneUpdate ValidateScene = "update" // 更新场景
-	SceneDelete ValidateScene = "delete" // 删除场景
-	SceneQuery  ValidateScene = "query"  // 查询场景
-)
-
 // Validatable 可验证的接口，模型需要实现这个接口来定义验证规则
 type Validatable interface {
 	// ValidateRules 返回验证规则
@@ -36,6 +29,15 @@ type CustomValidatable interface {
 type NestedValidatable interface {
 	// ValidateNested 验证嵌套对象
 	ValidateNested(scene ValidateScene) error
+}
+
+// ErrorMessageProvider 错误信息提供者接口，允许模型自定义验证错误消息
+type ErrorMessageProvider interface {
+	// GetErrorMessage 获取字段验证失败的错误信息
+	// fieldName: 字段名
+	// tag: 验证标签（如 required, email, min 等）
+	// param: 验证参数（如 min=3 中的 3）
+	GetErrorMessage(fieldName, tag, param string) string
 }
 
 // Validator 验证器
@@ -92,7 +94,7 @@ func (v *Validator) Validate(obj interface{}, scene ValidateScene) error {
 	} else {
 		// 如果没有实现 Validatable 接口，使用默认的 validator 验证所有字段
 		if err := v.validate.Struct(obj); err != nil {
-			return v.formatError(err)
+			return v.formatError(obj, err)
 		}
 	}
 
@@ -245,7 +247,7 @@ func (v *Validator) validateByRules(obj interface{}, rules map[ValidateScene]map
 
 		// 使用 validator 验证字段
 		if err := v.validate.Var(field.Interface(), rule); err != nil {
-			return v.formatFieldError(fieldName, rule, err)
+			return v.formatFieldError(obj, fieldName, rule, err)
 		}
 	}
 
@@ -253,7 +255,7 @@ func (v *Validator) validateByRules(obj interface{}, rules map[ValidateScene]map
 }
 
 // formatError 格式化验证错误
-func (v *Validator) formatError(err error) error {
+func (v *Validator) formatError(obj interface{}, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -265,14 +267,14 @@ func (v *Validator) formatError(err error) error {
 
 	var errMsgs []string
 	for _, e := range validationErrors {
-		errMsgs = append(errMsgs, fmt.Sprintf("字段 '%s' 验证失败: %s", e.Field(), v.getErrorMsg(e)))
+		errMsgs = append(errMsgs, fmt.Sprintf("字段 '%s' 验证失败: %s", e.Field(), v.getErrorMsg(obj, e)))
 	}
 
 	return fmt.Errorf("%s", strings.Join(errMsgs, "; "))
 }
 
 // formatFieldError 格式化字段错误
-func (v *Validator) formatFieldError(fieldName, rule string, err error) error {
+func (v *Validator) formatFieldError(obj interface{}, fieldName, rule string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -283,46 +285,23 @@ func (v *Validator) formatFieldError(fieldName, rule string, err error) error {
 	}
 
 	for _, e := range validationErrors {
-		return fmt.Errorf("字段 '%s' 验证失败: %s", fieldName, v.getErrorMsg(e))
+		return fmt.Errorf("字段 '%s' 验证失败: %s", fieldName, v.getErrorMsg(obj, e))
 	}
 
 	return fmt.Errorf("字段 '%s' 验证失败", fieldName)
 }
 
-// getErrorMsg 获取错误信息
-func (v *Validator) getErrorMsg(e validator.FieldError) string {
-	switch e.Tag() {
-	case "required":
-		return "必填项"
-	case "email":
-		return "必须是有效的邮箱地址"
-	case "min":
-		return fmt.Sprintf("最小值/长度为 %s", e.Param())
-	case "max":
-		return fmt.Sprintf("最大值/长度为 %s", e.Param())
-	case "len":
-		return fmt.Sprintf("长度必须为 %s", e.Param())
-	case "gt":
-		return fmt.Sprintf("必须大于 %s", e.Param())
-	case "gte":
-		return fmt.Sprintf("必须大于等于 %s", e.Param())
-	case "lt":
-		return fmt.Sprintf("必须小于 %s", e.Param())
-	case "lte":
-		return fmt.Sprintf("必须小于等于 %s", e.Param())
-	case "alphanum":
-		return "只能包含字母和数字"
-	case "alpha":
-		return "只能包含字母"
-	case "numeric":
-		return "只能包含数字"
-	case "url":
-		return "必须是有效的URL"
-	case "oneof":
-		return fmt.Sprintf("必须是以下值之一: %s", e.Param())
-	default:
-		return fmt.Sprintf("不符合规则 '%s'", e.Tag())
+// getErrorMsg 获取错误信息，优先使用模型自定义的错误消息
+func (v *Validator) getErrorMsg(obj interface{}, e validator.FieldError) string {
+	// 尝试从对象获取自定义错误消息
+	if provider, ok := obj.(ErrorMessageProvider); ok {
+		if msg := provider.GetErrorMessage(e.Field(), e.Tag(), e.Param()); msg != "" {
+			return msg
+		}
 	}
+
+	// 使用默认错误消息
+	return fmt.Sprintf("struct rule error '%s, %s'", e.Field(), e.Tag())
 }
 
 // RegisterValidation 注册自定义验证规则

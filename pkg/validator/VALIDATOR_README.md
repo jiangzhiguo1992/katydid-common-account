@@ -2,7 +2,7 @@
 
 ## 概述
 
-`validator` 包提供了一个强大且灵活的数据验证框架，基于 `go-playground/validator/v10` 构建，支持场景化验证、嵌套验证和自定义验证逻辑。
+`validator` 包提供了一个强大且灵活的数据验证框架，基于 `go-playground/validator/v10` 构建，支持场景化验证、嵌套验证、自定义验证逻辑和**自定义错误消息**。
 
 ## 核心特性
 
@@ -16,7 +16,14 @@
 - **接口化设计**：通过接口实现灵活的验证扩展
 
 ### 3. 友好的错误信息
-自动将字段名转换为 JSON 标签名，提供中文错误提示。
+- 自动将字段名转换为 JSON 标签名
+- 支持**模型自定义错误消息**（推荐）
+- 提供默认中文错误提示作为后备
+
+### 4. 扩展性设计
+- **错误消息由外部模型定义**：避免频繁修改基础包
+- 基础包提供基本的默认错误消息
+- 业务模型可完全自定义验证错误信息
 
 ## 核心类型
 
@@ -115,6 +122,126 @@ type NestedValidatable interface {
 }
 ```
 
+### ErrorMessageProvider 接口 ⭐️ 重要
+
+**实现此接口以自定义验证错误消息（强烈推荐）**
+
+这是验证器最重要的扩展点，允许业务模型完全控制错误消息的内容和格式。
+
+```go
+type ErrorMessageProvider interface {
+    // GetErrorMessage 获取字段验证失败的错误信息
+    // fieldName: 字段名（JSON标签名）
+    // tag: 验证标签（如 required, email, min 等）
+    // param: 验证参数（如 min=3 中的 3）
+    GetErrorMessage(fieldName, tag, param string) string
+}
+```
+
+**设计理念：**
+- ✅ **基础包保持稳定**：不需要为每个新的验证规则修改基础包
+- ✅ **业务自定义**：每个模型可以定义符合自己业务的错误消息
+- ✅ **灵活性**：支持国际化、多语言、业务术语等
+- ✅ **降低耦合**：基础包只提供默认后备消息
+
+**使用示例：**
+
+```go
+type User struct {
+    ID       int64  `json:"id"`
+    Username string `json:"username"`
+    Email    string `json:"email"`
+    Password string `json:"password"`
+    Age      int    `json:"age"`
+}
+
+// 实现 ErrorMessageProvider 接口
+func (u *User) GetErrorMessage(fieldName, tag, param string) string {
+    // 根据字段和验证标签返回自定义错误消息
+    switch fieldName {
+    case "username":
+        switch tag {
+        case "required":
+            return "用户名不能为空"
+        case "min":
+            return fmt.Sprintf("用户名长度不能少于%s个字符", param)
+        case "max":
+            return fmt.Sprintf("用户名长度不能超过%s个字符", param)
+        case "alphanum":
+            return "用户名只能包含字母和数字"
+        }
+    case "email":
+        switch tag {
+        case "required":
+            return "邮箱地址不能为空"
+        case "email":
+            return "请输入有效的邮箱地址"
+        }
+    case "password":
+        switch tag {
+        case "required":
+            return "密码不能为空"
+        case "min":
+            return fmt.Sprintf("密码长度不能少于%s位", param)
+        case "max":
+            return fmt.Sprintf("密码长度不能超过%s位", param)
+        }
+    case "age":
+        switch tag {
+        case "gte":
+            return fmt.Sprintf("年龄必须大于等于%s岁", param)
+        case "lte":
+            return fmt.Sprintf("年龄必须小于等于%s岁", param)
+        }
+    }
+    
+    // 返回空字符串使用默认消息
+    return ""
+}
+```
+
+**高级用法 - 支持国际化：**
+
+```go
+type Product struct {
+    Name  string `json:"name"`
+    Price float64 `json:"price"`
+    Lang  string `json:"-"` // 语言标识
+}
+
+func (p *Product) GetErrorMessage(fieldName, tag, param string) string {
+    // 根据语言返回不同的错误消息
+    if p.Lang == "en" {
+        return p.getEnglishMessage(fieldName, tag, param)
+    }
+    return p.getChineseMessage(fieldName, tag, param)
+}
+
+func (p *Product) getEnglishMessage(fieldName, tag, param string) string {
+    if fieldName == "name" && tag == "required" {
+        return "Product name is required"
+    }
+    // ... 其他英文消息
+    return ""
+}
+
+func (p *Product) getChineseMessage(fieldName, tag, param string) string {
+    if fieldName == "name" && tag == "required" {
+        return "产品名称不能为空"
+    }
+    // ... 其他中文消息
+    return ""
+}
+```
+
+**最佳实践：**
+
+1. **优先实现 ErrorMessageProvider**：为重要的业务模型实现此接口
+2. **返回空字符串使用默认消息**：不需要为每个验证规则都定义消息
+3. **使用业务术语**：错误消息应该符合业务场景，而不是技术术语
+4. **支持参数化**：使用 `param` 参数使消息更加具体
+5. **考虑用户体验**：错误消息应该友好、清晰、可操作
+
 ## 核心方法
 
 ### 创建验证器
@@ -170,7 +297,7 @@ err := validator.RegisterValidation("myvalidation", func(fl validator.FieldLevel
 
 ## 完整使用示例
 
-### 基础场景验证
+### 基础场景验证（带自定义错误消息）
 
 ```go
 package main
@@ -200,6 +327,36 @@ func (p *Product) ValidateRules() map[validator.ValidateScene]map[string]string 
             "Stock": "omitempty,gte=0",
         },
     }
+}
+
+// 实现自定义错误消息
+func (p *Product) GetErrorMessage(fieldName, tag, param string) string {
+    switch fieldName {
+    case "name":
+        switch tag {
+        case "required":
+            return "产品名称是必填项"
+        case "min":
+            return "产品名称至少需要2个字符"
+        case "max":
+            return "产品名称不能超过100个字符"
+        }
+    case "price":
+        switch tag {
+        case "required":
+            return "产品价格是必填项"
+        case "gt":
+            return "产品价格必须大于0"
+        }
+    case "stock":
+        switch tag {
+        case "required":
+            return "库存数量是必填项"
+        case "gte":
+            return "库存数量不能为负数"
+        }
+    }
+    return "" // 使用默认消息
 }
 
 func main() {
@@ -294,12 +451,26 @@ err := validator.Validate(order, validator.SceneCreate)
 
 ## 错误信息
 
-验证器提供中文错误信息，常见错误：
+### 错误消息优先级
+
+验证器按以下优先级获取错误消息：
+
+1. **模型自定义消息**（通过 `ErrorMessageProvider` 接口）⭐️ 最高优先级
+2. **基础包默认消息**（作为后备）
+
+### 基础包默认消息
+
+基础包提供以下默认错误消息作为后备：
 
 - `字段 'username' 验证失败: 必填项`
 - `字段 'email' 验证失败: 必须是有效的邮箱地址`
 - `字段 'age' 验证失败: 必须大于等于 0`
 - `字段 'Product' 验证失败: 字段 'name' 验证失败: 最小值/长度为 2`
+
+**重要提示：**
+- ⚠️ 基础包的默认消息**仅作为后备**，不应频繁修改
+- ✅ 业务模型应该**实现 ErrorMessageProvider 接口**来定义自己的错误消息
+- ✅ 这样可以保持基础包稳定，避免因新增验证规则而频繁变更基础包
 
 ## 最佳实践
 
@@ -313,7 +484,28 @@ err := validator.Validate(user, validator.SceneCreate)
 err := validator.ValidateStruct(user)
 ```
 
-### 2. 合理组织验证规则
+### 2. 为重要模型实现 ErrorMessageProvider ⭐️
+
+```go
+type User struct {
+    Username string `json:"username"`
+    Email    string `json:"email"`
+}
+
+// 强烈推荐：实现自定义错误消息
+func (u *User) GetErrorMessage(fieldName, tag, param string) string {
+    // 返回业务友好的错误消息
+    if fieldName == "username" && tag == "required" {
+        return "请输入用户名"
+    }
+    if fieldName == "email" && tag == "email" {
+        return "邮箱格式不正确，请重新输入"
+    }
+    return "" // 其他情况使用默认消息
+}
+```
+
+### 3. 合理组织验证规则
 
 ```go
 func (u *User) ValidateRules() map[validator.ValidateScene]map[string]string {
@@ -338,7 +530,7 @@ func (u *User) ValidateRules() map[validator.ValidateScene]map[string]string {
 }
 ```
 
-### 3. 自定义验证处理复杂逻辑
+### 4. 自定义验证处理复杂逻辑
 
 将复杂的业务验证逻辑放在 `CustomValidate` 中：
 
@@ -360,7 +552,7 @@ func (p *Product) CustomValidate(scene validator.ValidateScene) error {
 }
 ```
 
-### 4. 使用默认验证器
+### 5. 使用默认验证器
 
 大多数情况下使用默认验证器即可，无需创建多个实例：
 
@@ -373,6 +565,29 @@ v := validator.New()
 v.RegisterValidation("custom", customFunc)
 err := v.Validate(obj, scene)
 ```
+
+### 6. 错误消息设计原则 ⭐️
+
+**好的错误消息示例：**
+```go
+✅ "用户名不能为空"
+✅ "邮箱格式不正确，请输入有效的邮箱地址"
+✅ "密码长度必须在6-20位之间"
+✅ "价格必须大于0"
+```
+
+**不好的错误消息示例：**
+```go
+❌ "必填项"  // 太笼统
+❌ "不符合规则 'min'"  // 技术术语
+❌ "validation failed"  // 不够具体
+```
+
+**设计建议：**
+- 使用业务语言，不是技术术语
+- 告诉用户如何修正错误
+- 提供具体的限制条件（如范围、格式等）
+- 考虑用户场景和体验
 
 ## 与其他包的集成
 
@@ -425,4 +640,3 @@ func CreateUserHandler(c *gin.Context) {
 - [MAP_VALIDATOR_README.md](./MAP_VALIDATOR_README.md) - Map 验证器文档
 - [NESTED_VALIDATION_README.md](./NESTED_VALIDATION_README.md) - 嵌套验证文档
 - [go-playground/validator](https://github.com/go-playground/validator) - 底层验证库文档
-
