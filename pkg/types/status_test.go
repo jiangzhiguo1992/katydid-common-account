@@ -578,7 +578,7 @@ func TestStatus_MaxSafeBits(t *testing.T) {
 	t.Logf("High bit status: %d (binary: %b)", s, s)
 
 	// 确认我们当前的最高状态位是安全的
-	highestStatus := StatusExpand50
+	highestStatus := StatusExpand51
 	t.Logf("Highest defined status: %d (binary: %b)", highestStatus, highestStatus)
 
 	// 计算最高状态位使用的是第几位

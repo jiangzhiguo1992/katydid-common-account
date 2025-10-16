@@ -21,7 +21,7 @@ import (
 //
 // 注意事项：
 // - 避免使用负数作为状态值（会导致符号位冲突）
-// - 自定义状态位应从 StatusExpand50 开始
+// - 自定义状态位应从 StatusExpand51 开始
 // - 数据库索引：int64 类型支持高效索引查询
 type Status int64
 
@@ -43,7 +43,7 @@ const (
 	// 删除状态组（位 0-2）
 	StatusSysDeleted  Status = 1 << iota // 系统删除：由系统自动标记删除，通常不可恢复
 	StatusAdmDeleted                     // 管理员删除：由管理员操作删除，可能支持恢复
-	StatusUserDeleted                    // 用户删除：由用户主动删除，通常可恢复
+	StatusUserDeleted                    // 用户删除：由用户主动删除，通常可恢复(回收箱)
 
 	// 禁用状态组（位 3-5）
 	StatusSysDisabled  // 系统禁用：系统检测到异常后自动禁用
@@ -62,7 +62,7 @@ const (
 
 	// 扩展位（位 12 开始）
 	// 预留 51 位可用于业务自定义状态（63 - 12 = 51）
-	StatusExpand50 // 扩展起始位，自定义状态应基于此值左移
+	StatusExpand51 // 扩展起始位，自定义状态应基于此值左移
 )
 
 // Set 设置指定的状态位（追加状态）
