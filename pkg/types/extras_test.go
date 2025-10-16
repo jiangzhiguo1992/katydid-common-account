@@ -95,8 +95,10 @@ func TestExtras_JSONSerialization(t *testing.T) {
 		t.Errorf("Expected 'Test', got '%s'", name)
 	}
 
+	// 注意：JSON 反序列化后，数字会变成 float64，但我们的 GetInt 应该能处理这种情况
 	if count, ok := e2.GetInt("count"); !ok || count != 42 {
-		t.Errorf("Expected 42, got %d", count)
+		// 如果失败，显示实际类型以便调试
+		t.Errorf("Expected 42, got %d (ok=%v, actual type: %T, value: %v)", count, ok, e2["count"], e2["count"])
 	}
 
 	if enabled, ok := e2.GetBool("enabled"); !ok || !enabled {
@@ -127,8 +129,9 @@ func TestExtras_DatabaseScan(t *testing.T) {
 		t.Errorf("Expected 'value1', got '%s'", str)
 	}
 
+	// JSON 反序列化后数字会变成 float64
 	if num, ok := e2.GetInt("key2"); !ok || num != 123 {
-		t.Errorf("Expected 123, got %d", num)
+		t.Errorf("Expected 123, got %d (ok=%v, actual type: %T)", num, ok, e2["key2"])
 	}
 }
 
