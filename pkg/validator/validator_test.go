@@ -17,6 +17,7 @@ type TestUser struct {
 	Phone    string `json:"phone"`
 }
 
+// 测试场景常量
 const (
 	SceneCreate ValidateScene = "create" // 创建场景
 	SceneUpdate ValidateScene = "update" // 更新场景
