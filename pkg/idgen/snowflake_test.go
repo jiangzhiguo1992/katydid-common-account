@@ -22,7 +22,7 @@ func TestSnowflake_NextID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Greater(t, id2, id1)
 
-	// 批量生成测试
+	// 批量生成测试 - 验证唯一性
 	ids := make(map[int64]bool)
 	for i := 0; i < 10000; i++ {
 		id, err := sf.NextID()
