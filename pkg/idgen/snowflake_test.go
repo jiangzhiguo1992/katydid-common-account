@@ -3,6 +3,7 @@ package idgen
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,4 +123,100 @@ func BenchmarkNextID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = NextID()
 	}
+}
+
+// 测试基本功能
+func TestBasicFunctionality(t *testing.T) {
+	// 初始化
+	err := Init(1, 1)
+	if err != nil {
+		t.Fatalf("初始化失败: %v", err)
+	}
+
+	// 生成ID
+	id, err := NewID()
+	if err != nil {
+		t.Fatalf("生成ID失败: %v", err)
+	}
+
+	if id.IsZero() {
+		t.Fatal("生成的ID不应该为0")
+	}
+
+	t.Logf("成功生成ID: %s", id.String())
+}
+
+// 测试并发安全性
+func TestConcurrency(t *testing.T) {
+	sf, err := NewSnowflake(1, 1)
+	if err != nil {
+		t.Fatalf("创建生成器失败: %v", err)
+	}
+
+	// 并发生成1000个ID
+	const count = 1000
+	ids := make(chan int64, count)
+	var wg sync.WaitGroup
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < count/10; j++ {
+				id, err := sf.NextID()
+				if err != nil {
+					t.Errorf("生成ID失败: %v", err)
+					return
+				}
+				ids <- id
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(ids)
+
+	// 验证唯一性
+	idMap := make(map[int64]bool)
+	for id := range ids {
+		if idMap[id] {
+			t.Errorf("发现重复ID: %d", id)
+		}
+		idMap[id] = true
+	}
+
+	if len(idMap) != count {
+		t.Errorf("期望生成 %d 个ID，实际生成 %d 个", count, len(idMap))
+	}
+
+	t.Logf("并发测试通过: 成功生成 %d 个唯一ID", len(idMap))
+}
+
+// 测试JSON序列化
+func TestJSONSerialization(t *testing.T) {
+	id := ID(123456789012345)
+
+	// 序列化
+	data, err := id.MarshalJSON()
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+
+	expected := `"123456789012345"`
+	if string(data) != expected {
+		t.Errorf("期望 %s, 实际 %s", expected, string(data))
+	}
+
+	// 反序列化
+	var id2 ID
+	err = id2.UnmarshalJSON(data)
+	if err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+
+	if id != id2 {
+		t.Errorf("期望 %v, 实际 %v", id, id2)
+	}
+
+	t.Logf("JSON序列化测试通过")
 }
