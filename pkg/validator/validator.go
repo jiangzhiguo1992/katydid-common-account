@@ -42,8 +42,16 @@ type ErrorMessageProvider interface {
 
 // Validator 验证器
 type Validator struct {
-	validate *validator.Validate
-	mu       sync.RWMutex
+	validate  *validator.Validate
+	typeCache sync.Map // key: reflect.Type, value: *typeCache
+	mu        sync.RWMutex
+}
+
+// typeCache 类型信息缓存
+type typeCache struct {
+	isValidatable       bool
+	isCustomValidatable bool
+	isErrorProvider     bool
 }
 
 var (
@@ -66,10 +74,7 @@ func New() *Validator {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
-		if name == "-" {
-			return ""
-		}
-		if name == "" {
+		if name == "-" || name == "" {
 			return fld.Name
 		}
 		return name
@@ -80,21 +85,46 @@ func New() *Validator {
 	}
 }
 
+// getOrCacheTypeInfo 获取或缓存类型信息
+func (v *Validator) getOrCacheTypeInfo(obj interface{}) *typeCache {
+	typ := reflect.TypeOf(obj)
+
+	// 尝试从缓存获取
+	if cached, ok := v.typeCache.Load(typ); ok {
+		return cached.(*typeCache)
+	}
+
+	// 创建新的缓存项
+	cache := &typeCache{}
+	_, cache.isValidatable = obj.(Validatable)
+	_, cache.isCustomValidatable = obj.(CustomValidatable)
+	_, cache.isErrorProvider = obj.(ErrorMessageProvider)
+
+	// 存入缓存
+	v.typeCache.Store(typ, cache)
+
+	return cache
+}
+
 // Validate 验证模型，支持指定场景和嵌套验证
 func (v *Validator) Validate(obj interface{}, scene ValidateScene) error {
 	if obj == nil {
 		return fmt.Errorf("validation object cannot be nil")
 	}
 
+	// 获取类型缓存
+	cache := v.getOrCacheTypeInfo(obj)
+
 	// 1. 先执行结构体标签验证（如果实现了 Validatable 接口）
-	if validatable, ok := obj.(Validatable); ok {
+	if cache.isValidatable {
+		validatable := obj.(Validatable)
 		if err := v.validateByRules(obj, validatable.ValidateRules(), scene); err != nil {
 			return err
 		}
 	} else {
 		// 如果没有实现 Validatable 接口，使用默认的 validator 验证所有字段
 		if err := v.validate.Struct(obj); err != nil {
-			return v.formatError(obj, err)
+			return v.formatError(obj, err, cache.isErrorProvider)
 		}
 	}
 
@@ -104,7 +134,8 @@ func (v *Validator) Validate(obj interface{}, scene ValidateScene) error {
 	}
 
 	// 3. 执行自定义验证逻辑
-	if customValidatable, ok := obj.(CustomValidatable); ok {
+	if cache.isCustomValidatable {
+		customValidatable := obj.(CustomValidatable)
 		if err := customValidatable.CustomValidate(scene); err != nil {
 			return err
 		}
@@ -130,9 +161,10 @@ func (v *Validator) validateNestedStructs(obj interface{}, scene ValidateScene) 
 	}
 
 	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
+	numField := val.NumField()
+
+	for i := 0; i < numField; i++ {
 		field := val.Field(i)
-		fieldType := typ.Field(i)
 
 		// 跳过未导出的字段
 		if !field.CanInterface() {
@@ -145,6 +177,7 @@ func (v *Validator) validateNestedStructs(obj interface{}, scene ValidateScene) 
 		}
 
 		fieldValue := field.Interface()
+		fieldType := typ.Field(i)
 
 		// 检查字段是否实现了 Validatable 接口
 		if validatable, ok := fieldValue.(Validatable); ok {
@@ -162,10 +195,8 @@ func (v *Validator) validateNestedStructs(obj interface{}, scene ValidateScene) 
 
 		// 如果是结构体或结构体指针，递归验证
 		fieldKind := field.Kind()
-		if fieldKind == reflect.Ptr {
-			if !field.IsNil() {
-				fieldKind = field.Elem().Kind()
-			}
+		if fieldKind == reflect.Ptr && !field.IsNil() {
+			fieldKind = field.Elem().Kind()
 		}
 
 		if fieldKind == reflect.Struct {
@@ -190,9 +221,10 @@ func (v *Validator) validateNestedValidatables(obj interface{}, scene ValidateSc
 	}
 
 	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
+	numField := val.NumField()
+
+	for i := 0; i < numField; i++ {
 		field := val.Field(i)
-		fieldType := typ.Field(i)
 
 		// 跳过未导出的字段
 		if !field.CanInterface() {
@@ -208,6 +240,7 @@ func (v *Validator) validateNestedValidatables(obj interface{}, scene ValidateSc
 
 		// 检查是否实现了 NestedValidatable 接口
 		if nestedValidatable, ok := fieldValue.(NestedValidatable); ok {
+			fieldType := typ.Field(i)
 			if err := nestedValidatable.ValidateNested(scene); err != nil {
 				return fmt.Errorf("字段 '%s' 嵌套验证失败: %w", fieldType.Name, err)
 			}
@@ -255,7 +288,7 @@ func (v *Validator) validateByRules(obj interface{}, rules map[ValidateScene]map
 }
 
 // formatError 格式化验证错误
-func (v *Validator) formatError(obj interface{}, err error) error {
+func (v *Validator) formatError(obj interface{}, err error, isErrorProvider bool) error {
 	if err == nil {
 		return nil
 	}
@@ -265,12 +298,26 @@ func (v *Validator) formatError(obj interface{}, err error) error {
 		return err
 	}
 
-	var errMsgs []string
-	for _, e := range validationErrors {
-		errMsgs = append(errMsgs, fmt.Sprintf("字段 '%s' 验证失败: %s", e.Field(), v.getErrorMsg(obj, e)))
+	errCount := len(validationErrors)
+	if errCount == 0 {
+		return nil
 	}
 
-	return fmt.Errorf("%s", strings.Join(errMsgs, "; "))
+	// 使用 strings.Builder 优化字符串拼接，预分配容量
+	var builder strings.Builder
+	builder.Grow(errCount * 50) // 预估每个错误约50字节
+
+	for i, e := range validationErrors {
+		if i > 0 {
+			builder.WriteString("; ")
+		}
+		builder.WriteString("字段 '")
+		builder.WriteString(e.Field())
+		builder.WriteString("' 验证失败: ")
+		builder.WriteString(v.getErrorMsg(obj, e, isErrorProvider))
+	}
+
+	return fmt.Errorf("%s", builder.String())
 }
 
 // formatFieldError 格式化字段错误
@@ -284,24 +331,35 @@ func (v *Validator) formatFieldError(obj interface{}, fieldName, rule string, er
 		return fmt.Errorf("字段 '%s' 验证失败: %v", fieldName, err)
 	}
 
+	// 获取类型缓存以避免重复类型断言
+	cache := v.getOrCacheTypeInfo(obj)
+
 	for _, e := range validationErrors {
-		return fmt.Errorf("字段 '%s' 验证失败: %s", fieldName, v.getErrorMsg(obj, e))
+		return fmt.Errorf("字段 '%s' 验证失败: %s", fieldName, v.getErrorMsg(obj, e, cache.isErrorProvider))
 	}
 
 	return fmt.Errorf("字段 '%s' 验证失败", fieldName)
 }
 
 // getErrorMsg 获取错误信息，优先使用模型自定义的错误消息
-func (v *Validator) getErrorMsg(obj interface{}, e validator.FieldError) string {
+func (v *Validator) getErrorMsg(obj interface{}, e validator.FieldError, isErrorProvider bool) string {
 	// 尝试从对象获取自定义错误消息
-	if provider, ok := obj.(ErrorMessageProvider); ok {
+	if isErrorProvider {
+		provider := obj.(ErrorMessageProvider)
 		if msg := provider.GetErrorMessage(e.Field(), e.Tag(), e.Param()); msg != "" {
 			return msg
 		}
 	}
 
-	// 使用默认错误消息
-	return fmt.Sprintf("struct rule error '%s, %s'", e.Field(), e.Tag())
+	// 使用默认错误消息，优化字符串拼接
+	var builder strings.Builder
+	builder.Grow(32) // 预分配容量
+	builder.WriteString("struct rule error '")
+	builder.WriteString(e.Field())
+	builder.WriteString(", ")
+	builder.WriteString(e.Tag())
+	builder.WriteString("'")
+	return builder.String()
 }
 
 // RegisterValidation 注册自定义验证规则
@@ -314,6 +372,11 @@ func (v *Validator) RegisterValidation(tag string, fn validator.Func) error {
 // ValidateStruct 简单的结构体验证（不区分场景）
 func (v *Validator) ValidateStruct(obj interface{}) error {
 	return v.validate.Struct(obj)
+}
+
+// ClearTypeCache 清除类型缓存（用于测试或需要重新加载类型信息时）
+func (v *Validator) ClearTypeCache() {
+	v.typeCache = sync.Map{}
 }
 
 // 便捷函数
@@ -331,4 +394,9 @@ func ValidateStruct(obj interface{}) error {
 // RegisterValidation 注册自定义验证规则到默认验证器
 func RegisterValidation(tag string, fn validator.Func) error {
 	return Default().RegisterValidation(tag, fn)
+}
+
+// ClearTypeCache 清除默认验证器的类型缓存
+func ClearTypeCache() {
+	Default().ClearTypeCache()
 }
