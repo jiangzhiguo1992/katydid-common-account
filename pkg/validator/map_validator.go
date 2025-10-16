@@ -333,21 +333,26 @@ func ValidateMapIntKey(kvs map[string]any, key string, min, max int) error {
 		intValue = int(v)
 	case uint:
 		// 安全检查：防止整数溢出
-		if v > math.MaxInt {
+		if v > uint(math.MaxInt) {
 			return fmt.Errorf("map key '%s' validation failed: uint value overflows int type", key)
 		}
 		intValue = int(v)
 	case uint64:
 		// 安全检查：防止整数溢出
-		if v > math.MaxInt {
+		if v > uint64(math.MaxInt) {
 			return fmt.Errorf("map key '%s' validation failed: uint64 value overflows int type", key)
 		}
 		intValue = int(v)
 	case uint32:
 		// 安全检查：防止整数溢出
-		if v > math.MaxInt {
+		// 在 32 位系统上 math.MaxInt 可能小于 math.MaxUint32
+		if uint64(v) > uint64(math.MaxInt) {
 			return fmt.Errorf("map key '%s' validation failed: uint32 value overflows int type", key)
 		}
+		intValue = int(v)
+	case uint16:
+		intValue = int(v)
+	case uint8:
 		intValue = int(v)
 	case float64:
 		// 检查是否为整数
