@@ -45,23 +45,17 @@ type ValidationError struct {
 }
 
 // FieldError 单个字段的验证错误
-// 国际化时，可以通过 Namespace _ Tag _ Code 和 Params 字段查找对应的翻译
+// 国际化时，可以通过 Namespace + Tag 和 Params 字段查找对应的翻译
 // 如User.Profile.Email_regex_len + params=["3", "100"]
 type FieldError struct {
-	// StructField 结构体字段名
-	StructField string `json:"struct_field,omitempty"`
-	// Field 字段名（JSON tag 名称）
-	Field string `json:"field"`
+	// Namespace 字段的完整命名空间（如 User.Profile.Email）
+	Namespace string `json:"namespace"`
 	// Tag 验证标签（如 required, email, min 等）
 	Tag string `json:"tag"`
 	// Params 验证参数（如 min=3 中的 3）
 	Params []string `json:"param,omitempty"`
 	// Value 字段的实际值（可选，用于调试）
 	Value interface{} `json:"value,omitempty"`
-	// Code 错误代码（用于国际化查找）
-	Code string `json:"code,omitempty"`
-	// Namespace 字段的完整命名空间（如 User.Profile.Email）
-	Namespace string `json:"namespace,omitempty"`
 }
 
 // NewValidationError 创建一个新的验证错误
@@ -69,6 +63,16 @@ func NewValidationError(scene ValidateScene) *ValidationError {
 	return &ValidationError{
 		Errors: make([]*FieldError, 0),
 		Scene:  scene,
+	}
+}
+
+// NewFieldError 创建一个新的字段错误
+func NewFieldError(namespace, tag string, params []string, value interface{}) *FieldError {
+	return &FieldError{
+		Namespace: namespace,
+		Tag:       tag,
+		Params:    params,
+		Value:     value,
 	}
 }
 
@@ -86,7 +90,7 @@ func MergeValidationErrors(errors ...*ValidationError) *ValidationError {
 // Error 实现 error 接口
 func (ve *ValidationError) Error() string {
 	if len(ve.Errors) == 0 {
-		return "validation failed with no errors"
+		return "validation failed: no errors"
 	}
 
 	var builder strings.Builder
@@ -129,11 +133,11 @@ func (ve *ValidationError) ToJSON() ([]byte, error) {
 	return json.Marshal(ve)
 }
 
-// GetErrorsByField 按字段名获取错误
-func (ve *ValidationError) GetErrorsByField(field string) []*FieldError {
+// GetErrorsByNamespace 按命名空间获取错误
+func (ve *ValidationError) GetErrorsByNamespace(namespace string) []*FieldError {
 	var errors []*FieldError
 	for _, err := range ve.Errors {
-		if err.Field == field {
+		if err.Namespace == namespace {
 			errors = append(errors, err)
 		}
 	}
@@ -160,11 +164,10 @@ type FieldErrorOption func(*FieldError)
 //   - tag: 验证标签
 //   - message: 错误消息
 //   - opts: 可选参数
-func BuildFieldError(namespace, tag, code string, opts ...FieldErrorOption) *FieldError {
+func BuildFieldError(namespace, tag string, opts ...FieldErrorOption) *FieldError {
 	fe := &FieldError{
 		Namespace: namespace,
 		Tag:       tag,
-		Code:      code,
 	}
 
 	for _, opt := range opts {
@@ -172,20 +175,6 @@ func BuildFieldError(namespace, tag, code string, opts ...FieldErrorOption) *Fie
 	}
 
 	return fe
-}
-
-// WithStructField 设置结构体字段名
-func WithStructField(structField string) FieldErrorOption {
-	return func(fe *FieldError) {
-		fe.StructField = structField
-	}
-}
-
-// WithField 设置字段名
-func WithField(field string) FieldErrorOption {
-	return func(fe *FieldError) {
-		fe.Field = field
-	}
 }
 
 // WithParam 设置验证参数
