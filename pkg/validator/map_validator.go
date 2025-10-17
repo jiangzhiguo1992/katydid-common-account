@@ -11,6 +11,8 @@ import (
 // 支持必填键验证、允许键白名单验证、自定义键验证器等功能
 // 线程安全，可在多个 goroutine 中并发使用
 type MapValidator struct {
+	// NameSpace 结构体命名空间
+	NameSpace string
 	// RequiredKeys 必填的键列表
 	RequiredKeys []string
 	// AllowedKeys 允许的键列表（如果为空则不限制）
@@ -48,7 +50,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		return nil
 	}
 
-	// 创建错误收集器 TODO:GG
+	// 创建错误收集器 TODO:GG 分场景吗?
 	ctx := NewValidationContext("")
 
 	// 1. 验证必填键
@@ -80,7 +82,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *ValidationContext) {
 	for _, key := range mv.RequiredKeys {
 		if _, exists := kvs[key]; !exists {
-			ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "required", nil, nil)
+			ctx.AddErrorByDetail(mv.NameSpace+"."+key, "required", nil, nil)
 		}
 	}
 }
@@ -105,7 +107,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 
 	for key := range kvs {
 		if !allowedMap[key] {
-			ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "allowed", nil, nil)
+			ctx.AddErrorByDetail(mv.NameSpace+"."+key, "allowed", nil, nil)
 		}
 	}
 }
@@ -119,7 +121,7 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 			}
 
 			if err := validatorFunc(value); err != nil {
-				ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "custom", nil, nil)
+				ctx.AddErrorByDetail(mv.NameSpace+"."+key, "custom", nil, nil)
 			}
 		}
 	}

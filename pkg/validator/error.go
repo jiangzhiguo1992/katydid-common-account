@@ -10,8 +10,6 @@ import (
 
 // ValidationContext 验证上下文，用于传递验证环境信息
 type ValidationContext struct {
-	// NameSpace 结构体命名空间 TODO:GG
-	NameSpace string `json:"namespace"`
 	// Scene 验证场景
 	Scene ValidateScene `json:"scene"`
 	// Message 总体错误消息（可选）
