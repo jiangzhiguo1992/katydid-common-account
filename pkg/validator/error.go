@@ -4,44 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // ValidationContext 验证上下文，用于传递验证环境信息
 type ValidationContext struct {
 	// Scene 验证场景
 	Scene ValidateScene
-	// ParentNamespace 父级命名空间（用于嵌套对象）
-	ParentNamespace string
-}
-
-// NewValidationContext 创建验证上下文
-func NewValidationContext(scene ValidateScene) *ValidationContext {
-	return &ValidationContext{
-		Scene: scene,
-	}
-}
-
-// ErrorMessageProvider 错误详情提供者接口
-// 模型实现此接口可以提供更详细的错误信息
-type ErrorMessageProvider interface {
-	// GetErrorMessage 获取字段验证错误的详细信息
-	// namespace: 字段完整命名空间
-	// tag: 验证标签
-	// code: 错误代码
-	// param: 验证参数
-	// value: 字段实际值
-	// 返回 FieldError 结构，包含完整的错误详情
-	GetErrorMessage(namespace, tag, code string, params []string, value interface{}) *FieldError
-}
-
-// ValidationError 统一的验证错误结构，多错误聚合
-type ValidationError struct {
-	// Errors 所有验证错误的集合
-	Errors []*FieldError `json:"errors"`
-	// Scene 验证场景
-	Scene ValidateScene `json:"scene,omitempty"`
 	// Message 总体错误消息（可选）
 	Message string `json:"message,omitempty"`
+	// Errors 所有验证错误的集合
+	Errors []*FieldError `json:"errors"`
 }
 
 // FieldError 单个字段的验证错误
@@ -55,14 +29,14 @@ type FieldError struct {
 	// Params 验证参数（如 min=3 中的 3）
 	Params []string `json:"param,omitempty"`
 	// Value 字段的实际值（可选，用于调试）
-	Value interface{} `json:"value,omitempty"`
+	Value any `json:"value,omitempty"`
 }
 
-// NewValidationError 创建一个新的验证错误
-func NewValidationError(scene ValidateScene) *ValidationError {
-	return &ValidationError{
-		Errors: make([]*FieldError, 0),
+// NewValidationContext 创建验证上下文
+func NewValidationContext(scene ValidateScene) *ValidationContext {
+	return &ValidationContext{
 		Scene:  scene,
+		Errors: make([]*FieldError, 0),
 	}
 }
 
@@ -76,27 +50,19 @@ func NewFieldError(namespace, tag string, params []string, value interface{}) *F
 	}
 }
 
-// MergeValidationErrors 合并多个验证错误
-func MergeValidationErrors(errors ...*ValidationError) *ValidationError {
-	merged := NewValidationError("")
-	for _, err := range errors {
-		if err != nil && err.HasErrors() {
-			merged.AddErrors(err.Errors)
-		}
-	}
-	return merged
-}
-
 // Error 实现 error 接口
-func (ve *ValidationError) Error() string {
-	if len(ve.Errors) == 0 {
-		return "validation failed: no errors"
+func (vc *ValidationContext) Error() string {
+	if len(vc.Errors) == 0 {
+		if len(vc.Message) == 0 {
+			return "validation passed: no errors"
+		}
+		return fmt.Sprintf("validation failed: %s", vc.Message)
 	}
 
 	var builder strings.Builder
-	builder.Grow(len(ve.Errors) * errorMessageEstimateLen)
+	builder.Grow(len(vc.Errors) * errorMessageEstimateLen)
 
-	for i, err := range ve.Errors {
+	for i, err := range vc.Errors {
 		if i > 0 {
 			builder.WriteString("; ")
 		}
@@ -112,31 +78,51 @@ func (fe *FieldError) String() string {
 }
 
 // HasErrors 检查是否有验证错误
-func (ve *ValidationError) HasErrors() bool {
-	return len(ve.Errors) > 0
+func (vc *ValidationContext) HasErrors() bool {
+	return len(vc.Errors) > 0
 }
 
-// AddError 添加一个字段错误
-func (ve *ValidationError) AddError(err *FieldError) {
+// AddError 通过 FieldError 添加字段错误
+func (vc *ValidationContext) AddError(err *FieldError) {
 	if err != nil {
-		ve.Errors = append(ve.Errors, err)
+		vc.Errors = append(vc.Errors, err)
 	}
 }
 
+// AddErrorByValidator 通过 validator.FieldError 添加字段错误
+func (vc *ValidationContext) AddErrorByValidator(error validator.FieldError) {
+	vc.Errors = append(vc.Errors, &FieldError{
+		Namespace: error.Namespace(),
+		Tag:       error.Tag(),
+		Params:    []string{error.Param()},
+		Value:     error.Value(),
+	})
+}
+
+// AddErrorByDetail 通过详细信息添加字段错误
+func (vc *ValidationContext) AddErrorByDetail(namespace, tag string, params []string, value any) {
+	vc.Errors = append(vc.Errors, &FieldError{
+		Namespace: namespace,
+		Tag:       tag,
+		Params:    params,
+		Value:     value,
+	})
+}
+
 // AddErrors 批量添加字段错误
-func (ve *ValidationError) AddErrors(errors []*FieldError) {
-	ve.Errors = append(ve.Errors, errors...)
+func (vc *ValidationContext) AddErrors(errors []*FieldError) {
+	vc.Errors = append(vc.Errors, errors...)
 }
 
 // ToJSON 转换为 JSON 格式
-func (ve *ValidationError) ToJSON() ([]byte, error) {
-	return json.Marshal(ve)
+func (vc *ValidationContext) ToJSON() ([]byte, error) {
+	return json.Marshal(vc)
 }
 
 // GetErrorsByNamespace 按命名空间获取错误
-func (ve *ValidationError) GetErrorsByNamespace(namespace string) []*FieldError {
+func (vc *ValidationContext) GetErrorsByNamespace(namespace string) []*FieldError {
 	var errors []*FieldError
-	for _, err := range ve.Errors {
+	for _, err := range vc.Errors {
 		if err.Namespace == namespace {
 			errors = append(errors, err)
 		}
@@ -145,9 +131,9 @@ func (ve *ValidationError) GetErrorsByNamespace(namespace string) []*FieldError 
 }
 
 // GetErrorsByTag 按验证标签获取错误
-func (ve *ValidationError) GetErrorsByTag(tag string) []*FieldError {
+func (vc *ValidationContext) GetErrorsByTag(tag string) []*FieldError {
 	var errors []*FieldError
-	for _, err := range ve.Errors {
+	for _, err := range vc.Errors {
 		if err.Tag == tag {
 			errors = append(errors, err)
 		}
