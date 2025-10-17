@@ -45,7 +45,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	if kvs == nil {
 		// 如果有必填键要求，则 nil map 是错误的
 		if len(v.RequiredKeys) > 0 {
-			return []*FieldError{NewFieldError("map", "required", nil, nil)}
+			return []*FieldError{NewFieldError(nil, "", "map", "required", "")}
 		}
 		return nil
 	}
@@ -72,7 +72,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	if ctx.HasErrors() {
 		return ctx.Errors
 	} else if len(ctx.Message) != 0 {
-		return []*FieldError{NewFieldError("", ctx.Message, nil, nil)}
+		return []*FieldError{NewFieldError(nil, "", ctx.Message, "", "")}
 	}
 
 	return nil
@@ -82,7 +82,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *ValidationContext) {
 	for _, key := range mv.RequiredKeys {
 		if _, exists := kvs[key]; !exists {
-			ctx.AddErrorByDetail(mv.NameSpace+"."+key, "required", nil, nil)
+			ctx.AddErrorByDetail(nil, "", "", "required", "", "", mv.NameSpace+"."+key)
 		}
 	}
 }
@@ -107,7 +107,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 
 	for key := range kvs {
 		if !allowedMap[key] {
-			ctx.AddErrorByDetail(mv.NameSpace+"."+key, "allowed", nil, nil)
+			ctx.AddErrorByDetail(nil, "", "", "allowed", "", "", mv.NameSpace+"."+key)
 		}
 	}
 }
@@ -121,7 +121,7 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 			}
 
 			if err := validatorFunc(value); err != nil {
-				ctx.AddErrorByDetail(mv.NameSpace+"."+key, "custom", nil, nil)
+				ctx.AddErrorByDetail(nil, "", "", "custom", "", "", mv.NameSpace+"."+key)
 			}
 		}
 	}

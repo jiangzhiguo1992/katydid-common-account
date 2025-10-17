@@ -20,8 +20,6 @@ type ValidationContext struct {
 
 // FieldError 单个字段的验证错误
 // 包含了 sl.ReportError 所需的所有参数
-// 国际化时，可以通过 Namespace + Tag 和 Params 字段查找对应的翻译
-// 如User.Profile.Email_regex_len + params=["3", "100"]
 type FieldError struct {
 	// FieldName 结构体字段名（对应 sl.ReportError 的 fieldName 参数）
 	FieldName string `json:"field_name,omitempty"`
@@ -178,4 +176,10 @@ func (fe *FieldError) WithNamespace(namespace string) *FieldError {
 // 返回值对应 sl.ReportError(value, fieldName, jsonName, tag, param)
 func (fe *FieldError) ToReportErrorArgs() (value interface{}, fieldName, jsonName, tag, param string) {
 	return fe.Value, fe.FieldName, fe.JsonName, fe.Tag, fe.Param
+}
+
+// ToLocalizes 转换为本地化错误信息模板(需要外部根据模板查找具体翻译)
+func (fe *FieldError) ToLocalizes() (string, string) {
+	join := strings.Join([]string{fe.Namespace, fe.Tag}, ".")
+	return join, fe.Param
 }

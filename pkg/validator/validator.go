@@ -22,75 +22,97 @@ const (
 	maxNestedDepth = 100
 )
 
-// Validatable 可验证的接口，模型需要实现这个接口来定义验证规则
-// 通过场景化的验证规则，可以针对不同的业务场景使用不同的验证逻辑
-type Validatable interface {
-	// ValidateRules 返回验证规则
-	// 返回的 map 第一层 key 是验证场景，第二层 key 是字段名，value 是验证规则
-	// 验证规则遵循 go-playground/validator/v10 的标签格式
-	ValidateRules() map[ValidateScene]map[string]string
+// ============================================================================
+// 核心验证接口
+// ============================================================================
+
+// RuleProvider 规则提供者接口 - 定义字段验证规则
+// 用途：为模型字段提供基础的格式验证规则（必填、长度、格式等）
+//
+// 使用场景：
+//   - 需要场景化验证（创建/更新使用不同规则）
+//   - 需要定义字段的基础格式验证（required, min, max, email等）
+//
+// 示例：
+//
+//	func (u *User) Rules() map[ValidateScene]map[string]string {
+//	    return map[ValidateScene]map[string]string{
+//	        "create": {"Username": "required,min=3", "Email": "required,email"},
+//	        "update": {"Username": "omitempty,min=3", "Email": "omitempty,email"},
+//	    }
+//	}
+type RuleProvider interface {
+	// Rules 返回验证规则
+	// 支持场景化：不同场景可以有不同的验证规则
+	// 返回格式：map[场景][字段名]规则字符串
+	Rules() map[ValidateScene]map[string]string
 }
 
-// CustomValidatable 自定义验证接口，用于复杂的业务验证逻辑
-// 当标准的验证标签无法满足需求时，可以实现此接口进行自定义验证
-type CustomValidatable interface {
-	// CustomValidate 自定义验证方法
-	// scene: 验证场景，可以根据不同场景执行不同的验证逻辑
-	// 返回 error 表示验证失败，返回 nil 表示验证成功
-	CustomValidate(scene ValidateScene) []*FieldError
-}
-
-// NestedValidatable 嵌套验证接口，用于验证嵌套的复杂对象（如 Extras、自定义类型等）
-// 此接口用于处理包含复杂嵌套结构的字段验证
-type NestedValidatable interface {
-	// ValidateNested 验证嵌套对象
-	// scene: 验证场景
-	// 返回 error 表示验证失败，返回 nil 表示验证成功
-	ValidateNested(scene ValidateScene) []*FieldError
-}
-
-// StructLevelValidatable 结构体级别验证接口（自动注册）
-// 实现此接口的类型会在首次验证时自动注册到验证器
-// 用于跨字段验证、复杂的业务逻辑验证
-// 注意：不再暴露第三方库类型，使用封装的 StructLevel 接口
-type StructLevelValidatable interface {
-	// StructLevelValidation 结构体级别验证
-	// sl: StructLevel 提供的验证上下文（已封装）
-	// 可以通过 sl.ReportError() 报告验证错误
-	StructLevelValidation(sl StructLevel)
-}
-
-// MapRulesValidatable Map 规则验证接口（自动注册）
-// 实现此接口的类型会在首次验证时自动注册到验证器
-// 用于简单的字段验证规则定义
-type MapRulesValidatable interface {
-	// ValidationMapRules 返回字段验证规则的 map
-	// key: 字段名, value: 验证规则（遵循 go-playground/validator 标签格式）
-	ValidationMapRules() map[string]string
+// BusinessValidator 跨字段验证器接口 - 字段间关系和复杂业务逻辑验证
+// 用途：验证多个字段之间的关系和约束，支持复杂业务逻辑验证
+//
+// 使用场景：
+//   - 跨字段验证（如：密码和确认密码必须一致）
+//   - 需要场景化的跨字段验证（如：创建时价格必须小于原价，更新时可以相等）
+//   - 复杂的条件验证（如：电子产品必须有品牌信息）
+//   - Map/Extras 字段的动态验证
+//   - 需要访问数据库的验证（唯一性检查等）
+//   - 包含复杂业务逻辑的验证（如：会员等级判断、权限检查等）
+//
+// 优势：
+//   - 支持场景化验证，不同场景可以有不同的验证逻辑
+//   - 返回 []*FieldError，可以一次返回多个错误
+//   - 使用简单直观，无需手动报告错误
+//   - 自动注册到底层验证器，性能优异
+//   - 集成到 go-playground/validator 的验证流程
+//
+// 示例：
+//
+//	func (p *Product) BusinessValidation(scene ValidateScene) []*FieldError {
+//	    var errors []*FieldError
+//
+//	    // 简单跨字段验证
+//	    if p.Password != p.ConfirmPassword {
+//	        errors = append(errors, NewFieldError("confirm_password", "密码和确认密码不一致", nil, nil))
+//	    }
+//
+//	    // 场景化的跨字段验证
+//	    if scene == SceneCreate && p.DiscountPrice >= p.OriginalPrice {
+//	        errors = append(errors, NewFieldError("discount_price", "折扣价必须低于原价", nil, nil))
+//	    }
+//
+//	    // 复杂条件验证
+//	    if p.Category == "electronics" {
+//	        if err := ValidateMapMustHaveKeys(p.Extras, "brand"); err != nil {
+//	            errors = append(errors, NewFieldError("extras.brand", err.Error(), nil, nil))
+//	        }
+//	    }
+//
+//	    return errors
+//	}
+type BusinessValidator interface {
+	// BusinessValidation 跨字段验证方法
+	// 参数 scene：当前验证场景，可根据场景执行不同的验证逻辑
+	// 返回：验证错误列表，nil 或空切片表示验证通过
+	BusinessValidation(scene ValidateScene) []*FieldError
 }
 
 // Validator 验证器，提供结构体字段验证功能
 // 支持场景化验证、嵌套验证、自定义验证等多种验证方式
 // 线程安全，可在多个 goroutine 中并发使用
 type Validator struct {
-	validate          *validator.Validate // 底层验证器实例
-	typeCache         *sync.Map           // 类型信息缓存，key: reflect.Type, value: *typeCache
-	registeredTags    *sync.Map           // 已注册的验证标签缓存，key: string(tag), value: bool
-	registeredStructs *sync.Map           // 已注册的结构体验证缓存，key: reflect.Type, value: bool
-	autoRegistered    *sync.Map           // 自动注册的类型缓存，key: reflect.Type, value: bool
-	mu                sync.RWMutex        // 保护注册自定义验证函数的互斥锁
+	validate       *validator.Validate // 底层验证器实例
+	typeCache      *sync.Map           // 类型信息缓存，key: reflect.Type, value: *typeCache
+	autoRegistered *sync.Map           // 自动注册的类型缓存，key: reflect.Type, value: bool
+	mu             sync.RWMutex        // 保护注册自定义验证函数的互斥锁
 }
 
 // typeCache 类型信息缓存结构，用于避免重复的类型断言
 // 缓存类型实现的接口信息，提升性能
 type typeCache struct {
-	isValidatable   bool                                // 是否实现了 Validatable 接口
-	validationRules map[ValidateScene]map[string]string // 缓存的验证规则
-
-	isCustomValidatable      bool // 是否实现了 CustomValidatable 接口
-	isNestedValidatable      bool // 是否实现了 NestedValidatable 接口
-	isStructLevelValidatable bool // 是否实现了 StructLevelValidatable 接口（自动注册）
-	isMapRulesValidatable    bool // 是否实现了 MapRulesValidatable 接口（自动注册）
+	isRuleProvider        bool                                // 是否实现了 RuleProvider 接口
+	isCrossFieldValidator bool                                // 是否实现了 BusinessValidator 接口（自动注册）
+	validationRules       map[ValidateScene]map[string]string // 缓存的验证规则
 }
 
 var (
@@ -135,11 +157,9 @@ func New() *Validator {
 	})
 
 	return &Validator{
-		validate:          v,
-		typeCache:         &sync.Map{},
-		registeredTags:    &sync.Map{},
-		registeredStructs: &sync.Map{},
-		autoRegistered:    &sync.Map{},
+		validate:       v,
+		typeCache:      &sync.Map{},
+		autoRegistered: &sync.Map{},
 	}
 }
 
@@ -168,15 +188,12 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 	// 创建新的缓存项
 	cache := &typeCache{}
 
-	// 检查接口实现
-	if validatable, ok := obj.(Validatable); ok {
-		cache.isValidatable = true
-		cache.validationRules = validatable.ValidateRules()
+	// 接口检查
+	if ruleProvider, ok := obj.(RuleProvider); ok {
+		cache.isRuleProvider = true
+		cache.validationRules = ruleProvider.Rules()
 	}
-	_, cache.isCustomValidatable = obj.(CustomValidatable)
-	_, cache.isNestedValidatable = obj.(NestedValidatable)
-	_, cache.isStructLevelValidatable = obj.(StructLevelValidatable)
-	_, cache.isMapRulesValidatable = obj.(MapRulesValidatable)
+	_, cache.isCrossFieldValidator = obj.(BusinessValidator)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := v.typeCache.LoadOrStore(typ, cache)
@@ -185,38 +202,38 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 
 // Validate 验证模型，支持指定场景和嵌套验证
 // 验证流程：
-// 1. 自动注册实现了自动注册接口的类型
-// 2. 执行结构体标签验证（基于 Validatable 接口的规则）
+// 1. 自动注册 BusinessValidator（需要注册到底层验证器）
+// 2. 执行结构体标签验证（RuleProvider 不需要注册，直接读取规则）
 // 3. 递归验证嵌套的结构体字段（包括嵌入字段）
-// 4. 执行自定义验证逻辑（CustomValidatable 接口）
-// 5. 验证实现了 NestedValidatable 接口的嵌套字段
+// 4. 执行跨字段验证逻辑（BusinessValidator 直接调用，自动注册）
 // 参数：
 //
 //	obj: 待验证的对象
 //	scene: 验证场景
 //
-// 返回：验证错误，nil 表示验证成功
+// 返回：验证错误列表，nil 表示验证成功
 func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 安全检查：防止 nil 对象
 	if obj == nil {
-		return []*FieldError{NewFieldError("struct", "required", nil, nil)}
+		return []*FieldError{NewFieldError(nil, "struct", "", "required", "")}
 	}
 
 	// 获取类型缓存
 	cache := v.getOrCacheTypeInfo(obj)
 
-	// 0. 自动注册实现了自动注册接口的类型（懒加载，只注册一次）
+	// 0. 自动注册实现了 BusinessValidator 接口的类型（懒加载，只注册一次）
 	v.autoRegisterIfNeeded(obj, cache)
 
 	// 创建验证上下文
 	ctx := NewValidationContext(scene)
 
-	// 1. 执行结构体标签验证
-	if cache.isValidatable {
+	// 1. 执行结构体标签验证（RuleProvider 直接读取规则，无需注册）
+	if cache.isRuleProvider {
 		if cache.validationRules != nil {
 			v.collectValidationErrors(obj, cache.validationRules, ctx)
 		}
 	} else {
+		// 如果没有实现 RuleProvider，使用底层验证器的 Struct 验证
 		if err := v.validate.Struct(obj); err != nil {
 			v.addFieldErrors(obj, err, ctx)
 		}
@@ -225,31 +242,31 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 2. 递归验证嵌套的结构体字段
 	v.collectNestedStructErrors(obj, ctx, 0)
 
-	// 3. 执行自定义验证逻辑
-	if cache.isCustomValidatable {
-		customValidatable := obj.(CustomValidatable)
-		if errs := customValidatable.CustomValidate(scene); errs != nil {
-			// 如果自定义验证返回 ValidationError，合并错误
+	// 3. 执行跨字段验证逻辑（BusinessValidator 直接调用）
+	if cache.isCrossFieldValidator {
+		crossFieldValidator := obj.(BusinessValidator)
+		if errs := crossFieldValidator.BusinessValidation(scene); errs != nil {
 			ctx.AddErrors(errs)
 		}
 	}
-
-	// 4. 验证实现了 NestedValidatable 接口的嵌套字段
-	v.collectNestedValidatableErrors(obj, scene, ctx, 0)
 
 	// 如果有错误，返回验证错误
 	if ctx.HasErrors() {
 		return ctx.Errors
 	} else if len(ctx.Message) != 0 {
-		return []*FieldError{NewFieldError("", ctx.Message, nil, nil)}
+		return []*FieldError{NewFieldError("", "", "", ctx.Message, "")}
 	}
 
 	return nil
 }
 
-// autoRegisterIfNeeded 自动注册实现了自动注册接口的类型
+// autoRegisterIfNeeded 自动注册实现了 BusinessValidator 接口的类型
 // 这是懒加载机制，只在首次验证时注册一次
 func (v *Validator) autoRegisterIfNeeded(obj any, cache *typeCache) {
+	if !cache.isCrossFieldValidator {
+		return
+	}
+
 	typ := reflect.TypeOf(obj)
 	if typ == nil {
 		return
@@ -263,37 +280,23 @@ func (v *Validator) autoRegisterIfNeeded(obj any, cache *typeCache) {
 	// 标记为已检查（即使不需要注册，也避免重复检查）
 	v.autoRegistered.Store(typ, true)
 
-	// 自动注册 StructLevelValidatable
-	if cache.isStructLevelValidatable {
-		structLevelValidatable := obj.(StructLevelValidatable)
-		v.mu.Lock()
-		if _, loaded := v.registeredStructs.LoadOrStore(typ, true); !loaded {
-			// 包装调用对象的 StructLevelValidation 方法，使用封装的 StructLevel
-			v.validate.RegisterStructValidation(func(sl validator.StructLevel) {
-				// 通过类型断言获取当前验证的对象
-				if current, ok := sl.Current().Interface().(StructLevelValidatable); ok {
-					// 包装第三方库的 StructLevel，隐藏实现细节
-					wrapper := &structLevelWrapper{sl: sl}
-					current.StructLevelValidation(wrapper)
+	// 注册 BusinessValidator 接口
+	// 注意：这里注册到底层验证器是为了在 Struct 验证时也能执行跨字段验证
+	// 但我们主要在步骤3直接调用 BusinessValidation 方法
+	v.validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		// 这里是底层验证器的回调，我们需要创建一个包装器来收集错误
+		// 但由于我们在步骤3直接调用了 BusinessValidation，这里可以简化或保留兼容性
+		if current, ok := sl.Current().Interface().(BusinessValidator); ok {
+			// 传递空场景，因为底层验证器不知道场景
+			// 实际的场景化验证在步骤3中进行
+			if errs := current.BusinessValidation(""); errs != nil {
+				// 将错误报告给底层验证器
+				for _, err := range errs {
+					sl.ReportError(err.Value, err.JsonName, err.FieldName, err.Tag, err.Param)
 				}
-			}, obj)
-		}
-		v.mu.Unlock()
-		_ = structLevelValidatable // 避免 unused 警告
-	}
-
-	// 自动注册 MapRulesValidatable
-	if cache.isMapRulesValidatable {
-		mapRulesValidatable := obj.(MapRulesValidatable)
-		rules := mapRulesValidatable.ValidationMapRules()
-		if rules != nil && len(rules) > 0 {
-			v.mu.Lock()
-			if _, loaded := v.registeredStructs.LoadOrStore(typ, true); !loaded {
-				v.validate.RegisterStructValidationMapRules(rules, obj)
 			}
-			v.mu.Unlock()
 		}
-	}
+	}, obj)
 }
 
 // collectValidationErrors 收集验证错误（不中断）
@@ -349,7 +352,7 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 // collectNestedStructErrors 收集嵌套结构体错误
 func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, depth int) {
 	if depth > maxNestedDepth {
-		ctx.AddErrorByDetail("", fmt.Sprintf("nested depth exceeds maximum limit %d", maxNestedDepth), nil, nil)
+		ctx.AddErrorByDetail("", "", "", fmt.Sprintf("nested depth exceeds maximum limit %d", maxNestedDepth), "", "", "")
 		return
 	}
 
@@ -389,20 +392,7 @@ func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, d
 		// 处理嵌入字段
 		if fieldType.Anonymous {
 			v.collectNestedStructErrors(fieldValue, ctx, depth+1)
-		}
-
-		fieldCache := v.getOrCacheTypeInfo(fieldValue)
-
-		// 验证实现了接口的字段
-		if fieldCache.isValidatable && fieldCache.validationRules != nil {
-			v.collectValidationErrors(fieldValue, fieldCache.validationRules, ctx)
-		}
-
-		if fieldCache.isCustomValidatable {
-			customValidatable := fieldValue.(CustomValidatable)
-			if errs := customValidatable.CustomValidate(ctx.Scene); errs != nil {
-				ctx.AddErrors(errs)
-			}
+			continue
 		}
 
 		// 递归处理嵌套结构体
@@ -411,61 +401,8 @@ func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, d
 			fieldKind = field.Elem().Kind()
 		}
 
-		if fieldKind == reflect.Struct && !fieldType.Anonymous {
+		if fieldKind == reflect.Struct {
 			v.collectNestedStructErrors(fieldValue, ctx, depth+1)
-		}
-	}
-}
-
-// collectNestedValidatableErrors 收集 NestedValidatable 错误
-func (v *Validator) collectNestedValidatableErrors(obj any, scene ValidateScene, ctx *ValidationContext, depth int) {
-	if depth > maxNestedDepth {
-		return
-	}
-
-	val := reflect.ValueOf(obj)
-	if !val.IsValid() {
-		return
-	}
-
-	if val.Kind() == reflect.Ptr {
-		if val.IsNil() {
-			return
-		}
-		val = val.Elem()
-	}
-
-	if val.Kind() != reflect.Struct {
-		return
-	}
-
-	typ := val.Type()
-	numField := val.NumField()
-
-	for i := 0; i < numField; i++ {
-		field := val.Field(i)
-		fieldType := typ.Field(i)
-
-		if !field.CanInterface() || !field.IsValid() {
-			continue
-		}
-
-		if field.Kind() == reflect.Ptr && field.IsNil() {
-			continue
-		}
-
-		fieldValue := field.Interface()
-
-		if fieldType.Anonymous {
-			v.collectNestedValidatableErrors(fieldValue, scene, ctx, depth+1)
-		}
-
-		fieldCache := v.getOrCacheTypeInfo(fieldValue)
-		if fieldCache.isNestedValidatable {
-			nestedValidatable := fieldValue.(NestedValidatable)
-			if errs := nestedValidatable.ValidateNested(scene); errs != nil {
-				ctx.AddErrors(errs)
-			}
 		}
 	}
 }
@@ -475,7 +412,7 @@ func (v *Validator) addFieldErrors(_ any, err error, ctx *ValidationContext) {
 	var validationErrors validator.ValidationErrors
 	ok := errors.As(err, &validationErrors)
 	if !ok {
-		ctx.AddErrorByDetail("", err.Error(), nil, nil)
+		ctx.AddErrorByDetail("", "", "", err.Error(), "", "", "")
 		return
 	}
 
