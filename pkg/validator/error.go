@@ -19,17 +19,24 @@ type ValidationContext struct {
 }
 
 // FieldError 单个字段的验证错误
+// 包含了 sl.ReportError 所需的所有参数
 // 国际化时，可以通过 Namespace + Tag 和 Params 字段查找对应的翻译
 // 如User.Profile.Email_regex_len + params=["3", "100"]
 type FieldError struct {
-	// Namespace 字段的完整命名空间（如 User.Profile.Email）
-	Namespace string `json:"namespace"`
+	// FieldName 结构体字段名（对应 sl.ReportError 的 fieldName 参数）
+	FieldName string `json:"field_name,omitempty"`
+	// JsonName JSON 字段名（对应 sl.ReportError 的 jsonName 参数）
+	JsonName string `json:"json_name"`
 	// Tag 验证标签（如 required, email, min 等）
 	Tag string `json:"tag"`
-	// Params 验证参数（如 min=3 中的 3）
-	Params []string `json:"param,omitempty"`
-	// Value 字段的实际值（可选，用于调试）
+	// Param 验证参数（如 min=3 中的 "3"）
+	Param string `json:"param,omitempty"`
+	// Value 字段的实际值（用于 sl.ReportError 的 value 参数）
 	Value any `json:"value,omitempty"`
+	// Message 友好的错误消息（可选，用于直接显示给用户）
+	Message string `json:"message,omitempty"`
+	// Namespace 字段的完整命名空间（如 User.Profile.Email）
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // NewValidationContext 创建验证上下文
@@ -40,13 +47,20 @@ func NewValidationContext(scene ValidateScene) *ValidationContext {
 	}
 }
 
-// NewFieldError 创建一个新的字段错误
-func NewFieldError(namespace, tag string, params []string, value interface{}) *FieldError {
+// NewFieldError 创建字段错误
+// value: 字段值
+// fieldName: 结构体字段名
+// jsonName: JSON 字段名
+// tag: 验证标签
+// param: 验证参数
+func NewFieldError(value any, fieldName, jsonName, tag, param string) *FieldError {
 	return &FieldError{
-		Namespace: namespace,
+		FieldName: fieldName,
+		JsonName:  jsonName,
 		Tag:       tag,
-		Params:    params,
+		Param:     param,
 		Value:     value,
+		Namespace: jsonName,
 	}
 }
 
@@ -74,7 +88,10 @@ func (vc *ValidationContext) Error() string {
 
 // String 返回友好的错误信息
 func (fe *FieldError) String() string {
-	return fmt.Sprintf("field '%s' validation failed on tag '%s'", fe.Namespace, fe.Tag)
+	if fe.Message != "" {
+		return fmt.Sprintf("field '%s': %s", fe.JsonName, fe.Message)
+	}
+	return fmt.Sprintf("field '%s' validation failed on tag '%s'", fe.JsonName, fe.Tag)
 }
 
 // HasErrors 检查是否有验证错误
@@ -92,20 +109,26 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 // AddErrorByValidator 通过 validator.FieldError 添加字段错误
 func (vc *ValidationContext) AddErrorByValidator(error validator.FieldError) {
 	vc.Errors = append(vc.Errors, &FieldError{
-		Namespace: error.Namespace(),
+		FieldName: error.StructField(),
+		JsonName:  error.Field(),
 		Tag:       error.Tag(),
-		Params:    []string{error.Param()},
+		Param:     error.Param(),
 		Value:     error.Value(),
+		Message:   error.Error(),
+		Namespace: error.Namespace(),
 	})
 }
 
 // AddErrorByDetail 通过详细信息添加字段错误
-func (vc *ValidationContext) AddErrorByDetail(namespace, tag string, params []string, value any) {
+func (vc *ValidationContext) AddErrorByDetail(value any, field, json, tag, param, message, namespace string) {
 	vc.Errors = append(vc.Errors, &FieldError{
-		Namespace: namespace,
+		FieldName: field,
+		JsonName:  json,
 		Tag:       tag,
-		Params:    params,
+		Param:     param,
 		Value:     value,
+		Message:   message,
+		Namespace: namespace,
 	})
 }
 
@@ -141,38 +164,18 @@ func (vc *ValidationContext) GetErrorsByTag(tag string) []*FieldError {
 	return errors
 }
 
-// FieldErrorOption 字段错误选项函数
-type FieldErrorOption func(*FieldError)
-
-// BuildFieldError 构建字段错误（供模型使用的辅助方法）
-// 参数：
-//   - field: 字段名
-//   - tag: 验证标签
-//   - message: 错误消息
-//   - opts: 可选参数
-func BuildFieldError(namespace, tag string, opts ...FieldErrorOption) *FieldError {
-	fe := &FieldError{
-		Namespace: namespace,
-		Tag:       tag,
-	}
-
-	for _, opt := range opts {
-		opt(fe)
-	}
-
+func (fe *FieldError) WithMessage(message string) *FieldError {
+	fe.Message = message
 	return fe
 }
 
-// WithParam 设置验证参数
-func WithParam(params []string) FieldErrorOption {
-	return func(fe *FieldError) {
-		fe.Params = params
-	}
+func (fe *FieldError) WithNamespace(namespace string) *FieldError {
+	fe.Namespace = namespace
+	return fe
 }
 
-// WithValue 设置字段值
-func WithValue(value interface{}) FieldErrorOption {
-	return func(fe *FieldError) {
-		fe.Value = value
-	}
+// ToReportErrorArgs 转换为 sl.ReportError 所需的参数
+// 返回值对应 sl.ReportError(value, fieldName, jsonName, tag, param)
+func (fe *FieldError) ToReportErrorArgs() (value interface{}, fieldName, jsonName, tag, param string) {
+	return fe.Value, fe.FieldName, fe.JsonName, fe.Tag, fe.Param
 }
