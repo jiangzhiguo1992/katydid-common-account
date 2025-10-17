@@ -79,15 +79,6 @@ const (
 
 	// StatusAllUnverified 所有未验证状态的组合（系统未验证 | 管理员未验证 | 用户未验证）
 	StatusAllUnverified Status = StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
-
-	// StatusAllSystem 所有系统级状态的组合
-	StatusAllSystem Status = StatusSysDeleted | StatusSysDisabled | StatusSysHidden | StatusSysUnverified
-
-	// StatusAllAdmin 所有管理员级状态的组合
-	StatusAllAdmin Status = StatusAdmDeleted | StatusAdmDisabled | StatusAdmHidden | StatusAdmUnverified
-
-	// StatusAllUser 所有用户级状态的组合
-	StatusAllUser Status = StatusUserDeleted | StatusUserDisabled | StatusUserHidden | StatusUserUnverified
 )
 
 // 状态值边界常量（用于运行时检查）

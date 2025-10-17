@@ -96,15 +96,6 @@ types.StatusAllHidden = StatusSysHidden | StatusAdmHidden | StatusUserHidden
 
 // 所有未验证状态
 types.StatusAllUnverified = StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
-
-// 所有系统级状态
-types.StatusAllSystem = StatusSysDeleted | StatusSysDisabled | StatusSysHidden | StatusSysUnverified
-
-// 所有管理员级状态
-types.StatusAllAdmin = StatusAdmDeleted | StatusAdmDisabled | StatusAdmHidden | StatusAdmUnverified
-
-// 所有用户级状态
-types.StatusAllUser = StatusUserDeleted | StatusUserDisabled | StatusUserHidden | StatusUserUnverified
 ```
 
 ## 核心操作
