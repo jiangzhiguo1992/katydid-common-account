@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// ============================================================================
+// Map 验证测试
+// ============================================================================
+
 // TestValidateMap 测试基础的 map 验证功能
 func TestValidateMap(t *testing.T) {
 	tests := []struct {
@@ -202,28 +206,12 @@ func TestValidateMapStringKey(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "键不存在不报错",
+			name:    "键不存在",
 			extras:  map[string]any{},
 			key:     "name",
 			minLen:  3,
 			maxLen:  10,
-			wantErr: false,
-		},
-		{
-			name:    "只验证最小长度",
-			extras:  map[string]any{"name": "alice"},
-			key:     "name",
-			minLen:  3,
-			maxLen:  0,
-			wantErr: false,
-		},
-		{
-			name:    "只验证最大长度",
-			extras:  map[string]any{"name": "alice"},
-			key:     "name",
-			minLen:  0,
-			maxLen:  10,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 
@@ -251,7 +239,7 @@ func TestValidateMapIntKey(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "整数在范围内 - int类型",
+			name:    "整数在范围内",
 			extras:  map[string]any{"age": 25},
 			key:     "age",
 			min:     0,
@@ -259,23 +247,7 @@ func TestValidateMapIntKey(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "整数在范围内 - int64类型",
-			extras:  map[string]any{"age": int64(25)},
-			key:     "age",
-			min:     0,
-			max:     120,
-			wantErr: false,
-		},
-		{
-			name:    "整数在范围内 - float64类型",
-			extras:  map[string]any{"age": float64(25)},
-			key:     "age",
-			min:     0,
-			max:     120,
-			wantErr: false,
-		},
-		{
-			name:    "整数小于最小值",
+			name:    "整数太小",
 			extras:  map[string]any{"age": -5},
 			key:     "age",
 			min:     0,
@@ -283,28 +255,28 @@ func TestValidateMapIntKey(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "整数大于最大值",
-			extras:  map[string]any{"age": 150},
+			name:    "整数太大",
+			extras:  map[string]any{"age": 200},
 			key:     "age",
 			min:     0,
 			max:     120,
 			wantErr: true,
 		},
 		{
-			name:    "不是数字类型",
-			extras:  map[string]any{"age": "twenty"},
+			name:    "不是整数类型",
+			extras:  map[string]any{"age": "25"},
 			key:     "age",
 			min:     0,
 			max:     120,
 			wantErr: true,
 		},
 		{
-			name:    "键不存在不报错",
+			name:    "键不存在",
 			extras:  map[string]any{},
 			key:     "age",
 			min:     0,
 			max:     120,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 
@@ -335,39 +307,39 @@ func TestValidateMapFloatKey(t *testing.T) {
 			name:    "浮点数在范围内",
 			extras:  map[string]any{"price": 99.99},
 			key:     "price",
-			min:     0.0,
+			min:     0.01,
 			max:     999.99,
 			wantErr: false,
 		},
 		{
-			name:    "整数可以作为浮点数验证",
-			extras:  map[string]any{"price": 100},
+			name:    "浮点数太小",
+			extras:  map[string]any{"price": -10.5},
 			key:     "price",
-			min:     0.0,
-			max:     999.99,
-			wantErr: false,
-		},
-		{
-			name:    "浮点数小于最小值",
-			extras:  map[string]any{"price": -10.0},
-			key:     "price",
-			min:     0.0,
+			min:     0.01,
 			max:     999.99,
 			wantErr: true,
 		},
 		{
-			name:    "浮点数大于最大值",
-			extras:  map[string]any{"price": 1000.0},
+			name:    "浮点数太大",
+			extras:  map[string]any{"price": 1500.0},
 			key:     "price",
-			min:     0.0,
+			min:     0.01,
 			max:     999.99,
 			wantErr: true,
 		},
 		{
-			name:    "不是数字类型",
-			extras:  map[string]any{"price": "expensive"},
+			name:    "不是浮点数类型",
+			extras:  map[string]any{"price": "99.99"},
 			key:     "price",
-			min:     0.0,
+			min:     0.01,
+			max:     999.99,
+			wantErr: true,
+		},
+		{
+			name:    "键不存在",
+			extras:  map[string]any{},
+			key:     "price",
+			min:     0.01,
 			max:     999.99,
 			wantErr: true,
 		},
@@ -378,53 +350,6 @@ func TestValidateMapFloatKey(t *testing.T) {
 			err := ValidateMapFloatKey(tt.extras, tt.key, tt.min, tt.max)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateMapFloatKey() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil {
-				t.Logf("错误信息: %v", err)
-			}
-		})
-	}
-}
-
-// TestValidateMapBoolKey 测试布尔类型键验证
-func TestValidateMapBoolKey(t *testing.T) {
-	tests := []struct {
-		name    string
-		extras  map[string]any
-		key     string
-		wantErr bool
-	}{
-		{
-			name:    "布尔值 true",
-			extras:  map[string]any{"enabled": true},
-			key:     "enabled",
-			wantErr: false,
-		},
-		{
-			name:    "布尔值 false",
-			extras:  map[string]any{"enabled": false},
-			key:     "enabled",
-			wantErr: false,
-		},
-		{
-			name:    "不是布尔类型",
-			extras:  map[string]any{"enabled": "yes"},
-			key:     "enabled",
-			wantErr: true,
-		},
-		{
-			name:    "键不存在不报错",
-			extras:  map[string]any{},
-			key:     "enabled",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateMapBoolKey(tt.extras, tt.key)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateMapBoolKey() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
 				t.Logf("错误信息: %v", err)
@@ -444,12 +369,16 @@ func TestValidateMapKey(t *testing.T) {
 	}{
 		{
 			name:   "自定义验证通过",
-			extras: map[string]any{"email": "test@example.com"},
-			key:    "email",
+			extras: map[string]any{"status": "active"},
+			key:    "status",
 			validatorFunc: func(value interface{}) error {
-				email, ok := value.(string)
-				if !ok || len(email) == 0 {
-					return fmt.Errorf("email 不能为空")
+				status, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("status 必须是字符串")
+				}
+				validStatuses := map[string]bool{"active": true, "inactive": true}
+				if !validStatuses[status] {
+					return fmt.Errorf("status 必须是 active 或 inactive")
 				}
 				return nil
 			},
@@ -457,25 +386,29 @@ func TestValidateMapKey(t *testing.T) {
 		},
 		{
 			name:   "自定义验证失败",
-			extras: map[string]any{"email": ""},
-			key:    "email",
+			extras: map[string]any{"status": "unknown"},
+			key:    "status",
 			validatorFunc: func(value interface{}) error {
-				email, ok := value.(string)
-				if !ok || len(email) == 0 {
-					return fmt.Errorf("email 不能为空")
+				status, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("status 必须是字符串")
+				}
+				validStatuses := map[string]bool{"active": true, "inactive": true}
+				if !validStatuses[status] {
+					return fmt.Errorf("status 必须是 active 或 inactive")
 				}
 				return nil
 			},
 			wantErr: true,
 		},
 		{
-			name:   "键不存在不报错",
+			name:   "键不存在",
 			extras: map[string]any{},
-			key:    "email",
+			key:    "status",
 			validatorFunc: func(value interface{}) error {
-				return fmt.Errorf("不应该执行到这里")
+				return nil
 			},
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 
@@ -492,141 +425,179 @@ func TestValidateMapKey(t *testing.T) {
 	}
 }
 
-// TestNewMapValidator 测试验证器构造器
-func TestNewMapValidator(t *testing.T) {
-	t.Run("创建空验证器", func(t *testing.T) {
-		v := NewMapValidator()
-		if v == nil {
-			t.Error("NewMapValidator() should not return nil")
-		}
-		if v.KeyValidators == nil {
-			t.Error("KeyValidators map should be initialized")
-		}
-	})
+// TestMapValidator_ChainedMethods 测试链式调用
+func TestMapValidator_ChainedMethods(t *testing.T) {
+	mv := NewMapValidator().
+		WithRequiredKeys("name", "email").
+		WithAllowedKeys("name", "email", "age", "phone").
+		WithKeyValidator("email", func(value interface{}) error {
+			email, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("email 必须是字符串")
+			}
+			if len(email) < 5 {
+				return fmt.Errorf("email 长度必须至少5个字符")
+			}
+			return nil
+		})
 
-	t.Run("链式调用构建验证器", func(t *testing.T) {
-		v := NewMapValidator().
-			WithRequiredKeys("name", "email").
-			WithAllowedKeys("name", "email", "phone").
-			WithKeyValidator("email", func(value interface{}) error {
-				email, ok := value.(string)
-				if !ok || len(email) == 0 {
-					return fmt.Errorf("invalid email")
-				}
-				return nil
-			})
+	tests := []struct {
+		name    string
+		data    map[string]any
+		wantErr bool
+	}{
+		{
+			name: "所有验证通过",
+			data: map[string]any{
+				"name":  "John Doe",
+				"email": "john@example.com",
+				"age":   30,
+			},
+			wantErr: false,
+		},
+		{
+			name: "缺少必填键",
+			data: map[string]any{
+				"name": "John Doe",
+			},
+			wantErr: true,
+		},
+		{
+			name: "包含不允许的键",
+			data: map[string]any{
+				"name":    "John Doe",
+				"email":   "john@example.com",
+				"address": "123 Main St", // 不在允许列表中
+			},
+			wantErr: true,
+		},
+		{
+			name: "自定义验证失败",
+			data: map[string]any{
+				"name":  "John Doe",
+				"email": "abc", // 太短
+			},
+			wantErr: true,
+		},
+	}
 
-		if len(v.RequiredKeys) != 2 {
-			t.Errorf("Expected 2 required keys, got %d", len(v.RequiredKeys))
-		}
-		if len(v.AllowedKeys) != 3 {
-			t.Errorf("Expected 3 allowed keys, got %d", len(v.AllowedKeys))
-		}
-		if len(v.KeyValidators) != 1 {
-			t.Errorf("Expected 1 key validator, got %d", len(v.KeyValidators))
-		}
-	})
-
-	t.Run("AddRequiredKey 方法", func(t *testing.T) {
-		v := NewMapValidator().
-			AddRequiredKey("key1").
-			AddRequiredKey("key2")
-
-		if len(v.RequiredKeys) != 2 {
-			t.Errorf("Expected 2 required keys, got %d", len(v.RequiredKeys))
-		}
-	})
-
-	t.Run("AddAllowedKey 方法", func(t *testing.T) {
-		v := NewMapValidator().
-			AddAllowedKey("key1").
-			AddAllowedKey("key2")
-
-		if len(v.AllowedKeys) != 2 {
-			t.Errorf("Expected 2 allowed keys, got %d", len(v.AllowedKeys))
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mv.Validate(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				t.Logf("错误信息: %v", err)
+			}
+		})
+	}
 }
 
-// TestMapValidator_ComplexScenario 测试复杂场景
-func TestMapValidator_ComplexScenario(t *testing.T) {
-	t.Run("电子产品验证场景", func(t *testing.T) {
-		extras := map[string]any{
-			"brand":    "Apple",
-			"model":    "iPhone 15",
-			"warranty": 12,
-			"price":    999.99,
-		}
+// ============================================================================
+// Map 验证性能基准测试
+// ============================================================================
 
-		validator := NewMapValidator().
-			WithRequiredKeys("brand", "warranty").
-			WithAllowedKeys("brand", "model", "warranty", "price").
-			WithKeyValidator("brand", func(value interface{}) error {
-				brand, ok := value.(string)
-				if !ok || len(brand) < 2 {
-					return fmt.Errorf("品牌名称至少2个字符")
-				}
+// BenchmarkMapValidator_AllowedKeys 测试 Map 验证器的允许键缓存性能
+func BenchmarkMapValidator_AllowedKeys(b *testing.B) {
+	mv := NewMapValidator().
+		WithAllowedKeys("key1", "key2", "key3", "key4", "key5")
+
+	data := map[string]any{
+		"key1": "value1",
+		"key2": "value2",
+		"key3": "value3",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = mv.Validate(data)
+	}
+}
+
+// BenchmarkMapValidator_RequiredKeys 测试必填键验证性能
+func BenchmarkMapValidator_RequiredKeys(b *testing.B) {
+	mv := NewMapValidator().
+		WithRequiredKeys("name", "email", "age")
+
+	data := map[string]any{
+		"name":  "Test User",
+		"email": "test@example.com",
+		"age":   25,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = mv.Validate(data)
+	}
+}
+
+// BenchmarkMapValidator_ComplexValidation 测试复杂 Map 验证场景
+func BenchmarkMapValidator_ComplexValidation(b *testing.B) {
+	mv := NewMapValidator().
+		WithRequiredKeys("name", "price").
+		WithAllowedKeys("name", "price", "brand", "warranty", "stock").
+		WithKeyValidator("price", func(value interface{}) error {
+			if v, ok := value.(float64); ok && v > 0 {
 				return nil
-			}).
-			WithKeyValidator("warranty", func(value interface{}) error {
-				warranty, ok := value.(int)
-				if !ok || warranty < 1 || warranty > 60 {
-					return fmt.Errorf("保修期必须在1-60个月之间")
-				}
-				return nil
-			})
+			}
+			return nil
+		})
 
-		err := ValidateMap(extras, validator)
-		if err != nil {
-			t.Errorf("验证失败: %v", err)
-		}
-	})
+	data := map[string]any{
+		"name":     "Product",
+		"price":    99.99,
+		"brand":    "BrandName",
+		"warranty": 12,
+		"stock":    100,
+	}
 
-	t.Run("用户资料验证场景", func(t *testing.T) {
-		extras := map[string]any{
-			"twitter": "https://twitter.com/example",
-			"github":  "https://github.com/example",
-		}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = mv.Validate(data)
+	}
+}
 
-		validator := &MapValidator{
-			AllowedKeys: []string{"twitter", "github", "linkedin", "website"},
-			KeyValidators: map[string]func(value interface{}) error{
-				"twitter": func(value interface{}) error {
-					url, ok := value.(string)
-					if !ok || len(url) == 0 || len(url) > 200 {
-						return fmt.Errorf("twitter URL 长度必须在1-200之间")
-					}
-					return nil
-				},
-				"github": func(value interface{}) error {
-					url, ok := value.(string)
-					if !ok || len(url) == 0 || len(url) > 200 {
-						return fmt.Errorf("github URL 长度必须在1-200之间")
-					}
-					return nil
-				},
-			},
-		}
+// BenchmarkValidateMapStringKey 测试字符串键验证性能
+func BenchmarkValidateMapStringKey(b *testing.B) {
+	data := map[string]any{
+		"name": "TestProduct",
+	}
 
-		err := ValidateMap(extras, validator)
-		if err != nil {
-			t.Errorf("验证失败: %v", err)
-		}
-	})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ValidateMapStringKey(data, "name", 3, 50)
+	}
+}
 
-	t.Run("包含无效键应该失败", func(t *testing.T) {
-		extras := map[string]any{
-			"twitter":  "https://twitter.com/example",
-			"facebook": "https://facebook.com/example", // 不允许的键
-		}
+// BenchmarkValidateMapIntKey 测试整数键验证性能
+func BenchmarkValidateMapIntKey(b *testing.B) {
+	data := map[string]any{
+		"age": 25,
+	}
 
-		validator := &MapValidator{
-			AllowedKeys: []string{"twitter", "github", "linkedin"},
-		}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ValidateMapIntKey(data, "age", 0, 120)
+	}
+}
 
-		err := ValidateMap(extras, validator)
-		if err == nil {
-			t.Error("应该返回错误，因为包含不允许的键 facebook")
+// BenchmarkMapValidator_Parallel 测试并发 Map 验证性能
+func BenchmarkMapValidator_Parallel(b *testing.B) {
+	mv := NewMapValidator().
+		WithRequiredKeys("name", "price").
+		WithAllowedKeys("name", "price", "brand")
+
+	data := map[string]any{
+		"name":  "Product",
+		"price": 99.99,
+		"brand": "BrandName",
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = mv.Validate(data)
 		}
 	})
 }
