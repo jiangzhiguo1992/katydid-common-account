@@ -24,9 +24,10 @@ import (
 // - 建议在业务层使用 sync.RWMutex 保护
 //
 // 注意事项：
-// - 避免存储过大的数据（影响数据库性能）
+// - 避免存储过大的数据（影响数据库性能，建议单条记录不超过 64KB）
 // - 类型转换失败时返回零值和 false
 // - nil 和空 map 在序列化时行为一致
+// - 键名不能为空字符串，否则会被忽略
 type Extras map[string]any
 
 // NewExtras 创建一个新的扩展字段实例
@@ -49,7 +50,9 @@ func NewExtras() Extras {
 //
 // 使用场景：预知字段数量时，减少扩容开销
 // 参数：
-//   - capacity: 预期的键值对数量
+//   - capacity: 预期的键值对数量（负数或零会创建空 map）
+//
+// 性能优化：预分配容量可避免多次动态扩容，提升插入性能
 //
 // 示例：
 //
@@ -73,8 +76,14 @@ func NewExtrasWithCapacity(capacity int) Extras {
 //	extras.Set("age", 25)
 //	extras.Set("tags", []string{"vip", "active"})
 //
-// 注意：value 为 nil 时仍会存储 nil 值，使用 SetOrDel 可自动删除
+// 注意：
+// - value 为 nil 时仍会存储 nil 值，使用 SetOrDel 可自动删除
+// - 空字符串键名会被忽略（防御性检查）
 func (e Extras) Set(key string, value any) {
+	// 防御性检查：忽略空键名，避免无效数据
+	if key == "" {
+		return
+	}
 	e[key] = value
 }
 
@@ -88,8 +97,13 @@ func (e Extras) Set(key string, value any) {
 //
 //	extras.SetOrDel("optional", getValue())  // 值为 nil 时自动删除
 //
-// 业务优势：避免存储无意义的 nil 值，节省存储空间
+// 业务优势：避免存储无意义的 nil 值，节省存储空间和序列化开销
 func (e Extras) SetOrDel(key string, value any) {
+	// 防御性检查：忽略空键名
+	if key == "" {
+		return
+	}
+
 	if value == nil {
 		delete(e, key)
 		return
@@ -107,7 +121,7 @@ func (e Extras) SetOrDel(key string, value any) {
 //
 //	extras.Delete("temporary_field")
 //
-// 注意：删除不存在的键不会报错
+// 注意：删除不存在的键不会报错（幂等操作）
 func (e Extras) Delete(key string) {
 	delete(e, key)
 }
@@ -172,6 +186,11 @@ func (e Extras) GetStringSlice(key string) ([]string, bool) {
 		case []string:
 			return val, true
 		case []any:
+			// 空切片优化：避免不必要的内存分配
+			if len(val) == 0 {
+				return []string{}, true
+			}
+
 			// 预分配切片，避免多次扩容
 			strs := make([]string, 0, len(val))
 			for _, item := range val {
@@ -197,7 +216,7 @@ func (e Extras) GetStringSlice(key string) ([]string, bool) {
 // 支持的类型转换：
 // - int, int8, int16, int32, int64 → int
 // - uint, uint8, uint16, uint32, uint64 → int（需在 int 范围内）
-// - float32, float64 → int（仅支持整数值）
+// - float32, float64 → int（仅支持整数值，如 1.0 可以，1.5 不行）
 //
 // 返回值：
 // - 成功：返回转换后的 int 值和 true

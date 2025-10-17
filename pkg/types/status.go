@@ -21,8 +21,9 @@ import (
 //
 // 注意事项：
 // - 避免使用负数作为状态值（会导致符号位冲突）
-// - 自定义状态位应从 StatusExpand51 开始
+// - 自定义状态位应从 StatusExpand51 开始左移
 // - 数据库索引：int64 类型支持高效索引查询
+// - 所有修改方法都需要指针接收者才能生效
 type Status int64
 
 // 预定义的常用状态位
@@ -133,9 +134,9 @@ func (s Status) IsValid() bool {
 //
 //	var s Status
 //	s.Set(StatusUserDisabled)  // 设置用户禁用状态
-//	s.Set(StatusSysHidden)     // 追加系统隐藏状态
+//	s.Set(StatusSysHidden)     // 追加系统隐藏状态（保留原有状态）
 //
-// 注意：此方法会修改接收者本身，传入指针才能生效
+// 注意：此方法会修改接收者本身，必须传入指针才能生效
 func (s *Status) Set(flag Status) {
 	// 使用按位或运算，将指定位设置为 1
 	// 例如：0000 | 0010 = 0010
@@ -151,7 +152,7 @@ func (s *Status) Set(flag Status) {
 // 示例：
 //
 //	s := StatusUserDisabled | StatusSysHidden
-//	s.Unset(StatusUserDisabled)  // 仅移除用户禁用状态
+//	s.Unset(StatusUserDisabled)  // 仅移除用户禁用状态，保留系统隐藏状态
 //
 // 注意：使用按位清除运算（AND NOT），精确移除指定位
 func (s *Status) Unset(flag Status) {
@@ -189,7 +190,7 @@ func (s *Status) Toggle(flag Status) {
 // 示例：
 //
 //	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-//	s.Merge(StatusUserDisabled | StatusAdmDeleted)  // 只保留这两个状态
+//	s.Merge(StatusUserDisabled | StatusAdmDeleted)  // 只保留这两个状态，清除 StatusSysHidden
 //
 // 警告：此操作会清除所有未在 flag 中指定的状态位
 func (s *Status) Merge(flag Status) {
@@ -208,7 +209,7 @@ func (s *Status) Merge(flag Status) {
 //
 //	s := StatusUserDisabled | StatusSysHidden
 //	s.Contain(StatusUserDisabled)                      // true
-//	s.Contain(StatusUserDisabled | StatusSysHidden)    // true
+//	s.Contain(StatusUserDisabled | StatusSysHidden)    // true（同时包含两个）
 //	s.Contain(StatusUserDisabled | StatusAdmDeleted)   // false（缺少 StatusAdmDeleted）
 //
 // 注意：与 HasAll 功能相同，但参数为单个 Status 值
@@ -338,7 +339,7 @@ func (s *Status) SetMultiple(flags ...Status) {
 // 示例：
 //
 //	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-//	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)
+//	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)  // 只保留 StatusAdmDeleted
 //
 // 性能优化：预先合并所有标志，进行单次 AND NOT 运算
 func (s *Status) UnsetMultiple(flags ...Status) {
@@ -458,6 +459,7 @@ func (s Status) Value() (driver.Value, error) {
 // 支持的数据库类型：
 // - int64: 标准整数类型
 // - int: Go 原生整数类型
+// - uint64: 无符号整数类型（需范围检查）
 // - []byte: JSON 格式的数字
 //
 // 时间复杂度：O(1)，除 []byte 需要 JSON 解析

@@ -1,513 +1,537 @@
-# Status 状态类型
+# Status 状态位管理模块
 
 ## 概述
 
-`Status` 是一个基于位运算的高性能状态管理类型，支持多状态叠加和高效查询。采用 int64 类型，支持最多 63 种状态位的组合。
+`Status` 是一个基于位运算的状态管理类型，支持多状态并存和高效的状态检查。使用 `int64` 作为底层类型，最多支持 63 种状态位的组合。
 
 ## 核心特性
 
-### 1. 高性能设计
-- **内存占用**：固定 8 字节
-- **时间复杂度**：所有操作 O(1)
-- **零内存分配**：位运算无需额外分配
-- **线程安全**：值类型天然线程安全
-
-### 2. 状态分层设计
-
-#### 三层管理结构
-- **System (系统级)**：最高优先级，系统自动管理
-- **Admin (管理员级)**：中等优先级，管理员手动操作
-- **User (用户级)**：最低优先级，用户自主控制
-
-#### 四类状态
-1. **Deleted (删除)**：软删除标记
-2. **Disabled (禁用)**：暂时不可用
-3. **Hidden (隐藏)**：不对外展示
-4. **Unverified (未验证)**：需要验证
-
-### 3. 预定义状态常量
-
-```go
-// 基础状态位 (位 0-11)
-StatusSysDeleted      // 系统删除
-StatusAdmDeleted      // 管理员删除
-StatusUserDeleted     // 用户删除
-StatusSysDisabled     // 系统禁用
-StatusAdmDisabled     // 管理员禁用
-StatusUserDisabled    // 用户禁用
-StatusSysHidden       // 系统隐藏
-StatusAdmHidden       // 管理员隐藏
-StatusUserHidden      // 用户隐藏
-StatusSysUnverified   // 系统未验证
-StatusAdmUnverified   // 管理员未验证
-StatusUserUnverified  // 用户未验证
-
-// 组合常量 (性能优化)
-StatusAllDeleted      // 所有删除状态
-StatusAllDisabled     // 所有禁用状态
-StatusAllHidden       // 所有隐藏状态
-StatusAllUnverified   // 所有未验证状态
-StatusAllSystem       // 所有系统级状态
-StatusAllAdmin        // 所有管理员级状态
-StatusAllUser         // 所有用户级状态
-
-// 扩展位
-StatusExpand51        // 扩展起始位（位 12 开始）
-```
-
-## 使用示例
-
-### 基础操作
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/katydid/katydid-common-account/pkg/types"
-)
-
-func main() {
-    // 创建状态
-    var status types.Status
-    
-    // 设置单个状态
-    status.Set(types.StatusUserDisabled)
-    fmt.Printf("状态值: %s\n", status) // 输出: Status(32)
-    
-    // 追加多个状态
-    status.Set(types.StatusSysHidden)
-    status.Set(types.StatusAdmUnverified)
-    
-    // 批量设置
-    var status2 types.Status
-    status2.SetMultiple(
-        types.StatusUserDisabled,
-        types.StatusSysHidden,
-        types.StatusAdmUnverified,
-    )
-    
-    // 检查状态
-    if status.Contain(types.StatusUserDisabled) {
-        fmt.Println("包含用户禁用状态")
-    }
-    
-    // 移除状态
-    status.Unset(types.StatusUserDisabled)
-    
-    // 批量移除
-    status.UnsetMultiple(types.StatusSysHidden, types.StatusAdmUnverified)
-    
-    // 清除所有状态
-    status.Clear()
-}
-```
-
-### 状态检查
-
-```go
-// 检查任意一个状态
-if status.HasAny(types.StatusUserDisabled, types.StatusAdmDisabled) {
-    fmt.Println("被禁用了（用户或管理员）")
-}
-
-// 检查所有状态
-if status.HasAll(types.StatusUserDisabled, types.StatusSysHidden) {
-    fmt.Println("既被禁用又被隐藏")
-}
-
-// 使用预定义组合常量（性能更优）
-if status.Contain(types.StatusAllDeleted) {
-    fmt.Println("检查所有删除状态")
-}
-```
-
-### 业务场景方法
-
-```go
-// 业务可用性检查
-if status.CanEnable() {
-    fmt.Println("可以启用")
-}
-
-if status.CanVisible() {
-    fmt.Println("可以对外展示")
-}
-
-if status.CanVerified() {
-    fmt.Println("已通过验证，完全可用")
-}
-
-// 业务状态检查
-if status.IsDeleted() {
-    fmt.Println("已被删除")
-}
-
-if status.IsDisable() {
-    fmt.Println("已被禁用")
-}
-
-if status.IsHidden() {
-    fmt.Println("已被隐藏")
-}
-
-if status.IsUnverified() {
-    fmt.Println("未通过验证")
-}
-```
-
-### 数据库集成
-
-```go
-import (
-    "database/sql"
-    "github.com/katydid/katydid-common-account/pkg/types"
-)
-
-type User struct {
-    ID     int64
-    Name   string
-    Status types.Status // 自动支持数据库读写
-}
-
-func main() {
-    db, _ := sql.Open("mysql", "dsn")
-    
-    // 写入数据库
-    user := User{
-        ID:     1,
-        Name:   "张三",
-        Status: types.StatusUserDisabled | types.StatusSysHidden,
-    }
-    db.Exec("INSERT INTO users (id, name, status) VALUES (?, ?, ?)",
-        user.ID, user.Name, user.Status)
-    
-    // 从数据库读取
-    var loadedUser User
-    db.QueryRow("SELECT id, name, status FROM users WHERE id = ?", 1).
-        Scan(&loadedUser.ID, &loadedUser.Name, &loadedUser.Status)
-    
-    fmt.Printf("用户状态: %s\n", loadedUser.Status)
-}
-```
-
-### JSON 序列化
-
-```go
-import (
-    "encoding/json"
-    "fmt"
-    "github.com/katydid/katydid-common-account/pkg/types"
-)
-
-type Response struct {
-    Code   int          `json:"code"`
-    Status types.Status `json:"status"`
-}
-
-func main() {
-    // 序列化
-    resp := Response{
-        Code:   200,
-        Status: types.StatusUserDisabled | types.StatusSysHidden,
-    }
-    data, _ := json.Marshal(resp)
-    fmt.Println(string(data))
-    // 输出: {"code":200,"status":96}
-    
-    // 反序列化
-    var loaded Response
-    json.Unmarshal(data, &loaded)
-    fmt.Printf("状态: %s\n", loaded.Status)
-}
-```
-
-### 数据库查询示例
-
-```sql
--- 查询所有已删除的用户（任意级别）
--- StatusAllDeleted = 7 (StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted)
-SELECT * FROM users WHERE status & 7 != 0;
-
--- 查询未被删除且未被禁用的用户
--- StatusAllDeleted = 7, StatusAllDisabled = 56
-SELECT * FROM users WHERE status & 63 = 0;
-
--- 查询用户级禁用的用户
--- StatusUserDisabled = 32
-SELECT * FROM users WHERE status & 32 = 32;
-
--- 查询可见的用户（未删除、未禁用、未隐藏）
--- StatusAllDeleted | StatusAllDisabled | StatusAllHidden = 511
-SELECT * FROM users WHERE status & 511 = 0;
-```
-
-### 自定义扩展状态
-
-```go
-const (
-    // 基于 StatusExpand51 扩展自定义状态
-    StatusCustomLocked   types.Status = types.StatusExpand51 << 0  // 自定义：锁定
-    StatusCustomFrozen   types.Status = types.StatusExpand51 << 1  // 自定义：冻结
-    StatusCustomPending  types.Status = types.StatusExpand51 << 2  // 自定义：待处理
-)
-
-func main() {
-    var status types.Status
-    status.Set(StatusCustomLocked)
-    
-    if status.Contain(StatusCustomLocked) {
-        fmt.Println("账户已锁定")
-    }
-}
-```
-
-## 设计原则
-
 ### 1. 位运算设计
+- 基于 `int64`，固定 8 字节内存占用
+- 支持多状态叠加（位或运算）
+- O(1) 时间复杂度的状态检查
+- 无内存分配的纯位运算
 
-```
-位位置    状态              值
-0         StatusSysDeleted   1
-1         StatusAdmDeleted   2
-2         StatusUserDeleted  4
-3         StatusSysDisabled  8
-4         StatusAdmDisabled  16
-5         StatusUserDisabled 32
-6         StatusSysHidden    64
-7         StatusAdmHidden    128
-8         StatusUserHidden   256
-9         StatusSysUnverified 512
-10        StatusAdmUnverified 1024
-11        StatusUserUnverified 2048
-12-62     扩展位（自定义）
-63        符号位（不可用）
-```
+### 2. 分层状态管理
+- **System（系统级）**: 最高优先级，系统自动管理
+- **Admin（管理员级）**: 中等优先级，管理员手动操作
+- **User（用户级）**: 最低优先级，用户自主控制
 
-### 2. 业务规则
+### 3. 四类预定义状态
+- **Deleted（删除）**: 软删除标记，支持回收站
+- **Disabled（禁用）**: 暂时不可用，可恢复
+- **Hidden（隐藏）**: 不对外展示
+- **Unverified（未验证）**: 等待验证或审核
 
-```
-CanEnable()    = !IsDeleted() && !IsDisable()
-CanVisible()   = CanEnable() && !IsHidden()
-CanVerified()  = CanVisible() && !IsUnverified()
-```
+### 4. 业务语义方法
+- `CanEnable()`: 检查是否可启用
+- `CanVisible()`: 检查是否可见
+- `CanVerified()`: 检查是否已验证
 
-### 3. 性能优化建议
+## 快速开始
 
-1. **使用预定义组合常量**
-   ```go
-   // 推荐：使用组合常量
-   if status.Contain(types.StatusAllDeleted) {
-       // ...
-   }
-   
-   // 不推荐：手动组合
-   if status.HasAny(types.StatusSysDeleted, types.StatusAdmDeleted, types.StatusUserDeleted) {
-       // ...
-   }
-   ```
-
-2. **批量操作优于单次操作**
-   ```go
-   // 推荐：批量设置
-   status.SetMultiple(types.StatusUserDisabled, types.StatusSysHidden)
-   
-   // 不推荐：多次单独设置
-   status.Set(types.StatusUserDisabled)
-   status.Set(types.StatusSysHidden)
-   ```
-
-3. **直接位运算最快**
-   ```go
-   // 最快：直接位运算
-   if status & types.StatusAllDeleted != 0 {
-       // ...
-   }
-   
-   // 次之：方法调用
-   if status.IsDeleted() {
-       // ...
-   }
-   ```
-
-## 错误处理
-
-### 运行时验证
+### 基本用法
 
 ```go
-// 验证状态值合法性
-status := types.Status(12345)
-if !status.IsValid() {
-    log.Printf("错误：状态值 %d 不合法", status)
+// 创建状态
+var status types.Status
+
+// 设置状态（追加）
+status.Set(types.StatusUserDisabled)
+status.Set(types.StatusSysHidden)
+
+// 检查状态
+if status.Contain(types.StatusUserDisabled) {
+    fmt.Println("用户已禁用")
 }
 
-// 数据库读取时自动验证
-var status types.Status
-err := status.Scan(int64(-1))  // 返回错误：负数不允许
-if err != nil {
-    log.Printf("扫描错误: %v", err)
+// 移除状态
+status.Unset(types.StatusUserDisabled)
+
+// 切换状态
+status.Toggle(types.StatusUserHidden)
+```
+
+### 状态常量
+
+#### 删除状态（位 0-2）
+```go
+types.StatusSysDeleted   // 系统删除：系统自动标记，通常不可恢复
+types.StatusAdmDeleted   // 管理员删除：管理员操作，可能支持恢复
+types.StatusUserDeleted  // 用户删除：用户主动删除，通常可恢复
+```
+
+#### 禁用状态（位 3-5）
+```go
+types.StatusSysDisabled  // 系统禁用：系统检测异常后自动禁用
+types.StatusAdmDisabled  // 管理员禁用：管理员手动禁用
+types.StatusUserDisabled // 用户禁用：用户主动禁用（如账号冻结）
+```
+
+#### 隐藏状态（位 6-8）
+```go
+types.StatusSysHidden    // 系统隐藏：系统根据规则自动隐藏
+types.StatusAdmHidden    // 管理员隐藏：管理员手动隐藏内容
+types.StatusUserHidden   // 用户隐藏：用户设置为私密/不公开
+```
+
+#### 未验证状态（位 9-11）
+```go
+types.StatusSysUnverified  // 系统未验证：等待系统自动验证
+types.StatusAdmUnverified  // 管理员未验证：等待管理员审核
+types.StatusUserUnverified // 用户未验证：等待用户完成验证（如邮箱）
+```
+
+### 预定义组合常量
+
+```go
+// 所有删除状态
+types.StatusAllDeleted = StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted
+
+// 所有禁用状态
+types.StatusAllDisabled = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
+
+// 所有隐藏状态
+types.StatusAllHidden = StatusSysHidden | StatusAdmHidden | StatusUserHidden
+
+// 所有未验证状态
+types.StatusAllUnverified = StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
+
+// 所有系统级状态
+types.StatusAllSystem = StatusSysDeleted | StatusSysDisabled | StatusSysHidden | StatusSysUnverified
+
+// 所有管理员级状态
+types.StatusAllAdmin = StatusAdmDeleted | StatusAdmDisabled | StatusAdmHidden | StatusAdmUnverified
+
+// 所有用户级状态
+types.StatusAllUser = StatusUserDeleted | StatusUserDisabled | StatusUserHidden | StatusUserUnverified
+```
+
+## 核心操作
+
+### 1. 设置和移除状态
+
+```go
+var s types.Status
+
+// Set: 追加状态（保留原有状态）
+s.Set(types.StatusUserDisabled)    // s = 32
+s.Set(types.StatusSysHidden)        // s = 32 | 64 = 96
+
+// Unset: 移除指定状态
+s.Unset(types.StatusUserDisabled)   // s = 64
+
+// Toggle: 切换状态（有则删除，无则添加）
+s.Toggle(types.StatusUserHidden)    // 首次：添加
+s.Toggle(types.StatusUserHidden)    // 再次：移除
+
+// Clear: 清除所有状态
+s.Clear()                            // s = 0
+```
+
+### 2. 批量操作
+
+```go
+var s types.Status
+
+// SetMultiple: 批量设置
+s.SetMultiple(
+    types.StatusUserDisabled,
+    types.StatusSysHidden,
+    types.StatusAdmUnverified,
+)
+
+// UnsetMultiple: 批量移除
+s.UnsetMultiple(
+    types.StatusUserDisabled,
+    types.StatusSysHidden,
+)
+```
+
+### 3. 状态检查
+
+```go
+s := types.StatusUserDisabled | types.StatusSysHidden
+
+// Contain: 检查是否包含所有指定状态
+if s.Contain(types.StatusUserDisabled) {
+    fmt.Println("包含用户禁用状态")
 }
 
-// JSON 反序列化时自动验证
-var status types.Status
-err := json.Unmarshal([]byte("-1"), &status)  // 返回错误：负数不允许
-if err != nil {
-    log.Printf("反序列化错误: %v", err)
+// HasAny: 检查是否包含任意一个状态
+if s.HasAny(types.StatusUserDisabled, types.StatusAdmDisabled) {
+    fmt.Println("包含至少一个禁用状态")
+}
+
+// HasAll: 检查是否包含所有状态
+if s.HasAll(types.StatusUserDisabled, types.StatusSysHidden) {
+    fmt.Println("同时包含两个状态")
+}
+
+// Equal: 检查状态是否完全相等
+s2 := types.StatusUserDisabled | types.StatusSysHidden
+if s.Equal(s2) {
+    fmt.Println("状态完全一致")
 }
 ```
 
-### 常见错误信息
+### 4. 业务语义检查
 
-- `invalid Status value: negative number %d is not allowed (sign bit conflict)` - 负数值冲突
-- `invalid Status value: %d exceeds maximum allowed value %d (overflow)` - 值溢出
-- `failed to unmarshal Status from JSON: invalid format, expected integer number` - JSON 格式错误
-- `cannot scan type %T into Status: unsupported database type` - 不支持的数据库类型
+```go
+var s types.Status
+
+// IsDeleted: 是否被删除（任意级别）
+if s.IsDeleted() {
+    // 不应该访问或展示
+}
+
+// IsDisable: 是否被禁用（任意级别）
+if s.IsDisable() {
+    // 暂时不可用
+}
+
+// IsHidden: 是否被隐藏（任意级别）
+if s.IsHidden() {
+    // 不对外展示
+}
+
+// IsUnverified: 是否未验证（任意级别）
+if s.IsUnverified() {
+    // 需要验证或审核
+}
+
+// CanEnable: 是否可启用（未删除且未禁用）
+if s.CanEnable() {
+    // 可以启用该功能
+}
+
+// CanVisible: 是否可见（可启用且未隐藏）
+if s.CanVisible() {
+    // 可以对外展示
+}
+
+// CanVerified: 是否已验证（可见且已验证）
+if s.CanVerified() {
+    // 完全可用
+}
+```
+
+## 数据库使用
+
+### 在模型中使用
+
+```go
+type Article struct {
+    ID        uint64       `gorm:"primaryKey"`
+    Title     string       `gorm:"size:200"`
+    Status    types.Status `gorm:"type:bigint;index"` // 使用索引提升查询性能
+    CreatedAt time.Time
+}
+
+// 创建文章（默认状态）
+article := &Article{
+    Title:  "示例文章",
+    Status: types.StatusNone, // 正常状态
+}
+db.Create(article)
+
+// 管理员隐藏文章
+article.Status.Set(types.StatusAdmHidden)
+db.Save(article)
+
+// 查询可见的文章
+var articles []Article
+db.Where("status & ? = 0", types.StatusAllHidden).Find(&articles)
+
+// 查询已删除的文章
+db.Where("status & ? != 0", types.StatusAllDeleted).Find(&articles)
+
+// 查询正常状态的文章（未删除、未禁用、未隐藏）
+normalMask := types.StatusAllDeleted | types.StatusAllDisabled | types.StatusAllHidden
+db.Where("status & ? = 0", normalMask).Find(&articles)
+```
+
+### 状态查询示例
+
+```go
+// 1. 查询所有正常可见的文章
+db.Model(&Article{}).Where("status = ?", types.StatusNone).Find(&articles)
+
+// 2. 查询被管理员操作过的文章（任意管理员级状态）
+db.Model(&Article{}).Where("status & ? != 0", types.StatusAllAdmin).Find(&articles)
+
+// 3. 查询等待审核的文章
+db.Model(&Article{}).Where("status & ? != 0", types.StatusAllUnverified).Find(&articles)
+
+// 4. 排除已删除的文章
+db.Model(&Article{}).Where("status & ? = 0", types.StatusAllDeleted).Find(&articles)
+
+// 5. 查询用户自己删除的文章（回收站）
+db.Model(&Article{}).Where("status & ? = ?", 
+    types.StatusAllDeleted, types.StatusUserDeleted).Find(&articles)
+```
+
+## 业务场景示例
+
+### 场景1：内容审核流程
+
+```go
+// 用户发布文章，默认需要审核
+article := &Article{
+    Title:  "新文章",
+    Status: types.StatusAdmUnverified, // 等待管理员审核
+}
+db.Create(article)
+
+// 管理员审核通过
+article.Status.Unset(types.StatusAdmUnverified)
+db.Save(article)
+
+// 管理员审核不通过并隐藏
+article.Status.Set(types.StatusAdmHidden)
+article.Status.Unset(types.StatusAdmUnverified)
+db.Save(article)
+```
+
+### 场景2：用户权限管理
+
+```go
+// 系统检测到异常行为，自动禁用账号
+user.Status.Set(types.StatusSysDisabled)
+db.Save(user)
+
+// 用户申诉，管理员解除禁用
+user.Status.Unset(types.StatusSysDisabled)
+db.Save(user)
+
+// 检查用户是否可以登录
+if !user.Status.CanEnable() {
+    return errors.New("账号已被禁用或删除")
+}
+```
+
+### 场景3：软删除和回收站
+
+```go
+// 用户删除文章（进入回收站）
+article.Status.Set(types.StatusUserDeleted)
+db.Save(article)
+
+// 查询回收站中的文章
+var deletedArticles []Article
+db.Where("status & ? = ?", 
+    types.StatusAllDeleted, 
+    types.StatusUserDeleted,
+).Find(&deletedArticles)
+
+// 从回收站恢复
+article.Status.Unset(types.StatusUserDeleted)
+db.Save(article)
+
+// 管理员永久删除（无法恢复）
+article.Status.Set(types.StatusSysDeleted)
+db.Save(article)
+// 或直接物理删除
+db.Delete(article)
+```
+
+### 场景4：内容可见性控制
+
+```go
+// 用户设置文章为私密
+article.Status.Set(types.StatusUserHidden)
+
+// 检查是否对外可见
+if article.Status.CanVisible() {
+    // 展示文章
+} else {
+    // 隐藏或显示"内容不可见"
+}
+
+// 管理员强制公开（移除所有隐藏状态）
+article.Status.Unset(types.StatusUserHidden)
+article.Status.Unset(types.StatusAdmHidden)
+article.Status.Unset(types.StatusSysHidden)
+```
+
+## 自定义状态扩展
+
+```go
+// 从位 12 开始定义自定义状态
+const (
+    // 业务自定义状态
+    StatusCustom1 types.Status = types.StatusExpand51 << 0  // 位 12
+    StatusCustom2 types.Status = types.StatusExpand51 << 1  // 位 13
+    StatusCustom3 types.Status = types.StatusExpand51 << 2  // 位 14
+    // ... 最多可以定义 51 个自定义状态（位 12-62）
+)
+
+// 使用自定义状态
+var s types.Status
+s.Set(StatusCustom1)
+if s.Contain(StatusCustom1) {
+    // 处理自定义状态
+}
+```
+
+## 性能优化
+
+### 1. 使用预定义组合常量
+
+```go
+// 推荐：使用预定义常量（单次位运算）
+if status.HasAny(types.StatusAllDeleted) {
+    // 检查任意删除状态
+}
+
+// 不推荐：每次调用都要合并（多次位运算）
+if status.HasAny(
+    types.StatusSysDeleted,
+    types.StatusAdmDeleted,
+    types.StatusUserDeleted,
+) {
+    // 性能略低
+}
+```
+
+### 2. 数据库索引优化
+
+```go
+// 在 status 字段上创建索引
+type Article struct {
+    Status types.Status `gorm:"type:bigint;index"` // 添加索引
+}
+
+// 使用位运算查询时，索引仍然有效
+db.Where("status & ? = 0", types.StatusAllDeleted).Find(&articles)
+```
+
+### 3. 批量操作
+
+```go
+// 推荐：批量设置
+s.SetMultiple(status1, status2, status3)
+
+// 不推荐：多次单独设置
+s.Set(status1)
+s.Set(status2)
+s.Set(status3)
+```
 
 ## 最佳实践
 
-### 1. 数据库设计
-
-```sql
--- 建表时使用 BIGINT 类型
-CREATE TABLE users (
-    id BIGINT PRIMARY KEY,
-    name VARCHAR(100),
-    status BIGINT NOT NULL DEFAULT 0,
-    INDEX idx_status (status)  -- 支持高效索引查询
-);
-```
-
-### 2. API 设计
+### 1. 状态分层使用
 
 ```go
-// 请求结构
-type UpdateUserStatusRequest struct {
-    UserID int64        `json:"user_id"`
-    Status types.Status `json:"status"`
+// 系统级：自动化操作
+if detectSpam(content) {
+    status.Set(types.StatusSysHidden)
 }
 
-// 响应结构
-type UserResponse struct {
-    ID     int64        `json:"id"`
-    Name   string       `json:"name"`
-    Status types.Status `json:"status"`
-    
-    // 可选：提供更友好的状态描述
-    CanEnable   bool `json:"can_enable"`
-    CanVisible  bool `json:"can_visible"`
-    CanVerified bool `json:"can_verified"`
+// 管理员级：人工干预
+if adminReview.IsRejected() {
+    status.Set(types.StatusAdmDeleted)
 }
 
-func (r *UserResponse) FromUser(user *User) {
-    r.ID = user.ID
-    r.Name = user.Name
-    r.Status = user.Status
-    r.CanEnable = user.Status.CanEnable()
-    r.CanVisible = user.Status.CanVisible()
-    r.CanVerified = user.Status.CanVerified()
+// 用户级：用户自主控制
+if user.WantsPrivate() {
+    status.Set(types.StatusUserHidden)
 }
 ```
 
-### 3. 日志记录
+### 2. 业务语义优先
 
 ```go
-import "log"
+// 推荐：使用业务语义方法
+if article.Status.CanVisible() {
+    renderArticle(article)
+}
 
-// 记录状态变化
-func UpdateUserStatus(userID int64, oldStatus, newStatus types.Status) {
-    log.Printf("[状态变更] 用户ID: %d, 旧状态: %s, 新状态: %s",
-        userID, oldStatus, newStatus)
-    
-    // 可以进一步分析变更内容
-    if !oldStatus.IsDeleted() && newStatus.IsDeleted() {
-        log.Printf("[警告] 用户 %d 被标记为删除", userID)
-    }
+// 不推荐：直接位运算判断
+if article.Status & types.StatusAllHidden == 0 && 
+   article.Status & types.StatusAllDeleted == 0 {
+    renderArticle(article)
 }
 ```
 
-### 4. 测试建议
+### 3. 状态验证
 
 ```go
-func TestUserStatus(t *testing.T) {
-    user := &User{Status: types.StatusNone}
-    
-    // 测试状态设置
-    user.Status.Set(types.StatusUserDisabled)
-    if !user.Status.Contain(types.StatusUserDisabled) {
-        t.Error("设置用户禁用状态失败")
-    }
-    
-    // 测试业务逻辑
-    if user.Status.CanEnable() {
-        t.Error("禁用状态不应该可以启用")
-    }
+// 从外部输入创建状态时，进行验证
+status := types.Status(userInput)
+if !status.IsValid() {
+    return errors.New("invalid status value")
 }
 ```
 
-## 性能基准
-
-```
-BenchmarkStatusSet-8              1000000000    0.3 ns/op    0 B/op    0 allocs/op
-BenchmarkStatusHasAny-8           1000000000    1.2 ns/op    0 B/op    0 allocs/op
-BenchmarkStatusHasAll-8           1000000000    1.2 ns/op    0 B/op    0 allocs/op
-BenchmarkStatusIsDeleted-8        1000000000    0.5 ns/op    0 B/op    0 allocs/op
-BenchmarkStatusMarshalJSON-8      50000000      30 ns/op     8 B/op    1 allocs/op
-BenchmarkStatusUnmarshalJSON-8    30000000      45 ns/op     0 B/op    0 allocs/op
-```
-
-## 注意事项
-
-1. **不要使用负数**：负数会导致符号位冲突，运行时会返回错误
-2. **扩展位限制**：自定义状态位不要超过位 62（最大有效位）
-3. **数据库类型**：确保数据库字段使用 BIGINT 类型
-4. **并发安全**：值类型天然并发安全，但指针操作需要加锁
-5. **位运算理解**：建议团队成员理解基本的位运算知识
-
-## 迁移指南
-
-### 从字符串状态迁移
+### 4. 错误处理
 
 ```go
-// 旧代码：字符串状态
-type User struct {
-    Status string // "active", "disabled", "deleted"
+// 数据库读取时检查错误
+var article Article
+if err := db.First(&article, id).Error; err != nil {
+    return err
 }
 
-// 新代码：位运算状态
-type User struct {
-    Status types.Status
-}
-
-// 迁移函数
-func MigrateStatus(oldStatus string) types.Status {
-    switch oldStatus {
-    case "active":
-        return types.StatusNone
-    case "disabled":
-        return types.StatusUserDisabled
-    case "deleted":
-        return types.StatusUserDeleted
-    default:
-        return types.StatusNone
-    }
+// 验证状态是否合法
+if !article.Status.IsValid() {
+    log.Warn("检测到非法状态值", article.Status)
 }
 ```
 
 ## 常见问题
 
-**Q: 为什么使用 int64 而不是 uint64？**
-A: int64 更兼容数据库和 JSON，且 63 位已经足够使用。
+### Q: 为什么 Set 方法需要指针接收者？
+A: 因为需要修改状态本身。值接收者只会修改副本，不会影响原始值。
 
-**Q: 可以同时设置多个级别的相同类型状态吗？**
-A: 可以，例如同时设置系统删除和用户删除，这在某些场景下是合理的。
+```go
+// 正确用法
+var s types.Status
+s.Set(types.StatusUserDisabled) // s 被修改
 
-**Q: 如何在前端展示状态？**
-A: 建议后端返回状态数值的同时，提供友好的布尔字段（如 `can_enable`）。
+// 错误用法（编译错误）
+s := types.Status(0)
+s.Set(types.StatusUserDisabled) // 这样写会修改副本，不影响 s
+```
 
-**Q: 性能如何？**
-A: 所有操作都是 O(1) 时间复杂度，零内存分配，性能极高。
+### Q: 如何判断状态是否为"正常"？
+A: 有两种方式：
+```go
+// 方式1：检查是否为零值
+if status == types.StatusNone {
+    // 完全正常
+}
 
-## 版本历史
+// 方式2：检查是否可用
+if status.CanVerified() {
+    // 业务上可用
+}
+```
 
-- **v1.0.0** (2025-10-17): 初始版本，支持基础状态管理和位运算操作
+### Q: 多个状态之间是否有优先级？
+A: 位运算没有优先级概念，所有状态平等。优先级由业务逻辑决定：
 
+```go
+// 业务逻辑示例：删除优先级最高
+if status.IsDeleted() {
+    return "已删除"
+} else if status.IsDisable() {
+    return "已禁用"
+} else if status.IsHidden() {
+    return "已隐藏"
+}
+```
+
+### Q: 为什么不能使用负数？
+A: `int64` 的符号位（第 63 位）为 1 表示负数，会与状态位冲突，导致不可预期的行为。所有状态值应该 >= 0。
+
+### Q: 如何重置所有状态？
+A: 使用 `Clear()` 方法或直接赋值为 `StatusNone`：
+
+```go
+// 方式1
+status.Clear()
+
+// 方式2
+status = types.StatusNone
+```
