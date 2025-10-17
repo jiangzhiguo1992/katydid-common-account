@@ -17,30 +17,23 @@ type MapValidator struct {
 	AllowedKeys []string
 	// KeyValidators 特定键的自定义验证函数
 	// key: 字段名，value: 验证函数
-	KeyValidators map[string]func(value interface{}) error
+	KeyValidators map[string]func(value any) error
 	// allowedKeysMap 内部缓存的允许键 map（优化查找性能，避免每次遍历切片）
 	allowedKeysMap map[string]bool
 	// mu 保护 allowedKeysMap 的并发访问，确保线程安全
 	mu sync.RWMutex
 }
 
-// 验证器配置常量
-const (
-	// 默认最大错误消息长度，防止内存溢出
-	maxErrorMessageLen = 1000
-	// 字符串构建器默认容量
-	stringBuilderCapacity = 256
-)
-
 // ValidateMap 验证 map[string]any 类型的扩展字段
 // 执行必填键验证、允许键验证、自定义键验证等
+// 收集所有错误后统一返回
 // 参数：
 //
 //	kvs: 待验证的 map
 //	v: MapValidator 验证器配置
 //
 // 返回：验证错误，nil 表示验证成功
-func ValidateMap(kvs map[string]any, v *MapValidator) error {
+func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	// 安全检查：如果验证器为 nil，则不进行验证
 	if v == nil {
 		return nil
@@ -50,65 +43,56 @@ func ValidateMap(kvs map[string]any, v *MapValidator) error {
 	if kvs == nil {
 		// 如果有必填键要求，则 nil map 是错误的
 		if len(v.RequiredKeys) > 0 {
-			return fmt.Errorf("map validation failed: map cannot be nil when required keys are specified")
+			return []*FieldError{NewFieldError("map", "required", nil, nil)}
 		}
 		return nil
 	}
 
+	// 创建错误收集器 TODO:GG
+	ctx := NewValidationContext("")
+
 	// 1. 验证必填键
 	if len(v.RequiredKeys) > 0 {
-		if err := v.validateRequiredKeys(kvs); err != nil {
-			return err
-		}
+		v.collectRequiredKeyErrors(kvs, ctx)
 	}
 
-	// 2. 验证允许的键（使用缓存的 map 提高查找性能）
+	// 2. 验证允许的键
 	if len(v.AllowedKeys) > 0 {
-		if err := v.validateAllowedKeys(kvs); err != nil {
-			return err
-		}
+		v.collectAllowedKeyErrors(kvs, ctx)
 	}
 
 	// 3. 执行自定义键验证器
 	if len(v.KeyValidators) > 0 {
-		if err := v.validateCustomKeys(kvs); err != nil {
-			return err
-		}
+		v.collectCustomKeyErrors(kvs, ctx)
+	}
+
+	// 如果有错误，返回验证错误
+	if ctx.HasErrors() {
+		return ctx.Errors
+	} else if len(ctx.Message) != 0 {
+		return []*FieldError{NewFieldError("", ctx.Message, nil, nil)}
 	}
 
 	return nil
 }
 
-// validateRequiredKeys 验证必填键
-// 内部方法，检查 map 中是否包含所有必填的键
-func (mv *MapValidator) validateRequiredKeys(kvs map[string]any) error {
-	var missingKeys []string
-
+// collectRequiredKeyErrors 收集必填键错误
+func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *ValidationContext) {
 	for _, key := range mv.RequiredKeys {
 		if _, exists := kvs[key]; !exists {
-			missingKeys = append(missingKeys, key)
+			ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "required", nil, nil)
 		}
 	}
-
-	if len(missingKeys) > 0 {
-		return fmt.Errorf("map validation failed: missing required keys: %s", strings.Join(missingKeys, ", "))
-	}
-
-	return nil
 }
 
-// validateAllowedKeys 验证允许的键
-// 内部方法，检查 map 中的键是否都在允许列表中
-func (mv *MapValidator) validateAllowedKeys(kvs map[string]any) error {
-	// 使用读锁检查缓存是否存在
+// collectAllowedKeyErrors 收集允许键错误
+func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *ValidationContext) {
 	mv.mu.RLock()
 	allowedMap := mv.allowedKeysMap
 	mv.mu.RUnlock()
 
-	// 如果缓存不存在，创建缓存
 	if allowedMap == nil {
 		mv.mu.Lock()
-		// 双重检查锁定模式，避免并发时重复构建缓存
 		if mv.allowedKeysMap == nil {
 			mv.allowedKeysMap = make(map[string]bool, len(mv.AllowedKeys))
 			for _, key := range mv.AllowedKeys {
@@ -119,37 +103,26 @@ func (mv *MapValidator) validateAllowedKeys(kvs map[string]any) error {
 		mv.mu.Unlock()
 	}
 
-	// 收集所有不允许的键
-	var disallowedKeys []string
 	for key := range kvs {
 		if !allowedMap[key] {
-			disallowedKeys = append(disallowedKeys, key)
+			ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "allowed", nil, nil)
 		}
 	}
-
-	if len(disallowedKeys) > 0 {
-		return fmt.Errorf("map validation failed: contains disallowed keys: %s", strings.Join(disallowedKeys, ", "))
-	}
-
-	return nil
 }
 
-// validateCustomKeys 执行自定义键验证
-// 内部方法，对指定的键执行自定义验证函数
-func (mv *MapValidator) validateCustomKeys(kvs map[string]any) error {
+// collectCustomKeyErrors 收集自定义键验证错误
+func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *ValidationContext) {
 	for key, validatorFunc := range mv.KeyValidators {
 		if value, exists := kvs[key]; exists {
-			// 安全检查：防止验证函数为 nil
 			if validatorFunc == nil {
 				continue
 			}
 
 			if err := validatorFunc(value); err != nil {
-				return fmt.Errorf("map key '%s' validation failed: %w", key, err)
+				ctx.AddErrorByDetail(ctx.NameSpace+"."+key, "custom", nil, nil)
 			}
 		}
 	}
-	return nil
 }
 
 // ValidateMapKey 验证 map[string]any 中特定键的值
@@ -161,7 +134,7 @@ func (mv *MapValidator) validateCustomKeys(kvs map[string]any) error {
 //	validatorFunc: 验证函数
 //
 // 返回：验证错误，nil 表示验证成功
-func ValidateMapKey(kvs map[string]any, key string, validatorFunc func(value interface{}) error) error {
+func ValidateMapKey(kvs map[string]any, key string, validatorFunc func(value any) error) error {
 	// 安全检查：防止 kvs 为 nil
 	if kvs == nil {
 		return nil
@@ -502,7 +475,7 @@ func NewMapValidator() *MapValidator {
 	return &MapValidator{
 		RequiredKeys:  make([]string, 0),
 		AllowedKeys:   make([]string, 0),
-		KeyValidators: make(map[string]func(value interface{}) error),
+		KeyValidators: make(map[string]func(value any) error),
 	}
 }
 
@@ -551,10 +524,10 @@ func (mv *MapValidator) WithAllowedKeys(keys ...string) *MapValidator {
 //	validatorFunc: 验证函数
 //
 // 返回：MapValidator 实例，支持链式调用
-func (mv *MapValidator) WithKeyValidator(key string, validatorFunc func(value interface{}) error) *MapValidator {
+func (mv *MapValidator) WithKeyValidator(key string, validatorFunc func(value any) error) *MapValidator {
 	// 安全检查：确保 KeyValidators map 已初始化
 	if mv.KeyValidators == nil {
-		mv.KeyValidators = make(map[string]func(value interface{}) error)
+		mv.KeyValidators = make(map[string]func(value any) error)
 	}
 
 	// 安全检查：防止空键名
@@ -619,6 +592,6 @@ func (mv *MapValidator) AddAllowedKey(key string) *MapValidator {
 //	kvs: 待验证的 map
 //
 // 返回：验证错误，nil 表示验证成功
-func (mv *MapValidator) Validate(kvs map[string]any) error {
+func (mv *MapValidator) Validate(kvs map[string]any) []*FieldError {
 	return ValidateMap(kvs, mv)
 }

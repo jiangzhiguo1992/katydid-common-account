@@ -10,12 +10,14 @@ import (
 
 // ValidationContext 验证上下文，用于传递验证环境信息
 type ValidationContext struct {
+	// NameSpace 结构体命名空间 TODO:GG
+	NameSpace string `json:"namespace"`
 	// Scene 验证场景
-	Scene ValidateScene
+	Scene ValidateScene `json:"scene"`
 	// Message 总体错误消息（可选）
 	Message string `json:"message,omitempty"`
-	// Errors 所有验证错误的集合
-	Errors []*FieldError `json:"errors"`
+	// Errors 所有验证错误的集合（可选）
+	Errors []*FieldError `json:"errors,omitempty"`
 }
 
 // FieldError 单个字段的验证错误
