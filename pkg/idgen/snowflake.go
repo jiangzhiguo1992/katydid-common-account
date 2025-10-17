@@ -96,7 +96,7 @@ type Snowflake struct {
 	sequence int64
 
 	// 使用atomic计数器统计生成的ID数量（性能监控）
-	idCount atomic.Uint64 // TODO:GG
+	idCount atomic.Uint64
 
 	// 时间提供者函数（依赖倒置原则 - 便于测试）
 	timeFunc func() int64
