@@ -37,8 +37,8 @@ type TestProduct struct {
 	Category string  `json:"category"`
 }
 
-// ValidateRules 实现 Validatable 接口
-func (p *TestProduct) ValidateRules() map[ValidateScene]map[string]string {
+// Rules 实现 RuleProvider 接口
+func (p *TestProduct) Rules() map[ValidateScene]map[string]string {
 	return map[ValidateScene]map[string]string{
 		SceneCreate: {
 			"Name":     "required,min=2,max=100",
@@ -53,85 +53,6 @@ func (p *TestProduct) ValidateRules() map[ValidateScene]map[string]string {
 			"Category": "omitempty,min=2,max=50",
 		},
 	}
-}
-
-// CustomValidate 实现 CustomValidatable 接口
-func (p *TestProduct) CustomValidate(scene ValidateScene) []*FieldError {
-	if scene == SceneCreate {
-		// 电子产品类别验证
-		if p.Category == "electronics" {
-			if errs := p.validateElectronicsExtras(); errs != nil {
-				return errs
-			}
-		}
-
-		// 服装类别验证
-		if p.Category == "clothing" {
-			if errs := p.validateClothingExtras(); errs != nil {
-				return errs
-			}
-		}
-	}
-
-	return nil
-}
-
-// validateElectronicsExtras 验证电子产品的额外属性
-func (p *TestProduct) validateElectronicsExtras() []*FieldError {
-	if p.Extras == nil {
-		return []*FieldError{NewFieldError("extras", "电子产品必须提供额外属性（品牌、保修期等）", nil, nil)}
-	}
-
-	// 验证必填键
-	if err := ValidateMapMustHaveKeys(p.Extras, "brand", "warranty"); err != nil {
-		return []*FieldError{NewFieldError("extras", err.Error(), nil, nil)}
-	}
-
-	// 验证 brand 字段
-	if err := ValidateMapStringKey(p.Extras, "brand", 2, 50); err != nil {
-		return []*FieldError{NewFieldError("extras.brand", err.Error(), nil, nil)}
-	}
-
-	// 验证 warranty 字段
-	if err := ValidateMapIntKey(p.Extras, "warranty", 1, 60); err != nil {
-		return []*FieldError{NewFieldError("extras.warranty", err.Error(), nil, nil)}
-	}
-
-	return nil
-}
-
-// validateClothingExtras 验证服装的额外属性
-func (p *TestProduct) validateClothingExtras() []*FieldError {
-	if p.Extras == nil {
-		return []*FieldError{NewFieldError("extras", "服装必须提供额外属性（尺码、颜色等）", nil, nil)}
-	}
-
-	// 验证必填键
-	if err := ValidateMapMustHaveKeys(p.Extras, "size", "color"); err != nil {
-		return []*FieldError{NewFieldError("extras", err.Error(), nil, nil)}
-	}
-
-	// 验证 size 必须是指定值之一
-	if err := ValidateMapKey(p.Extras, "size", func(value interface{}) error {
-		size, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("size 必须是字符串类型")
-		}
-		validSizes := map[string]bool{"XS": true, "S": true, "M": true, "L": true, "XL": true, "XXL": true}
-		if !validSizes[size] {
-			return fmt.Errorf("size 必须是 XS, S, M, L, XL, XXL 之一")
-		}
-		return nil
-	}); err != nil {
-		return []*FieldError{NewFieldError("extras.size", err.Error(), nil, nil)}
-	}
-
-	// 验证 color 字段
-	if err := ValidateMapStringKey(p.Extras, "color", 2, 20); err != nil {
-		return []*FieldError{NewFieldError("extras.color", err.Error(), nil, nil)}
-	}
-
-	return nil
 }
 
 // TestUserProfile 测试用用户资料模型
@@ -160,10 +81,8 @@ func (up *TestUserProfile) ValidateRules() map[ValidateScene]map[string]string {
 	}
 }
 
-// CustomValidate 验证 Extras 中的社交媒体链接
-func (up *TestUserProfile) CustomValidate(scene ValidateScene) []*FieldError {
-	_ = scene // 避免未使用参数警告
-
+// CrossFieldValidation 验证 Extras 中的社交媒体链接
+func (up *TestUserProfile) BusinessValidation(scene ValidateScene) []*FieldError {
 	if up.Extras == nil || len(up.Extras) == 0 {
 		return nil
 	}
@@ -194,8 +113,8 @@ func (up *TestUserProfile) CustomValidate(scene ValidateScene) []*FieldError {
 		},
 	}
 
-	if err := ValidateMap(up.Extras, extrasValidator); err != nil {
-		return []*FieldError{NewFieldError("extras", err.Error(), nil, nil)}
+	if errs := ValidateMap(up.Extras, extrasValidator); errs != nil {
+		return errs
 	}
 
 	return nil
@@ -412,184 +331,152 @@ func TestUserProfile_NestedValidation(t *testing.T) {
 
 // TestBaseModel_NestedValidation 测试 BaseModel 的嵌套验证
 func TestBaseModel_NestedValidation(t *testing.T) {
-	// 使用 TestUser 模型测试，它会继承验证规则
-	type TestUserNested struct {
-		Username string `json:"username"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
+	// 测试带有嵌入 BaseModel 的结构验证
+	product := &TestProduct{
+		TestBaseModel: TestBaseModel{
+			ID:     1,
+			Status: 1,
+		},
+		Name:     "Test Product",
+		Price:    99.99,
+		Stock:    100,
+		Category: "books",
 	}
 
-	// 实现 Validatable 接口
-	userValidateRules := func() map[ValidateScene]map[string]string {
-		return map[ValidateScene]map[string]string{
-			SceneCreate: {
-				"Username": "required,min=3",
-				"Email":    "required,email",
-				"Password": "required,min=6",
-			},
-		}
+	// 测试更新场景，验证 BaseModel 的 ID 验证规则
+	errs := Validate(product, SceneUpdate)
+	if errs != nil {
+		t.Logf("验证结果: %v", errs)
 	}
 
-	// 创建用户实例
-	user := &TestUserNested{
-		Username: "testuser",
-		Email:    "test@example.com",
-		Password: "password123",
-	}
-
-	// 由于 TestUserNested 没有实现接口，使用 ValidateStruct
-	err := ValidateStruct(user)
-	if err != nil {
-		t.Logf("验证结果: %v", err)
-	}
-
-	// 测试验证规则函数
-	rules := userValidateRules()
-	if rules == nil {
-		t.Error("验证规则不应该为 nil")
+	// 测试创建场景
+	errs = Validate(product, SceneCreate)
+	if errs != nil {
+		t.Logf("创建场景验证结果: %v", errs)
 	}
 }
 
 // TestComplexNestedStructure 测试复杂的嵌套结构
 func TestComplexNestedStructure(t *testing.T) {
-	// 创建一个复杂的嵌套结构
-	type Address struct {
-		Street  string         `json:"street"`
-		City    string         `json:"city"`
-		Country string         `json:"country"`
-		Extras  map[string]any `json:"extras,omitempty"`
+	// 创建一个包含多层嵌套的产品测试
+	type NestedProduct struct {
+		TestProduct
+		RelatedProducts []TestProduct `json:"related_products,omitempty"`
 	}
 
-	type Company struct {
-		Name    string  `json:"name"`
-		Address Address `json:"address"`
-	}
+	// 实现 RuleProvider 接口
+	var _ RuleProvider = (*NestedProduct)(nil)
 
-	type Employee struct {
-		Name    string  `json:"name"`
-		Email   string  `json:"email"`
-		Company Company `json:"company"`
-	}
-
-	// 创建嵌套数据
-	employee := Employee{
-		Name:  "John Doe",
-		Email: "john@example.com",
-		Company: Company{
-			Name: "Tech Corp",
-			Address: Address{
-				Street:  "123 Main St",
-				City:    "San Francisco",
-				Country: "USA",
-				Extras: map[string]any{
-					"zip_code": "94102",
-					"phone":    "+1-555-1234",
-				},
-			},
+	nested := &NestedProduct{
+		TestProduct: TestProduct{
+			Name:     "Main Product",
+			Price:    199.99,
+			Stock:    50,
+			Category: "books",
 		},
 	}
 
-	// 由于没有实现验证接口，使用 ValidateStruct
-	err := ValidateStruct(employee)
-	if err != nil {
-		t.Logf("复杂嵌套结构验证: %v", err)
+	// 验证嵌套结构
+	errs := Validate(&nested.TestProduct, SceneCreate)
+	if errs != nil {
+		t.Logf("复杂嵌套结构验证: %v", errs)
 	}
 }
 
 // TestNestedValidation_WithEmbeddedFields 测试包含嵌入字段的验证
 func TestNestedValidation_WithEmbeddedFields(t *testing.T) {
-	type Timestamps struct {
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
-
-	type Article struct {
-		Timestamps        // 嵌入字段
-		Title      string `json:"title"`
-		Content    string `json:"content"`
-		Author     string `json:"author"`
-	}
-
-	article := Article{
-		Timestamps: Timestamps{
-			CreatedAt: "2024-01-01",
-			UpdatedAt: "2024-01-02",
+	// 测试 TestProduct 本身就包含嵌入的 TestBaseModel
+	product := &TestProduct{
+		TestBaseModel: TestBaseModel{
+			ID:     100,
+			Status: 1,
+			Extras: types.Extras{
+				"manufacturer": "Test Inc",
+			},
 		},
-		Title:   "Test Article",
-		Content: "This is test content",
-		Author:  "John Doe",
+		Name:     "Embedded Test",
+		Price:    49.99,
+		Stock:    200,
+		Category: "test",
 	}
 
-	// 由于没有实现验证接口，使用 ValidateStruct
-	err := ValidateStruct(article)
-	if err != nil {
-		t.Logf("嵌入字段验证: %v", err)
+	errs := Validate(product, SceneCreate)
+	if errs != nil {
+		t.Logf("嵌入字段验证: %v", errs)
 	}
 }
 
 // TestNestedValidation_MaxDepth 测试最大嵌套深度限制
 func TestNestedValidation_MaxDepth(t *testing.T) {
-	// 创建一个深度嵌套的结构（用于测试深度限制）
-	type Level struct {
-		Name  string `json:"name"`
-		Child *Level `json:"child,omitempty"`
+	// 测试产品的多层验证（BaseModel -> Product -> Extras）
+	product := &TestProduct{
+		TestBaseModel: TestBaseModel{
+			ID:     1,
+			Status: 1,
+			Extras: types.Extras{
+				"level1": map[string]any{
+					"level2": "value",
+				},
+			},
+		},
+		Name:     "Deep Structure",
+		Price:    99.99,
+		Stock:    10,
+		Category: "test",
 	}
 
-	// 创建一个适度嵌套的结构
-	level5 := &Level{Name: "Level 5"}
-	level4 := &Level{Name: "Level 4", Child: level5}
-	level3 := &Level{Name: "Level 3", Child: level4}
-	level2 := &Level{Name: "Level 2", Child: level3}
-	level1 := &Level{Name: "Level 1", Child: level2}
-
-	// 验证嵌套结构
-	err := ValidateStruct(level1)
-	if err != nil {
-		t.Logf("嵌套深度验证: %v", err)
+	// 验证嵌套结构（验证器应该能处理适度的嵌套）
+	errs := Validate(product, SceneCreate)
+	if errs != nil {
+		t.Logf("嵌套深度验证: %v", errs)
 	}
 }
 
 // TestNestedValidation_NilFields 测试 nil 字段的处理
 func TestNestedValidation_NilFields(t *testing.T) {
-	type OptionalData struct {
-		Value string `json:"value"`
-	}
-
-	type Container struct {
-		Name     string        `json:"name"`
-		Optional *OptionalData `json:"optional,omitempty"`
-	}
-
 	tests := []struct {
-		name      string
-		container *Container
-		wantErr   bool
+		name    string
+		product *TestProduct
+		scene   ValidateScene
+		wantErr bool
 	}{
 		{
-			name: "包含可选数据",
-			container: &Container{
-				Name: "Test",
-				Optional: &OptionalData{
-					Value: "Optional Value",
+			name: "包含可选的 Extras 数据",
+			product: &TestProduct{
+				TestBaseModel: TestBaseModel{
+					Extras: types.Extras{
+						"optional": "data",
+					},
 				},
+				Name:     "Test",
+				Price:    99.99,
+				Stock:    10,
+				Category: "test",
 			},
+			scene:   SceneCreate,
 			wantErr: false,
 		},
 		{
-			name: "不包含可选数据",
-			container: &Container{
+			name: "不包含 Extras 数据",
+			product: &TestProduct{
+				TestBaseModel: TestBaseModel{
+					Extras: nil, // nil Extras
+				},
 				Name:     "Test",
-				Optional: nil, // nil 指针
+				Price:    99.99,
+				Stock:    10,
+				Category: "test",
 			},
+			scene:   SceneCreate,
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateStruct(tt.container)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateStruct() error = %v, wantErr %v", err, tt.wantErr)
+			errs := Validate(tt.product, tt.scene)
+			if (errs != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", errs, tt.wantErr)
 			}
 		})
 	}
@@ -597,22 +484,22 @@ func TestNestedValidation_NilFields(t *testing.T) {
 
 // TestNestedValidation_CircularReference 测试循环引用的处理
 func TestNestedValidation_CircularReference(t *testing.T) {
-	// 注意：这个测试主要是为了确保验证器不会因为循环引用而死锁
-	// 在实际使用中应该避免循环引用
-
-	type Node struct {
-		Name  string `json:"name"`
-		Value int    `json:"value"`
-	}
-
-	node := Node{
-		Name:  "Test Node",
-		Value: 42,
+	// 测试验证器对简单结构的处理
+	// 避免真正的循环引用，因为这会导致无限递归
+	product := &TestProduct{
+		TestBaseModel: TestBaseModel{
+			ID:     42,
+			Status: 1,
+		},
+		Name:     "Test Node",
+		Price:    99.99,
+		Stock:    100,
+		Category: "test",
 	}
 
 	// 验证简单节点
-	err := ValidateStruct(node)
-	if err != nil {
-		t.Logf("节点验证: %v", err)
+	errs := Validate(product, SceneCreate)
+	if errs != nil {
+		t.Logf("节点验证: %v", errs)
 	}
 }
