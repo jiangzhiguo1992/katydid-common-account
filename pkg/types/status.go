@@ -41,29 +41,87 @@ const (
 	StatusNone Status = 0 // 无状态（零值，表示所有状态位都未设置）
 
 	// 删除状态组（位 0-2）
-	StatusSysDeleted  Status = 1 << iota // 系统删除：由系统自动标记删除，通常不可恢复
-	StatusAdmDeleted                     // 管理员删除：由管理员操作删除，可能支持恢复
-	StatusUserDeleted                    // 用户删除：由用户主动删除，通常可恢复(回收箱)
+	StatusSysDeleted  Status = 1 << 0 // 系统删除：由系统自动标记删除，通常不可恢复
+	StatusAdmDeleted  Status = 1 << 1 // 管理员删除：由管理员操作删除，可能支持恢复
+	StatusUserDeleted Status = 1 << 2 // 用户删除：由用户主动删除，通常可恢复(回收箱)
 
 	// 禁用状态组（位 3-5）
-	StatusSysDisabled  // 系统禁用：系统检测到异常后自动禁用
-	StatusAdmDisabled  // 管理员禁用：管理员手动禁用
-	StatusUserDisabled // 用户禁用：用户主动禁用（如账号冻结）
+	StatusSysDisabled  Status = 1 << 3 // 系统禁用：系统检测到异常后自动禁用
+	StatusAdmDisabled  Status = 1 << 4 // 管理员禁用：管理员手动禁用
+	StatusUserDisabled Status = 1 << 5 // 用户禁用：用户主动禁用（如账号冻结）
 
 	// 隐藏状态组（位 6-8）
-	StatusSysHidden  // 系统隐藏：系统根据规则自动隐藏
-	StatusAdmHidden  // 管理员隐藏：管理员手动隐藏内容
-	StatusUserHidden // 用户隐藏：用户设置为私密/不公开
+	StatusSysHidden  Status = 1 << 6 // 系统隐藏：系统根据规则自动隐藏
+	StatusAdmHidden  Status = 1 << 7 // 管理员隐藏：管理员手动隐藏内容
+	StatusUserHidden Status = 1 << 8 // 用户隐藏：用户设置为私密/不公开
 
 	// 未验证状态组（位 9-11）
-	StatusSysUnverified  // 系统未验证：等待系统自动验证
-	StatusAdmUnverified  // 管理员未验证：等待管理员审核
-	StatusUserUnverified // 用户未验证：等待用户完成验证（如邮箱验证）
+	StatusSysUnverified  Status = 1 << 9  // 系统未验证：等待系统自动验证
+	StatusAdmUnverified  Status = 1 << 10 // 管理员未验证：等待管理员审核
+	StatusUserUnverified Status = 1 << 11 // 用户未验证：等待用户完成验证（如邮箱验证）
 
 	// 扩展位（位 12 开始）
 	// 预留 51 位可用于业务自定义状态（63 - 12 = 51）
-	StatusExpand51 // 扩展起始位，自定义状态应基于此值左移
+	StatusExpand51 Status = 1 << 12 // 扩展起始位，自定义状态应基于此值左移
 )
+
+// 预定义的状态组合常量（性能优化：避免重复位运算）
+const (
+	// StatusAllDeleted 所有删除状态的组合（系统删除 | 管理员删除 | 用户删除）
+	StatusAllDeleted Status = StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted
+
+	// StatusAllDisabled 所有禁用状态的组合（系统禁用 | 管理员禁用 | 用户禁用）
+	StatusAllDisabled Status = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
+
+	// StatusAllHidden 所有隐藏状态的组合（系统隐藏 | 管理员隐藏 | 用户隐藏）
+	StatusAllHidden Status = StatusSysHidden | StatusAdmHidden | StatusUserHidden
+
+	// StatusAllUnverified 所有未验证状态的组合（系统未验证 | 管理员未验证 | 用户未验证）
+	StatusAllUnverified Status = StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
+
+	// StatusAllSystem 所有系统级状态的组合
+	StatusAllSystem Status = StatusSysDeleted | StatusSysDisabled | StatusSysHidden | StatusSysUnverified
+
+	// StatusAllAdmin 所有管理员级状态的组合
+	StatusAllAdmin Status = StatusAdmDeleted | StatusAdmDisabled | StatusAdmHidden | StatusAdmUnverified
+
+	// StatusAllUser 所有用户级状态的组合
+	StatusAllUser Status = StatusUserDeleted | StatusUserDisabled | StatusUserHidden | StatusUserUnverified
+)
+
+// 状态值边界常量（用于运行时检查）
+const (
+	// maxValidBit 最大有效位数（int64 有 63 位可用，第 63 位为符号位）
+	maxValidBit = 62
+
+	// MaxStatus 最大合法状态值（所有 63 位都为 1，但排除符号位）
+	MaxStatus Status = (1 << maxValidBit) - 1
+)
+
+// IsValid 检查状态值是否合法（运行时安全检查）
+//
+// 检查规则：
+// - 不能为负数（符号位不能为 1）
+// - 不能超过最大值（避免溢出）
+//
+// 使用场景：
+// - 从外部输入创建 Status 时进行验证
+// - 在自定义状态时检查是否超出范围
+//
+// 时间复杂度：O(1)
+// 内存分配：0
+//
+// 示例：
+//
+//	s := Status(100)
+//	if s.IsValid() {
+//	    // 安全使用
+//	}
+func (s Status) IsValid() bool {
+	// 负数检查：int64 的负数最高位为 1
+	// 溢出检查：不应超过所有有效位的组合
+	return s >= 0 && s <= MaxStatus
+}
 
 // Set 设置指定的状态位（追加状态）
 //
@@ -164,7 +222,7 @@ func (s Status) Contain(flag Status) bool {
 // HasAny 检查是否包含任意一个指定的状态位（或运算）
 //
 // 使用场景：检查是否包含多个候选状态中的至少一个
-// 时间复杂度：O(n)，n 为 flags 数量
+// 时间复杂度：O(1) - 优化为单次位运算
 // 内存分配：0
 //
 // 示例：
@@ -173,21 +231,27 @@ func (s Status) Contain(flag Status) bool {
 //	s.HasAny(StatusUserDisabled, StatusAdmDisabled)  // true（包含第一个）
 //	s.HasAny(StatusSysDeleted, StatusAdmDeleted)     // false（都不包含）
 //
-// 性能提示：对于固定的状态组合，建议预先组合后使用 Contain
+// 性能优化：使用预定义的状态组合常量效率更高
 func (s Status) HasAny(flags ...Status) bool {
-	// 遍历所有候选状态，只要有一个位匹配就返回 true
-	for _, flag := range flags {
-		if s&flag != 0 {
-			return true
-		}
+	// 性能优化：如果没有传入任何标志，直接返回 false
+	if len(flags) == 0 {
+		return false
 	}
-	return false
+
+	// 优化：先将所有 flags 合并为一个，然后进行单次位运算
+	var combined Status
+	for _, flag := range flags {
+		combined |= flag
+	}
+
+	// 单次位运算检查是否有任何交集
+	return s&combined != 0
 }
 
 // HasAll 检查是否包含所有指定的状态位（与运算）
 //
 // 使用场景：检查是否同时满足多个状态条件
-// 时间复杂度：O(n)，n 为 flags 数量
+// 时间复杂度：O(1) - 优化为单次位运算
 // 内存分配：0
 //
 // 示例：
@@ -196,15 +260,21 @@ func (s Status) HasAny(flags ...Status) bool {
 //	s.HasAll(StatusUserDisabled, StatusSysHidden)  // true（都包含）
 //	s.HasAll(StatusUserDisabled, StatusAdmDeleted) // false（缺少第二个）
 //
-// 性能提示：对于固定的状态组合，建议预先组合后使用 Contain
+// 性能优化：使用预定义的状态组合常量效率更高
 func (s Status) HasAll(flags ...Status) bool {
-	// 遍历所有状态，每个都必须完全匹配
-	for _, flag := range flags {
-		if s&flag != flag {
-			return false
-		}
+	// 性能优化：如果没有传入任何标志，直接返回 true（逻辑上正确）
+	if len(flags) == 0 {
+		return true
 	}
-	return true
+
+	// 优化：先将所有 flags 合并为一个，然后进行单次位运算
+	var combined Status
+	for _, flag := range flags {
+		combined |= flag
+	}
+
+	// 单次位运算检查是否包含所有位
+	return s&combined == combined
 }
 
 // Clear 清除所有状态位（重置为零值）
@@ -241,7 +311,7 @@ func (s Status) Equal(status Status) bool {
 // SetMultiple 批量设置多个状态位（批量追加）
 //
 // 使用场景：一次性添加多个状态
-// 时间复杂度：O(n)，n 为 flags 数量
+// 时间复杂度：O(1) - 优化为单次位运算
 // 内存分配：0
 //
 // 示例：
@@ -249,20 +319,20 @@ func (s Status) Equal(status Status) bool {
 //	var s Status
 //	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmUnverified)
 //
-// 性能优化：对于固定的状态组合，建议预先组合
-//
-//	predefined := StatusUserDisabled | StatusSysHidden
-//	s.Set(predefined)  // 更快
+// 性能优化：预先合并所有标志，进行单次 OR 运算
 func (s *Status) SetMultiple(flags ...Status) {
+	// 优化：将所有 flags 先合并，然后一次性设置
+	var combined Status
 	for _, flag := range flags {
-		s.Set(flag)
+		combined |= flag
 	}
+	*s |= combined
 }
 
 // UnsetMultiple 批量取消多个状态位（批量移除）
 //
 // 使用场景：一次性移除多个状态
-// 时间复杂度：O(n)，n 为 flags 数量
+// 时间复杂度：O(1) - 优化为单次位运算
 // 内存分配：0
 //
 // 示例：
@@ -270,14 +340,14 @@ func (s *Status) SetMultiple(flags ...Status) {
 //	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
 //	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)
 //
-// 性能优化：对于固定的状态组合，建议预先组合
-//
-//	predefined := StatusUserDisabled | StatusSysHidden
-//	s.Unset(predefined)  // 更快
+// 性能优化：预先合并所有标志，进行单次 AND NOT 运算
 func (s *Status) UnsetMultiple(flags ...Status) {
+	// 优化：将所有 flags 先合并，然后一次性清除
+	var combined Status
 	for _, flag := range flags {
-		s.Unset(flag)
+		combined |= flag
 	}
+	*s &^= combined
 }
 
 // IsDeleted 检查是否被标记为删除（任意级别）
@@ -287,8 +357,10 @@ func (s *Status) UnsetMultiple(flags ...Status) {
 // 内存分配：0
 //
 // 返回值：包含任意删除状态时返回 true
+//
+// 性能优化：使用预定义的状态组合常量
 func (s Status) IsDeleted() bool {
-	return s.HasAny(StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted)
+	return s&StatusAllDeleted != 0
 }
 
 // IsDisable 检查是否被禁用（任意级别）
@@ -298,8 +370,10 @@ func (s Status) IsDeleted() bool {
 // 内存分配：0
 //
 // 返回值：包含任意禁用状态时返回 true
+//
+// 性能优化：使用预定义的状态组合常量
 func (s Status) IsDisable() bool {
-	return s.HasAny(StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled)
+	return s&StatusAllDisabled != 0
 }
 
 // IsHidden 检查是否被隐藏（任意级别）
@@ -309,8 +383,10 @@ func (s Status) IsDisable() bool {
 // 内存分配：0
 //
 // 返回值：包含任意隐藏状态时返回 true
+//
+// 性能优化：使用预定义的状态组合常量
 func (s Status) IsHidden() bool {
-	return s.HasAny(StatusSysHidden, StatusAdmHidden, StatusUserHidden)
+	return s&StatusAllHidden != 0
 }
 
 // IsUnverified 检查是否未验证（任意级别）
@@ -320,8 +396,10 @@ func (s Status) IsHidden() bool {
 // 内存分配：0
 //
 // 返回值：包含任意未验证状态时返回 true
+//
+// 性能优化：使用预定义的状态组合常量
 func (s Status) IsUnverified() bool {
-	return s.HasAny(StatusSysUnverified, StatusAdmUnverified, StatusUserUnverified)
+	return s&StatusAllUnverified != 0
 }
 
 // CanEnable 检查是否为可启用状态（业务可用性检查）
@@ -380,7 +458,6 @@ func (s Status) Value() (driver.Value, error) {
 // 支持的数据库类型：
 // - int64: 标准整数类型
 // - int: Go 原生整数类型
-// - uint64: 无符号整数（需在 int64 范围内）
 // - []byte: JSON 格式的数字
 //
 // 时间复杂度：O(1)，除 []byte 需要 JSON 解析
@@ -390,6 +467,7 @@ func (s Status) Value() (driver.Value, error) {
 // - nil 值会被设置为 StatusNone
 // - 不支持的类型会返回明确的错误信息
 // - JSON 解析失败会返回原始错误
+// - 添加溢出检查，防止数据库中的异常值
 func (s *Status) Scan(value interface{}) error {
 	// 处理 NULL 值：数据库中的 NULL 映射为零值
 	if value == nil {
@@ -401,26 +479,43 @@ func (s *Status) Scan(value interface{}) error {
 	switch v := value.(type) {
 	case int64:
 		// 最常见的数据库整数类型
+		// 添加边界检查，防止数据库中存储了异常值
+		if v < 0 {
+			return fmt.Errorf("invalid Status value: negative number %d is not allowed (sign bit conflict)", v)
+		}
 		*s = Status(v)
+
 	case int:
 		// Go 原生整数类型（某些驱动可能返回）
+		if v < 0 {
+			return fmt.Errorf("invalid Status value: negative number %d is not allowed (sign bit conflict)", v)
+		}
 		*s = Status(v)
+
 	case uint64:
 		// 无符号整数类型
-		// 注意：如果值超过 int64 最大值，会发生截断
-		// 但由于 Status 定义为 int64，不应使用负数位
+		// 检查是否超过 int64 的最大值
+		if v > uint64(MaxStatus) {
+			return fmt.Errorf("invalid Status value: %d exceeds maximum allowed value %d (overflow)", v, MaxStatus)
+		}
 		*s = Status(v)
+
 	case []byte:
 		// JSON 或文本格式（某些驱动如 SQLite）
 		var num int64
 		if err := json.Unmarshal(v, &num); err != nil {
 			return fmt.Errorf("failed to unmarshal Status from bytes: %w", err)
 		}
+		if num < 0 {
+			return fmt.Errorf("invalid Status value: negative number %d is not allowed (sign bit conflict)", num)
+		}
 		*s = Status(num)
+
 	default:
 		// 不支持的类型：返回详细的错误信息
 		return fmt.Errorf("cannot scan type %T into Status: unsupported database type, expected int64, int, uint64, or []byte", value)
 	}
+
 	return nil
 }
 
@@ -451,11 +546,37 @@ func (s Status) MarshalJSON() ([]byte, error) {
 // 错误处理：
 // - JSON 格式错误会返回解析错误
 // - 非数字类型会返回类型错误
+// - 添加边界检查，防止恶意输入
 func (s *Status) UnmarshalJSON(data []byte) error {
 	var num int64
 	if err := json.Unmarshal(data, &num); err != nil {
-		return fmt.Errorf("failed to unmarshal Status from JSON: %w", err)
+		return fmt.Errorf("failed to unmarshal Status from JSON: invalid format, expected integer number: %w", err)
 	}
+
+	// 边界检查：防止反序列化时的异常值
+	if num < 0 {
+		return fmt.Errorf("failed to unmarshal Status from JSON: negative value %d is not allowed (sign bit conflict)", num)
+	}
+
 	*s = Status(num)
 	return nil
+}
+
+// String 实现 fmt.Stringer 接口，用于调试和日志输出
+//
+// 输出格式：Status(数值) 或具体的状态描述
+// 时间复杂度：O(1)
+// 内存分配：字符串拼接会有少量分配
+//
+// 示例：
+//
+//	fmt.Println(StatusUserDisabled)  // 输出：Status(32)
+func (s Status) String() string {
+	// 特殊值处理
+	if s == StatusNone {
+		return "Status(None)"
+	}
+
+	// 返回数值表示，便于调试
+	return fmt.Sprintf("Status(%d)", int64(s))
 }

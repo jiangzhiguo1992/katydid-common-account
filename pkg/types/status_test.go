@@ -1,541 +1,589 @@
 package types
 
 import (
+	"database/sql/driver"
 	"encoding/json"
-	"sync"
 	"testing"
 )
 
-// TestStatus_Set 测试设置状态位
-func TestStatus_Set(t *testing.T) {
+// TestStatusConstants 测试状态常量定义
+func TestStatusConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   Status
+		expected int64
+	}{
+		{"无状态", StatusNone, 0},
+		{"系统删除", StatusSysDeleted, 1},
+		{"管理员删除", StatusAdmDeleted, 2},
+		{"用户删除", StatusUserDeleted, 4},
+		{"系统禁用", StatusSysDisabled, 8},
+		{"管理员禁用", StatusAdmDisabled, 16},
+		{"用户禁用", StatusUserDisabled, 32},
+		{"系统隐藏", StatusSysHidden, 64},
+		{"管理员隐藏", StatusAdmHidden, 128},
+		{"用户隐藏", StatusUserHidden, 256},
+		{"系统未验证", StatusSysUnverified, 512},
+		{"管理员未验证", StatusAdmUnverified, 1024},
+		{"用户未验证", StatusUserUnverified, 2048},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if int64(tt.status) != tt.expected {
+				t.Errorf("状态常量 %s 值错误: 期望 %d, 实际 %d", tt.name, tt.expected, int64(tt.status))
+			}
+		})
+	}
+}
+
+// TestStatusCombinedConstants 测试预定义的组合常量
+func TestStatusCombinedConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		combined Status
+		includes []Status
+	}{
+		{
+			"所有删除状态",
+			StatusAllDeleted,
+			[]Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted},
+		},
+		{
+			"所有禁用状态",
+			StatusAllDisabled,
+			[]Status{StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled},
+		},
+		{
+			"所有隐藏状态",
+			StatusAllHidden,
+			[]Status{StatusSysHidden, StatusAdmHidden, StatusUserHidden},
+		},
+		{
+			"所有未验证状态",
+			StatusAllUnverified,
+			[]Status{StatusSysUnverified, StatusAdmUnverified, StatusUserUnverified},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, include := range tt.includes {
+				if !tt.combined.Contain(include) {
+					t.Errorf("%s 应该包含 %d", tt.name, include)
+				}
+			}
+		})
+	}
+}
+
+// TestStatusIsValid 测试状态值验证
+func TestStatusIsValid(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		valid  bool
+	}{
+		{"零值有效", StatusNone, true},
+		{"正常状态有效", StatusUserDisabled, true},
+		{"组合状态有效", StatusUserDisabled | StatusSysHidden, true},
+		{"负数无效", Status(-1), false},
+		{"最大值有效", MaxStatus, true},
+		{"超出最大值无效", MaxStatus + 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsValid(); got != tt.valid {
+				t.Errorf("IsValid() = %v, 期望 %v", got, tt.valid)
+			}
+		})
+	}
+}
+
+// TestStatusSet 测试设置状态位
+func TestStatusSet(t *testing.T) {
 	var s Status
 	s.Set(StatusUserDisabled)
 	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to have StatusUserDisabled")
+		t.Error("设置状态失败")
 	}
 
 	s.Set(StatusSysHidden)
-	if !s.Contain(StatusSysHidden) {
-		t.Error("Expected status to have StatusSysHidden")
-	}
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to still have StatusUserDisabled")
+	if !s.Contain(StatusUserDisabled) || !s.Contain(StatusSysHidden) {
+		t.Error("追加状态后原有状态丢失")
 	}
 }
 
-// TestStatus_Unset 测试取消状态位
-func TestStatus_Unset(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden
+// TestStatusUnset 测试取消状态位
+func TestStatusUnset(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
 	s.Unset(StatusUserDisabled)
+
 	if s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to not have StatusUserDisabled")
+		t.Error("取消状态失败")
 	}
-	if !s.Contain(StatusSysHidden) {
-		t.Error("Expected status to still have StatusSysHidden")
+
+	if !s.Contain(StatusSysHidden) || !s.Contain(StatusAdmDeleted) {
+		t.Error("取消状态时误删了其他状态")
 	}
 }
 
-// TestStatus_Toggle 测试切换状态位
-func TestStatus_Toggle(t *testing.T) {
+// TestStatusToggle 测试切换状态位
+func TestStatusToggle(t *testing.T) {
 	var s Status
+
+	// 第一次切换：添加
 	s.Toggle(StatusUserDisabled)
 	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to have StatusUserDisabled after toggle")
+		t.Error("切换状态失败：未添加")
 	}
 
+	// 第二次切换：移除
 	s.Toggle(StatusUserDisabled)
 	if s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to not have StatusUserDisabled after second toggle")
+		t.Error("切换状态失败：未移除")
 	}
 }
 
-// TestStatus_Has 测试包含检查
-func TestStatus_Has(t *testing.T) {
+// TestStatusMerge 测试状态合并
+func TestStatusMerge(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
+	s.Merge(StatusUserDisabled | StatusAdmDeleted)
+
+	if !s.Contain(StatusUserDisabled) || !s.Contain(StatusAdmDeleted) {
+		t.Error("合并后应保留的状态丢失")
+	}
+
+	if s.Contain(StatusSysHidden) {
+		t.Error("合并后不应保留的状态仍存在")
+	}
+}
+
+// TestStatusContain 测试状态包含检查
+func TestStatusContain(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected status to have StatusUserDisabled")
+
+	tests := []struct {
+		name   string
+		check  Status
+		expect bool
+	}{
+		{"包含单个状态", StatusUserDisabled, true},
+		{"包含全部状态", StatusUserDisabled | StatusSysHidden, true},
+		{"不包含的状态", StatusAdmDeleted, false},
+		{"部分包含", StatusUserDisabled | StatusAdmDeleted, false},
 	}
-	if !s.Contain(StatusSysHidden) {
-		t.Error("Expected status to have StatusSysHidden")
-	}
-	if s.Contain(StatusSysDeleted) {
-		t.Error("Expected status to not have StatusSysDeleted")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.Contain(tt.check); got != tt.expect {
+				t.Errorf("Contain() = %v, 期望 %v", got, tt.expect)
+			}
+		})
 	}
 }
 
-// TestStatus_HasAny 测试包含任意状态
-func TestStatus_HasAny(t *testing.T) {
+// TestStatusHasAny 测试任意状态检查
+func TestStatusHasAny(t *testing.T) {
+	s := StatusUserDisabled
+
+	tests := []struct {
+		name   string
+		flags  []Status
+		expect bool
+	}{
+		{"包含一个", []Status{StatusUserDisabled, StatusAdmDisabled}, true},
+		{"都不包含", []Status{StatusSysDeleted, StatusAdmDeleted}, false},
+		{"空切片", []Status{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.HasAny(tt.flags...); got != tt.expect {
+				t.Errorf("HasAny() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusHasAll 测试全部状态检查
+func TestStatusHasAll(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
-	if !s.HasAny(StatusUserDisabled, StatusSysDeleted) {
-		t.Error("Expected status to have at least one of the flags")
+
+	tests := []struct {
+		name   string
+		flags  []Status
+		expect bool
+	}{
+		{"都包含", []Status{StatusUserDisabled, StatusSysHidden}, true},
+		{"缺少一个", []Status{StatusUserDisabled, StatusAdmDeleted}, false},
+		{"空切片", []Status{}, true},
 	}
-	if s.HasAny(StatusSysDeleted, StatusAdmDeleted) {
-		t.Error("Expected status to not have any of the flags")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.HasAll(tt.flags...); got != tt.expect {
+				t.Errorf("HasAll() = %v, 期望 %v", got, tt.expect)
+			}
+		})
 	}
 }
 
-// TestStatus_HasAll 测试包含所有状态
-func TestStatus_HasAll(t *testing.T) {
+// TestStatusClear 测试清除状态
+func TestStatusClear(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
-	if !s.HasAll(StatusUserDisabled, StatusSysHidden) {
-		t.Error("Expected status to have all flags")
-	}
-	if s.HasAll(StatusUserDisabled, StatusSysHidden, StatusSysDeleted) {
-		t.Error("Expected status to not have all flags")
+	s.Clear()
+
+	if !s.Equal(StatusNone) {
+		t.Errorf("清除后状态应为 StatusNone，实际为 %d", s)
 	}
 }
 
-// TestStatus_SetMultiple 测试批量设置
-func TestStatus_SetMultiple(t *testing.T) {
+// TestStatusEqual 测试状态相等
+func TestStatusEqual(t *testing.T) {
+	s1 := StatusUserDisabled | StatusSysHidden
+	s2 := StatusUserDisabled | StatusSysHidden
+	s3 := StatusUserDisabled
+
+	if !s1.Equal(s2) {
+		t.Error("相同的状态应该相等")
+	}
+
+	if s1.Equal(s3) {
+		t.Error("不同的状态不应该相等")
+	}
+}
+
+// TestStatusSetMultiple 测试批量设置
+func TestStatusSetMultiple(t *testing.T) {
 	var s Status
-	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmDisabled)
-	if !s.HasAll(StatusUserDisabled, StatusSysHidden, StatusAdmDisabled) {
-		t.Error("Expected status to have all set flags")
+	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmUnverified)
+
+	if !s.HasAll(StatusUserDisabled, StatusSysHidden, StatusAdmUnverified) {
+		t.Error("批量设置失败")
 	}
 }
 
-// TestStatus_UnsetMultiple 测试批量取消
-func TestStatus_UnsetMultiple(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDisabled
+// TestStatusUnsetMultiple 测试批量取消
+func TestStatusUnsetMultiple(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
 	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)
-	if s.Contain(StatusUserDisabled) || s.Contain(StatusSysHidden) {
-		t.Error("Expected unset flags to be removed")
-	}
-	if !s.Contain(StatusAdmDisabled) {
-		t.Error("Expected StatusAdmDisabled to remain")
-	}
-}
 
-// TestStatus_CanVerified 测试验证状态检查
-func TestStatus_CanVerified(t *testing.T) {
-	s := StatusNone
-	if !s.CanVerified() {
-		t.Error("Expected StatusNone to be normal")
+	if s.HasAny(StatusUserDisabled, StatusSysHidden) {
+		t.Error("批量取消失败")
 	}
 
-	s = StatusUserDisabled
-	if s.CanVerified() {
-		t.Error("Expected status with UserDisabled to not be normal")
-	}
-
-	s = StatusSysHidden
-	if s.CanVerified() {
-		t.Error("Expected status with SysHidden to not be normal")
+	if !s.Contain(StatusAdmDeleted) {
+		t.Error("批量取消时误删了其他状态")
 	}
 }
 
-// TestStatus_JSON 测试 JSON 序列化和反序列化
-func TestStatus_JSON(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDisabled
-
-	// Marshal
-	data, err := json.Marshal(s)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
+// TestStatusIsDeleted 测试删除状态检查
+func TestStatusIsDeleted(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"系统删除", StatusSysDeleted, true},
+		{"管理员删除", StatusAdmDeleted, true},
+		{"用户删除", StatusUserDeleted, true},
+		{"未删除", StatusUserDisabled, false},
+		{"零值", StatusNone, false},
 	}
 
-	// Unmarshal
-	var s2 Status
-	if err := json.Unmarshal(data, &s2); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-
-	if s != s2 {
-		t.Errorf("Expected %v, got %v", s, s2)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsDeleted(); got != tt.expect {
+				t.Errorf("IsDeleted() = %v, 期望 %v", got, tt.expect)
+			}
+		})
 	}
 }
 
-// TestStatus_Value 测试数据库 Value 接口
-func TestStatus_Value(t *testing.T) {
+// TestStatusIsDisable 测试禁用状态检查
+func TestStatusIsDisable(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"系统禁用", StatusSysDisabled, true},
+		{"管理员禁用", StatusAdmDisabled, true},
+		{"用户禁用", StatusUserDisabled, true},
+		{"未禁用", StatusSysDeleted, false},
+		{"零值", StatusNone, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsDisable(); got != tt.expect {
+				t.Errorf("IsDisable() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusIsHidden 测试隐藏状态检查
+func TestStatusIsHidden(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"系统隐藏", StatusSysHidden, true},
+		{"管理员隐藏", StatusAdmHidden, true},
+		{"用户隐藏", StatusUserHidden, true},
+		{"未隐藏", StatusUserDisabled, false},
+		{"零值", StatusNone, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsHidden(); got != tt.expect {
+				t.Errorf("IsHidden() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusIsUnverified 测试未验证状态检查
+func TestStatusIsUnverified(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"系统未验证", StatusSysUnverified, true},
+		{"管理员未验证", StatusAdmUnverified, true},
+		{"用户未验证", StatusUserUnverified, true},
+		{"已验证", StatusUserDisabled, false},
+		{"零值", StatusNone, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsUnverified(); got != tt.expect {
+				t.Errorf("IsUnverified() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusCanEnable 测试可启用状态检查
+func TestStatusCanEnable(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"正常状态", StatusNone, true},
+		{"已删除不可启用", StatusSysDeleted, false},
+		{"已禁用不可启用", StatusUserDisabled, false},
+		{"仅隐藏可启用", StatusSysHidden, true},
+		{"仅未验证可启用", StatusUserUnverified, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanEnable(); got != tt.expect {
+				t.Errorf("CanEnable() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusCanVisible 测试可见状态检查
+func TestStatusCanVisible(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"正常状态", StatusNone, true},
+		{"已删除不可见", StatusSysDeleted, false},
+		{"已禁用不可见", StatusUserDisabled, false},
+		{"已隐藏不可见", StatusSysHidden, false},
+		{"仅未验证可见", StatusUserUnverified, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanVisible(); got != tt.expect {
+				t.Errorf("CanVisible() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusCanVerified 测试已验证状态检查
+func TestStatusCanVerified(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		expect bool
+	}{
+		{"正常状态", StatusNone, true},
+		{"已删除未验证", StatusSysDeleted, false},
+		{"已禁用未验证", StatusUserDisabled, false},
+		{"已隐藏未验证", StatusSysHidden, false},
+		{"未验证", StatusUserUnverified, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanVerified(); got != tt.expect {
+				t.Errorf("CanVerified() = %v, 期望 %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestStatusValue 测试数据库 Value 方法
+func TestStatusValue(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	val, err := s.Value()
+
 	if err != nil {
-		t.Fatalf("Failed to get value: %v", err)
+		t.Errorf("Value() 返回错误: %v", err)
 	}
-	if val.(int64) != int64(s) {
-		t.Errorf("Expected %d, got %d", s, val)
+
+	if val != int64(s) {
+		t.Errorf("Value() = %v, 期望 %d", val, int64(s))
 	}
 }
 
-// TestStatus_Scan 测试数据库 Scan 接口
-func TestStatus_Scan(t *testing.T) {
+// TestStatusScan 测试数据库 Scan 方法
+func TestStatusScan(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   interface{}
-		want    Status
-		wantErr bool
+		name      string
+		input     interface{}
+		expect    Status
+		expectErr bool
 	}{
-		{
-			name:  "int64",
-			input: int64(3),
-			want:  Status(3),
-		},
-		{
-			name:  "int",
-			input: 5,
-			want:  Status(5),
-		},
-		{
-			name:  "uint64",
-			input: uint64(7),
-			want:  Status(7),
-		},
-		{
-			name:  "nil",
-			input: nil,
-			want:  StatusNone,
-		},
-		{
-			name:    "unsupported type",
-			input:   "invalid",
-			wantErr: true,
-		},
+		{"int64 类型", int64(100), Status(100), false},
+		{"int 类型", int(100), Status(100), false},
+		{"uint64 类型", uint64(100), Status(100), false},
+		{"[]byte 类型", []byte("100"), Status(100), false},
+		{"nil 值", nil, StatusNone, false},
+		{"负数 int64", int64(-1), StatusNone, true},
+		{"负数 int", int(-1), StatusNone, true},
+		{"溢出 uint64", uint64(1) << 63, StatusNone, true},
+		{"无效类型", "string", StatusNone, true},
+		{"无效 JSON", []byte("invalid"), StatusNone, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var s Status
 			err := s.Scan(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && s != tt.want {
-				t.Errorf("Scan() got = %v, want %v", s, tt.want)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("期望返回错误，但没有")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("不期望错误，但得到: %v", err)
+				}
+				if s != tt.expect {
+					t.Errorf("Scan() = %d, 期望 %d", s, tt.expect)
+				}
 			}
 		})
 	}
 }
 
-// TestStatus_HelperMethods 测试辅助方法
-func TestStatus_HelperMethods(t *testing.T) {
-	// 测试正常状态
-	s := StatusNone
-	if s.IsDisable() {
-		t.Error("Expected empty status to not be disabled")
-	}
-	if s.IsHidden() {
-		t.Error("Expected empty status to not be hidden")
-	}
-	if s.IsDeleted() {
-		t.Error("Expected empty status to not be deleted")
+// TestStatusMarshalJSON 测试 JSON 序列化
+func TestStatusMarshalJSON(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden
+	data, err := json.Marshal(s)
+
+	if err != nil {
+		t.Errorf("MarshalJSON() 错误: %v", err)
 	}
 
-	// 测试禁用状态
-	s = StatusUserDisabled
-	if !s.IsDisable() {
-		t.Error("Expected UserDisabled to be disabled")
-	}
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected to contain StatusUserDisabled")
+	var num int64
+	if err := json.Unmarshal(data, &num); err != nil {
+		t.Errorf("反序列化失败: %v", err)
 	}
 
-	// 测试隐藏状态
-	s = StatusSysHidden
-	if !s.IsHidden() {
-		t.Error("Expected IsHidden to be true")
-	}
-
-	// 测试删除状态
-	s = StatusSysDeleted
-	if !s.IsDeleted() {
-		t.Error("Expected IsDeleted to be true")
-	}
-
-	// 测试验证状态
-	s = StatusNone
-	if s.IsUnverified() {
-		t.Error("Expected empty status to be verified")
-	}
-
-	s = StatusSysUnverified
-	if !s.IsUnverified() {
-		t.Error("Expected IsUnverified to be true")
+	if num != int64(s) {
+		t.Errorf("序列化值 = %d, 期望 %d", num, int64(s))
 	}
 }
 
-// TestStatus_CanVisible 测试可见性检查
-func TestStatus_CanVisible(t *testing.T) {
-	// 测试完全正常状态（应该可见）
-	s := StatusNone
-	if !s.CanVisible() {
-		t.Error("Expected StatusNone to be visible")
+// TestStatusUnmarshalJSON 测试 JSON 反序列化
+func TestStatusUnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		expect    Status
+		expectErr bool
+	}{
+		{"正常数字", `100`, Status(100), false},
+		{"零值", `0`, StatusNone, false},
+		{"负数", `-1`, StatusNone, true},
+		{"无效 JSON", `"invalid"`, StatusNone, true},
+		{"空字符串", ``, StatusNone, true},
 	}
 
-	// 测试被禁用（不可见）
-	s = StatusUserDisabled
-	if s.CanVisible() {
-		t.Error("Expected disabled status to not be visible")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var s Status
+			err := json.Unmarshal([]byte(tt.input), &s)
 
-	s = StatusAdmDisabled
-	if s.CanVisible() {
-		t.Error("Expected admin disabled status to not be visible")
-	}
-
-	s = StatusSysDisabled
-	if s.CanVisible() {
-		t.Error("Expected system disabled status to not be visible")
-	}
-
-	// 测试被删除（不可见）
-	s = StatusUserDeleted
-	if s.CanVisible() {
-		t.Error("Expected deleted status to not be visible")
-	}
-
-	// 测试被隐藏（不可见）
-	s = StatusUserHidden
-	if s.CanVisible() {
-		t.Error("Expected hidden status to not be visible")
-	}
-
-	s = StatusAdmHidden
-	if s.CanVisible() {
-		t.Error("Expected admin hidden status to not be visible")
-	}
-
-	s = StatusSysHidden
-	if s.CanVisible() {
-		t.Error("Expected system hidden status to not be visible")
-	}
-
-	// 测试组合状态（禁用+隐藏，不可见）
-	s = StatusUserDisabled | StatusUserHidden
-	if s.CanVisible() {
-		t.Error("Expected disabled and hidden status to not be visible")
-	}
-
-	// 测试组合状态（删除+隐藏，不可见）
-	s = StatusSysDeleted | StatusSysHidden
-	if s.CanVisible() {
-		t.Error("Expected deleted and hidden status to not be visible")
-	}
-
-	// 测试未验证状态（应该可见，因为 CanVisible 不检查验证状态）
-	s = StatusSysUnverified
-	if !s.CanVisible() {
-		t.Error("Expected unverified status to be visible (CanVisible doesn't check verification)")
-	}
-
-	// 测试多级别状态叠加
-	s = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
-	if s.CanVisible() {
-		t.Error("Expected all levels disabled to not be visible")
-	}
-
-	// 测试边界情况：只要有一个禁用/删除/隐藏就不可见
-	s = StatusUserDisabled | StatusSysUnverified // 禁用+未验证
-	if s.CanVisible() {
-		t.Error("Expected disabled (even with unverified) to not be visible")
+			if tt.expectErr {
+				if err == nil {
+					t.Error("期望返回错误，但没有")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("不期望错误，但得到: %v", err)
+				}
+				if s != tt.expect {
+					t.Errorf("UnmarshalJSON() = %d, 期望 %d", s, tt.expect)
+				}
+			}
+		})
 	}
 }
 
-// TestStatus_CanEnable 测试启用状态检查
-func TestStatus_CanEnable(t *testing.T) {
-	testCases := []struct {
+// TestStatusString 测试字符串输出
+func TestStatusString(t *testing.T) {
+	tests := []struct {
 		name   string
 		status Status
-		expect bool
+		expect string
 	}{
-		{"None", StatusNone, true},
-		{"Only SysDisabled", StatusSysDisabled, false},
-		{"Only AdmDisabled", StatusAdmDisabled, false},
-		{"Only UserDisabled", StatusUserDisabled, false},
-		{"Only SysDeleted", StatusSysDeleted, false},
-		{"Only AdmDeleted", StatusAdmDeleted, false},
-		{"Only UserDeleted", StatusUserDeleted, false},
-		{"SysDisabled + AdmDeleted", StatusSysDisabled | StatusAdmDeleted, false},
-		{"Hidden only", StatusSysHidden, true},
-		{"Unverified only", StatusSysUnverified, true},
-		{"Hidden + Unverified", StatusSysHidden | StatusSysUnverified, true},
+		{"零值", StatusNone, "Status(None)"},
+		{"正常值", Status(100), "Status(100)"},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.status.CanEnable() != tc.expect {
-				t.Errorf("Expected %s CanEnable to be %v, got %v", tc.name, tc.expect, tc.status.CanEnable())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.String(); got != tt.expect {
+				t.Errorf("String() = %v, 期望 %v", got, tt.expect)
 			}
 		})
 	}
 }
 
-// TestStatus_PredefinedCombinations 测试预定义组合
-func TestStatus_PredefinedCombinations(t *testing.T) {
-	// 测试软删除组合
-	s := StatusSysDeleted | StatusSysHidden
-	if !s.HasAll(StatusSysDeleted, StatusSysHidden) {
-		t.Error("Expected to have SysDeleted and SysHidden")
-	}
-
-	// 测试全禁用组合
-	s = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
-	if !s.HasAll(StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled) {
-		t.Error("Expected to have all disabled flags")
-	}
+// TestStatusDriverInterfaces 测试数据库接口实现
+func TestStatusDriverInterfaces(t *testing.T) {
+	var _ driver.Valuer = (*Status)(nil)
+	// Note: sql.Scanner 需要指针接收者
 }
 
-// TestStatus_RealWorldScenario 测试真实场景
-func TestStatus_RealWorldScenario(t *testing.T) {
-	// 模拟用户状态管理
-	var userStatus Status
-
-	// 新用户注册，默认正常状态
-	if !userStatus.CanVerified() {
-		t.Error("New user should be in normal status")
-	}
-
-	// 用户违规，被管理员禁用
-	userStatus.Set(StatusAdmDisabled)
-	if !userStatus.IsDisable() {
-		t.Error("Disabled user should be disabled")
-	}
-
-	// 解除禁用
-	userStatus.Unset(StatusAdmDisabled)
-	if userStatus.IsDisable() {
-		t.Error("User should not be disabled after unset")
-	}
-
-	// 用户自己隐藏账号
-	userStatus.Set(StatusUserHidden)
-	if !userStatus.IsHidden() {
-		t.Error("User should be hidden")
-	}
-
-	// 用户取消隐藏
-	userStatus.Unset(StatusUserHidden)
-	if userStatus.IsHidden() {
-		t.Error("User should not be hidden after unset")
-	}
+// TestStatusJSONInterfaces 测试 JSON 接口实现
+func TestStatusJSONInterfaces(t *testing.T) {
+	var _ json.Marshaler = (*Status)(nil)
+	// Note: json.Unmarshaler 需要指针接收者
 }
 
-// TestStatus_Merge 测试合并操作
-func TestStatus_Merge(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-	s.Merge(StatusUserDisabled | StatusAdmDeleted)
-
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected to contain StatusUserDisabled")
-	}
-	if !s.Contain(StatusAdmDeleted) {
-		t.Error("Expected to contain StatusAdmDeleted")
-	}
-	if s.Contain(StatusSysHidden) {
-		t.Error("Expected to not contain StatusSysHidden after merge")
-	}
-}
-
-// TestStatus_Clear 测试清空操作
-func TestStatus_Clear(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden
-	s.Clear()
-
-	if s != StatusNone {
-		t.Errorf("Expected StatusNone after clear, got %v", s)
-	}
-}
-
-// TestStatus_Equal 测试相等性检查
-func TestStatus_Equal(t *testing.T) {
-	s1 := StatusUserDisabled | StatusSysHidden
-	s2 := StatusUserDisabled | StatusSysHidden
-	s3 := StatusUserDisabled
-
-	if !s1.Equal(s2) {
-		t.Error("Expected s1 to equal s2")
-	}
-	if s1.Equal(s3) {
-		t.Error("Expected s1 to not equal s3")
-	}
-}
-
-// TestStatus_BitOperations 测试位运算正确性
-func TestStatus_BitOperations(t *testing.T) {
-	// 验证状态位定义正确
-	if StatusSysDeleted != 1 {
-		t.Errorf("StatusSysDeleted should be 1, got %d", StatusSysDeleted)
-	}
-	if StatusAdmDeleted != 2 {
-		t.Errorf("StatusAdmDeleted should be 2, got %d", StatusAdmDeleted)
-	}
-	if StatusUserDeleted != 4 {
-		t.Errorf("StatusUserDeleted should be 4, got %d", StatusUserDeleted)
-	}
-
-	// 验证位运算不冲突
-	s := StatusNone
-	s.Set(StatusSysDeleted)
-	s.Set(StatusAdmDeleted)
-
-	if !s.HasAll(StatusSysDeleted, StatusAdmDeleted) {
-		t.Error("Expected to have both flags")
-	}
-}
-
-// TestStatus_EdgeCases 测试边缘情况
-func TestStatus_EdgeCases(t *testing.T) {
-	t.Run("Zero value", func(t *testing.T) {
-		var s Status
-		if s != StatusNone {
-			t.Error("Zero value should be StatusNone")
-		}
-		if !s.CanVerified() {
-			t.Error("Zero value should be verified")
-		}
-	})
-
-	t.Run("All flags", func(t *testing.T) {
-		s := StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted |
-			StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled |
-			StatusSysHidden | StatusAdmHidden | StatusUserHidden |
-			StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
-
-		if !s.IsDeleted() || !s.IsDisable() || !s.IsHidden() || !s.IsUnverified() {
-			t.Error("Expected all checks to be true")
-		}
-		if s.CanVerified() {
-			t.Error("Expected CanVerified to be false with all flags")
-		}
-	})
-}
-
-// TestStatus_JSONBytes 测试 []byte 类型的 Scan
-func TestStatus_JSONBytes(t *testing.T) {
-	var s Status
-	data := []byte("42")
-
-	err := s.Scan(data)
-	if err != nil {
-		t.Fatalf("Scan([]byte) failed: %v", err)
-	}
-
-	if s != Status(42) {
-		t.Errorf("Expected Status(42), got %v", s)
-	}
-}
-
-// TestStatus_ConcurrentRead 测试并发读取（安全）
-func TestStatus_ConcurrentRead(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// 并发读取是安全的
-			_ = s.IsDisable()
-			_ = s.IsHidden()
-			_ = s.IsDeleted()
-			_ = s.CanVisible()
-		}()
-	}
-	wg.Wait()
-}
-
-// BenchmarkStatus_Set 基准测试：Set 操作
-func BenchmarkStatus_Set(b *testing.B) {
+// BenchmarkStatusSet 基准测试：设置状态
+func BenchmarkStatusSet(b *testing.B) {
 	var s Status
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -543,38 +591,48 @@ func BenchmarkStatus_Set(b *testing.B) {
 	}
 }
 
-// BenchmarkStatus_Contain 基准测试：Contain 检查
-func BenchmarkStatus_Contain(b *testing.B) {
+// BenchmarkStatusHasAny 基准测试：检查任意状态
+func BenchmarkStatusHasAny(b *testing.B) {
 	s := StatusUserDisabled | StatusSysHidden
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.Contain(StatusUserDisabled)
+		s.HasAny(StatusUserDisabled, StatusAdmDisabled)
 	}
 }
 
-// BenchmarkStatus_HasAny 基准测试：HasAny 检查
-func BenchmarkStatus_HasAny(b *testing.B) {
+// BenchmarkStatusHasAll 基准测试：检查全部状态
+func BenchmarkStatusHasAll(b *testing.B) {
 	s := StatusUserDisabled | StatusSysHidden
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.HasAny(StatusUserDisabled, StatusAdmDisabled)
+		s.HasAll(StatusUserDisabled, StatusSysHidden)
 	}
 }
 
-// BenchmarkStatus_CanVerified 基准测试：CanVerified 检查
-func BenchmarkStatus_CanVerified(b *testing.B) {
-	s := StatusNone
+// BenchmarkStatusIsDeleted 基准测试：删除状态检查
+func BenchmarkStatusIsDeleted(b *testing.B) {
+	s := StatusUserDisabled | StatusSysHidden
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.CanVerified()
+		s.IsDeleted()
 	}
 }
 
-// BenchmarkStatus_JSON 基准测试：JSON 序列化
-func BenchmarkStatus_JSON(b *testing.B) {
+// BenchmarkStatusMarshalJSON 基准测试：JSON 序列化
+func BenchmarkStatusMarshalJSON(b *testing.B) {
 	s := StatusUserDisabled | StatusSysHidden
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = json.Marshal(s)
+	}
+}
+
+// BenchmarkStatusUnmarshalJSON 基准测试：JSON 反序列化
+func BenchmarkStatusUnmarshalJSON(b *testing.B) {
+	data := []byte("100")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var s Status
+		_ = json.Unmarshal(data, &s)
 	}
 }
