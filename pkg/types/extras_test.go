@@ -3,9 +3,11 @@ package types
 import (
 	"encoding/json"
 	"math"
+	"sync"
 	"testing"
 )
 
+// TestExtras_BasicOperations 测试基础操作
 func TestExtras_BasicOperations(t *testing.T) {
 	e := NewExtras()
 
@@ -50,6 +52,7 @@ func TestExtras_BasicOperations(t *testing.T) {
 	}
 }
 
+// TestExtras_ComplexTypes 测试复杂类型
 func TestExtras_ComplexTypes(t *testing.T) {
 	e := NewExtras()
 
@@ -71,6 +74,7 @@ func TestExtras_ComplexTypes(t *testing.T) {
 	}
 }
 
+// TestExtras_JSONSerialization 测试 JSON 序列化
 func TestExtras_JSONSerialization(t *testing.T) {
 	e := NewExtras()
 	e.Set("name", "Test")
@@ -107,6 +111,7 @@ func TestExtras_JSONSerialization(t *testing.T) {
 	}
 }
 
+// TestExtras_DatabaseScan 测试数据库扫描
 func TestExtras_DatabaseScan(t *testing.T) {
 	e := NewExtras()
 	e.Set("key1", "value1")
@@ -136,6 +141,7 @@ func TestExtras_DatabaseScan(t *testing.T) {
 	}
 }
 
+// TestExtras_NilAndEmpty 测试 nil 和空值
 func TestExtras_NilAndEmpty(t *testing.T) {
 	// 测试空Extras
 	var e Extras
@@ -156,6 +162,7 @@ func TestExtras_NilAndEmpty(t *testing.T) {
 	}
 }
 
+// TestExtras_Clone 测试克隆
 func TestExtras_Clone(t *testing.T) {
 	e := NewExtras()
 	e.Set("key1", "value1")
@@ -177,6 +184,7 @@ func TestExtras_Clone(t *testing.T) {
 	}
 }
 
+// TestExtras_Merge 测试合并
 func TestExtras_Merge(t *testing.T) {
 	e1 := NewExtras()
 	e1.Set("key1", "value1")
@@ -203,6 +211,7 @@ func TestExtras_Merge(t *testing.T) {
 	}
 }
 
+// TestExtras_Clear 测试清空
 func TestExtras_Clear(t *testing.T) {
 	e := NewExtras()
 	e.Set("key1", "value1")
@@ -219,6 +228,7 @@ func TestExtras_Clear(t *testing.T) {
 	}
 }
 
+// TestExtras_Keys 测试获取所有键
 func TestExtras_Keys(t *testing.T) {
 	e := NewExtras()
 	e.Set("key1", "value1")
@@ -406,4 +416,93 @@ func TestExtras_EdgeCases(t *testing.T) {
 			t.Error("Getting non-existent key should return false")
 		}
 	})
+}
+
+// TestExtras_Capacity 测试预分配容量
+func TestExtras_Capacity(t *testing.T) {
+	// 测试使用容量创建
+	e := NewExtrasWithCapacity(10)
+	if e == nil {
+		t.Fatal("NewExtrasWithCapacity should not return nil")
+	}
+
+	// 测试负数容量
+	e2 := NewExtrasWithCapacity(-1)
+	if e2 == nil {
+		t.Fatal("NewExtrasWithCapacity with negative capacity should return valid Extras")
+	}
+}
+
+// TestExtras_ConcurrentRead 测试并发读取（安全）
+func TestExtras_ConcurrentRead(t *testing.T) {
+	e := NewExtras()
+	e.Set("key1", "value1")
+	e.Set("key2", 42)
+	e.Set("key3", true)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// 并发读取是安全的
+			_, _ = e.GetString("key1")
+			_, _ = e.GetInt("key2")
+			_, _ = e.GetBool("key3")
+		}()
+	}
+	wg.Wait()
+}
+
+// BenchmarkExtras_Set 基准测试：Set 操作
+func BenchmarkExtras_Set(b *testing.B) {
+	e := NewExtras()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		e.Set("key", "value")
+	}
+}
+
+// BenchmarkExtras_Get 基准测试：Get 操作
+func BenchmarkExtras_Get(b *testing.B) {
+	e := NewExtras()
+	e.Set("key", "value")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = e.GetString("key")
+	}
+}
+
+// BenchmarkExtras_GetInt 基准测试：GetInt 带类型转换
+func BenchmarkExtras_GetInt(b *testing.B) {
+	e := NewExtras()
+	e.Set("key", 42)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = e.GetInt("key")
+	}
+}
+
+// BenchmarkExtras_JSONMarshal 基准测试：JSON 序列化
+func BenchmarkExtras_JSONMarshal(b *testing.B) {
+	e := NewExtras()
+	e.Set("name", "test")
+	e.Set("age", 30)
+	e.Set("active", true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = json.Marshal(e)
+	}
+}
+
+// BenchmarkExtras_Clone 基准测试：Clone 操作
+func BenchmarkExtras_Clone(b *testing.B) {
+	e := NewExtras()
+	for i := 0; i < 10; i++ {
+		e.Set(string(rune('a'+i)), i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = e.Clone()
+	}
 }

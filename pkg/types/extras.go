@@ -45,6 +45,22 @@ func NewExtras() Extras {
 	return make(Extras)
 }
 
+// NewExtrasWithCapacity 创建具有指定初始容量的扩展字段实例
+//
+// 使用场景：预知字段数量时，减少扩容开销
+// 参数：
+//   - capacity: 预期的键值对数量
+//
+// 示例：
+//
+//	extras := NewExtrasWithCapacity(10)  // 预分配10个键值对的空间
+func NewExtrasWithCapacity(capacity int) Extras {
+	if capacity <= 0 {
+		return make(Extras)
+	}
+	return make(Extras, capacity)
+}
+
 // Set 设置键值对
 //
 // 使用场景：添加或更新扩展字段
@@ -737,7 +753,7 @@ func (e *Extras) Scan(value any) error {
 	case string:
 		bytes = []byte(v)
 	default:
-		return fmt.Errorf("failed to scan Extras: unsupported type %T, expected []byte or string", value)
+		return fmt.Errorf("failed to scan Extras: unsupported database type %T, expected []byte or string", value)
 	}
 
 	// 空值优化
@@ -805,6 +821,9 @@ func (e Extras) Has(key string) bool {
 //
 // 注意：返回的键顺序是随机的（map 无序）
 func (e Extras) Keys() []string {
+	if len(e) == 0 {
+		return []string{}
+	}
 	keys := make([]string, 0, len(e))
 	for k := range e {
 		keys = append(keys, k)
@@ -1145,7 +1164,7 @@ func convertToUint(v any) (uint, bool) {
 			return uint(val), true
 		}
 	case int, int8, int16, int32, int64:
-		if iVal := toInt64(val); iVal >= 0 && iVal <= int64(math.MaxInt64) {
+		if iVal := toInt64(val); iVal >= 0 && uint64(iVal) <= uint64(math.MaxUint) {
 			return uint(iVal), true
 		}
 	case float32:

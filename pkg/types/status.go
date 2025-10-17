@@ -414,12 +414,12 @@ func (s *Status) Scan(value interface{}) error {
 		// JSON 或文本格式（某些驱动如 SQLite）
 		var num int64
 		if err := json.Unmarshal(v, &num); err != nil {
-			return fmt.Errorf("failed to unmarshal Status from []byte: %w", err)
+			return fmt.Errorf("failed to unmarshal Status from bytes: %w", err)
 		}
 		*s = Status(num)
 	default:
 		// 不支持的类型：返回详细的错误信息
-		return fmt.Errorf("cannot scan type %T into Status: unsupported type", value)
+		return fmt.Errorf("cannot scan type %T into Status: unsupported database type, expected int64, int, uint64, or []byte", value)
 	}
 	return nil
 }

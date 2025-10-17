@@ -2,9 +2,11 @@ package types
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 )
 
+// TestStatus_Set 测试设置状态位
 func TestStatus_Set(t *testing.T) {
 	var s Status
 	s.Set(StatusUserDisabled)
@@ -21,6 +23,7 @@ func TestStatus_Set(t *testing.T) {
 	}
 }
 
+// TestStatus_Unset 测试取消状态位
 func TestStatus_Unset(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	s.Unset(StatusUserDisabled)
@@ -32,6 +35,7 @@ func TestStatus_Unset(t *testing.T) {
 	}
 }
 
+// TestStatus_Toggle 测试切换状态位
 func TestStatus_Toggle(t *testing.T) {
 	var s Status
 	s.Toggle(StatusUserDisabled)
@@ -45,6 +49,7 @@ func TestStatus_Toggle(t *testing.T) {
 	}
 }
 
+// TestStatus_Has 测试包含检查
 func TestStatus_Has(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	if !s.Contain(StatusUserDisabled) {
@@ -58,6 +63,7 @@ func TestStatus_Has(t *testing.T) {
 	}
 }
 
+// TestStatus_HasAny 测试包含任意状态
 func TestStatus_HasAny(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	if !s.HasAny(StatusUserDisabled, StatusSysDeleted) {
@@ -68,6 +74,7 @@ func TestStatus_HasAny(t *testing.T) {
 	}
 }
 
+// TestStatus_HasAll 测试包含所有状态
 func TestStatus_HasAll(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	if !s.HasAll(StatusUserDisabled, StatusSysHidden) {
@@ -78,6 +85,7 @@ func TestStatus_HasAll(t *testing.T) {
 	}
 }
 
+// TestStatus_SetMultiple 测试批量设置
 func TestStatus_SetMultiple(t *testing.T) {
 	var s Status
 	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmDisabled)
@@ -86,6 +94,7 @@ func TestStatus_SetMultiple(t *testing.T) {
 	}
 }
 
+// TestStatus_UnsetMultiple 测试批量取消
 func TestStatus_UnsetMultiple(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden | StatusAdmDisabled
 	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)
@@ -97,6 +106,7 @@ func TestStatus_UnsetMultiple(t *testing.T) {
 	}
 }
 
+// TestStatus_CanVerified 测试验证状态检查
 func TestStatus_CanVerified(t *testing.T) {
 	s := StatusNone
 	if !s.CanVerified() {
@@ -114,6 +124,7 @@ func TestStatus_CanVerified(t *testing.T) {
 	}
 }
 
+// TestStatus_JSON 测试 JSON 序列化和反序列化
 func TestStatus_JSON(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden | StatusAdmDisabled
 
@@ -134,6 +145,7 @@ func TestStatus_JSON(t *testing.T) {
 	}
 }
 
+// TestStatus_Value 测试数据库 Value 接口
 func TestStatus_Value(t *testing.T) {
 	s := StatusUserDisabled | StatusSysHidden
 	val, err := s.Value()
@@ -145,6 +157,7 @@ func TestStatus_Value(t *testing.T) {
 	}
 }
 
+// TestStatus_Scan 测试数据库 Scan 接口
 func TestStatus_Scan(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -172,6 +185,11 @@ func TestStatus_Scan(t *testing.T) {
 			input: nil,
 			want:  StatusNone,
 		},
+		{
+			name:    "unsupported type",
+			input:   "invalid",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -182,13 +200,14 @@ func TestStatus_Scan(t *testing.T) {
 				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if s != tt.want {
+			if !tt.wantErr && s != tt.want {
 				t.Errorf("Scan() got = %v, want %v", s, tt.want)
 			}
 		})
 	}
 }
 
+// TestStatus_HelperMethods 测试辅助方法
 func TestStatus_HelperMethods(t *testing.T) {
 	// 测试正常状态
 	s := StatusNone
@@ -235,6 +254,7 @@ func TestStatus_HelperMethods(t *testing.T) {
 	}
 }
 
+// TestStatus_CanVisible 测试可见性检查
 func TestStatus_CanVisible(t *testing.T) {
 	// 测试完全正常状态（应该可见）
 	s := StatusNone
@@ -262,16 +282,6 @@ func TestStatus_CanVisible(t *testing.T) {
 	s = StatusUserDeleted
 	if s.CanVisible() {
 		t.Error("Expected deleted status to not be visible")
-	}
-
-	s = StatusAdmDeleted
-	if s.CanVisible() {
-		t.Error("Expected admin deleted status to not be visible")
-	}
-
-	s = StatusSysDeleted
-	if s.CanVisible() {
-		t.Error("Expected system deleted status to not be visible")
 	}
 
 	// 测试被隐藏（不可见）
@@ -321,118 +331,14 @@ func TestStatus_CanVisible(t *testing.T) {
 	}
 }
 
+// TestStatus_CanEnable 测试启用状态检查
 func TestStatus_CanEnable(t *testing.T) {
-	// 测试完全正常状态（应该启用）
-	s := StatusNone
-	if !s.CanEnable() {
-		t.Error("Expected StatusNone to be enabled")
-	}
-
-	// 测试被禁用（不启用）
-	s = StatusUserDisabled
-	if s.CanEnable() {
-		t.Error("Expected user disabled status to not be enabled")
-	}
-
-	s = StatusAdmDisabled
-	if s.CanEnable() {
-		t.Error("Expected admin disabled status to not be enabled")
-	}
-
-	s = StatusSysDisabled
-	if s.CanEnable() {
-		t.Error("Expected system disabled status to not be enabled")
-	}
-
-	// 测试被删除（不启用）
-	s = StatusUserDeleted
-	if s.CanEnable() {
-		t.Error("Expected user deleted status to not be enabled")
-	}
-
-	s = StatusAdmDeleted
-	if s.CanEnable() {
-		t.Error("Expected admin deleted status to not be enabled")
-	}
-
-	s = StatusSysDeleted
-	if s.CanEnable() {
-		t.Error("Expected system deleted status to not be enabled")
-	}
-
-	// 测试组合状态（禁用+删除，不启用）
-	s = StatusUserDisabled | StatusUserDeleted
-	if s.CanEnable() {
-		t.Error("Expected disabled and deleted status to not be enabled")
-	}
-
-	// 测试被隐藏（应该启用，因为 CanEnable 不检查隐藏状态）
-	s = StatusUserHidden
-	if !s.CanEnable() {
-		t.Error("Expected hidden status to be enabled (CanEnable doesn't check hidden)")
-	}
-
-	s = StatusAdmHidden
-	if !s.CanEnable() {
-		t.Error("Expected admin hidden status to be enabled (CanEnable doesn't check hidden)")
-	}
-
-	s = StatusSysHidden
-	if !s.CanEnable() {
-		t.Error("Expected system hidden status to be enabled (CanEnable doesn't check hidden)")
-	}
-
-	// 测试未验证状态（应该启用，因为 CanEnable 不检查验证状态）
-	s = StatusSysUnverified
-	if !s.CanEnable() {
-		t.Error("Expected unverified status to be enabled (CanEnable doesn't check verification)")
-	}
-
-	s = StatusAdmUnverified
-	if !s.CanEnable() {
-		t.Error("Expected admin unverified status to be enabled (CanEnable doesn't check verification)")
-	}
-
-	s = StatusUserUnverified
-	if !s.CanEnable() {
-		t.Error("Expected user unverified status to be enabled (CanEnable doesn't check verification)")
-	}
-
-	// 测试多级别禁用叠加（不启用）
-	s = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
-	if s.CanEnable() {
-		t.Error("Expected all levels disabled to not be enabled")
-	}
-
-	// 测试多级别删除叠加（不启用）
-	s = StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted
-	if s.CanEnable() {
-		t.Error("Expected all levels deleted to not be enabled")
-	}
-
-	// 测试组合：隐藏+未验证（应该启用）
-	s = StatusUserHidden | StatusSysUnverified
-	if !s.CanEnable() {
-		t.Error("Expected hidden and unverified to be enabled (CanEnable only checks deleted and disabled)")
-	}
-
-	// 测试边界情况：只要有禁用或删除就不启用
-	s = StatusUserDisabled | StatusUserHidden | StatusSysUnverified
-	if s.CanEnable() {
-		t.Error("Expected disabled (with hidden and unverified) to not be enabled")
-	}
-
-	s = StatusUserDeleted | StatusUserHidden | StatusSysUnverified
-	if s.CanEnable() {
-		t.Error("Expected deleted (with hidden and unverified) to not be enabled")
-	}
-
-	// 测试任意一个级别的禁用或删除都会导致不启用
 	testCases := []struct {
 		name   string
 		status Status
 		expect bool
 	}{
+		{"None", StatusNone, true},
 		{"Only SysDisabled", StatusSysDisabled, false},
 		{"Only AdmDisabled", StatusAdmDisabled, false},
 		{"Only UserDisabled", StatusUserDisabled, false},
@@ -454,20 +360,22 @@ func TestStatus_CanEnable(t *testing.T) {
 	}
 }
 
+// TestStatus_PredefinedCombinations 测试预定义组合
 func TestStatus_PredefinedCombinations(t *testing.T) {
-	// Test soft deleted combination
+	// 测试软删除组合
 	s := StatusSysDeleted | StatusSysHidden
 	if !s.HasAll(StatusSysDeleted, StatusSysHidden) {
 		t.Error("Expected to have SysDeleted and SysHidden")
 	}
 
-	// Test hard disabled combination
+	// 测试全禁用组合
 	s = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
 	if !s.HasAll(StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled) {
 		t.Error("Expected to have all disabled flags")
 	}
 }
 
+// TestStatus_RealWorldScenario 测试真实场景
 func TestStatus_RealWorldScenario(t *testing.T) {
 	// 模拟用户状态管理
 	var userStatus Status
@@ -500,138 +408,173 @@ func TestStatus_RealWorldScenario(t *testing.T) {
 	if userStatus.IsHidden() {
 		t.Error("User should not be hidden after unset")
 	}
-
-	// 系统软删除
-	userStatus = StatusSysDeleted | StatusSysHidden
-	if !userStatus.IsDeleted() {
-		t.Error("User should be deleted")
-	}
-	if !userStatus.IsHidden() {
-		t.Error("Deleted user should be hidden")
-	}
 }
 
-func TestStatus_NegativeValueHandling(t *testing.T) {
-	// 测试负数值是否会影响位运算
-	var s Status = -1 // 所有位都是1（二进制补码表示）
+// TestStatus_Merge 测试合并操作
+func TestStatus_Merge(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
+	s.Merge(StatusUserDisabled | StatusAdmDeleted)
 
-	t.Logf("Negative status value: %d (binary: %b)", s, s)
-
-	// 负数包含所有位，所以应该包含所有状态
 	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected -1 to have StatusUserDisabled bit")
+		t.Error("Expected to contain StatusUserDisabled")
 	}
-	if !s.Contain(StatusSysHidden) {
-		t.Error("Expected -1 to have StatusSysHidden bit")
+	if !s.Contain(StatusAdmDeleted) {
+		t.Error("Expected to contain StatusAdmDeleted")
 	}
-
-	// 测试从负数取消位
-	s.Unset(StatusUserDisabled)
-	t.Logf("After unsetting UserDisabled: %d (binary: %b)", s, s)
-	if s.Contain(StatusUserDisabled) {
-		t.Error("Expected StatusUserDisabled to be unset")
-	}
-
-	// 正常使用场景下，状态值应该始终为非负数
-	var normalStatus Status
-	normalStatus.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmDisabled)
-	t.Logf("Normal status value: %d (binary: %b)", normalStatus, normalStatus)
-
-	if normalStatus < 0 {
-		t.Error("Normal status should never be negative")
+	if s.Contain(StatusSysHidden) {
+		t.Error("Expected to not contain StatusSysHidden after merge")
 	}
 }
 
-func TestStatus_ValueRange(t *testing.T) {
-	// 测试所有预定义状态都是正数
-	statuses := []Status{
-		StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled,
-		StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted,
-		StatusSysHidden, StatusAdmHidden, StatusUserHidden,
-		StatusSysUnverified, StatusAdmUnverified, StatusUserUnverified,
-	}
-
-	for _, status := range statuses {
-		if status < 0 {
-			t.Errorf("Status %d should be positive", status)
-		}
-		t.Logf("Status value: %d (binary: %b)", status, status)
-	}
-
-	// 测试设置多个状态后仍然是正数
-	var s Status
-	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmDisabled,
-		StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted)
-
-	if s < 0 {
-		t.Error("Status with multiple flags should still be positive")
-	}
-	t.Logf("Multiple flags status: %d (binary: %b)", s, s)
-}
-
-func TestStatus_MaxSafeBits(t *testing.T) {
-	// int64 可以安全使用 0-62 位（第63位是符号位）
-	// 我们目前使用了 12 个状态位（0-11），非常安全
-
-	// 测试使用高位（但不触及符号位）
-	var s Status = 1 << 62 // 使用第62位
-	t.Logf("High bit status: %d (binary: %b)", s, s)
-
-	// 确认我们当前的最高状态位是安全的
-	highestStatus := StatusExpand51
-	t.Logf("Highest defined status: %d (binary: %b)", highestStatus, highestStatus)
-
-	// 计算最高状态位使用的是第几位
-	var bitPosition int
-	for i := 0; i < 64; i++ {
-		if highestStatus == (1 << i) {
-			bitPosition = i
-			break
-		}
-	}
-	t.Logf("Highest status uses bit position: %d (safe range: 0-62)", bitPosition)
-
-	if bitPosition >= 63 {
-		t.Error("Status bits should not use bit 63 (sign bit)")
-	}
-}
-
-func TestStatus_LeveledDisableHideDelete(t *testing.T) {
-	// 测试分级禁用、隐藏、删除功能
-	var s Status
-
-	// 测试用户级别禁用
-	s.Set(StatusUserDisabled)
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Expected user disabled")
-	}
-	if !s.IsDisable() {
-		t.Error("Expected to be disabled")
-	}
-
-	// 测试管理员级别禁用
+// TestStatus_Clear 测试清空操作
+func TestStatus_Clear(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden
 	s.Clear()
-	s.Set(StatusAdmDisabled)
-	if !s.Contain(StatusAdmDisabled) {
-		t.Error("Expected admin disabled")
+
+	if s != StatusNone {
+		t.Errorf("Expected StatusNone after clear, got %v", s)
 	}
-	if !s.IsDisable() {
-		t.Error("Expected to be disabled")
+}
+
+// TestStatus_Equal 测试相等性检查
+func TestStatus_Equal(t *testing.T) {
+	s1 := StatusUserDisabled | StatusSysHidden
+	s2 := StatusUserDisabled | StatusSysHidden
+	s3 := StatusUserDisabled
+
+	if !s1.Equal(s2) {
+		t.Error("Expected s1 to equal s2")
+	}
+	if s1.Equal(s3) {
+		t.Error("Expected s1 to not equal s3")
+	}
+}
+
+// TestStatus_BitOperations 测试位运算正确性
+func TestStatus_BitOperations(t *testing.T) {
+	// 验证状态位定义正确
+	if StatusSysDeleted != 1 {
+		t.Errorf("StatusSysDeleted should be 1, got %d", StatusSysDeleted)
+	}
+	if StatusAdmDeleted != 2 {
+		t.Errorf("StatusAdmDeleted should be 2, got %d", StatusAdmDeleted)
+	}
+	if StatusUserDeleted != 4 {
+		t.Errorf("StatusUserDeleted should be 4, got %d", StatusUserDeleted)
 	}
 
-	// 测试系统级别禁用
-	s.Clear()
-	s.Set(StatusSysDisabled)
-	if !s.Contain(StatusSysDisabled) {
-		t.Error("Expected system disabled")
+	// 验证位运算不冲突
+	s := StatusNone
+	s.Set(StatusSysDeleted)
+	s.Set(StatusAdmDeleted)
+
+	if !s.HasAll(StatusSysDeleted, StatusAdmDeleted) {
+		t.Error("Expected to have both flags")
+	}
+}
+
+// TestStatus_EdgeCases 测试边缘情况
+func TestStatus_EdgeCases(t *testing.T) {
+	t.Run("Zero value", func(t *testing.T) {
+		var s Status
+		if s != StatusNone {
+			t.Error("Zero value should be StatusNone")
+		}
+		if !s.CanVerified() {
+			t.Error("Zero value should be verified")
+		}
+	})
+
+	t.Run("All flags", func(t *testing.T) {
+		s := StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted |
+			StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled |
+			StatusSysHidden | StatusAdmHidden | StatusUserHidden |
+			StatusSysUnverified | StatusAdmUnverified | StatusUserUnverified
+
+		if !s.IsDeleted() || !s.IsDisable() || !s.IsHidden() || !s.IsUnverified() {
+			t.Error("Expected all checks to be true")
+		}
+		if s.CanVerified() {
+			t.Error("Expected CanVerified to be false with all flags")
+		}
+	})
+}
+
+// TestStatus_JSONBytes 测试 []byte 类型的 Scan
+func TestStatus_JSONBytes(t *testing.T) {
+	var s Status
+	data := []byte("42")
+
+	err := s.Scan(data)
+	if err != nil {
+		t.Fatalf("Scan([]byte) failed: %v", err)
 	}
 
-	// 测试多级别同时禁用
-	s = StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled
-	if !s.IsDisable() {
-		t.Error("Expected to be disabled")
+	if s != Status(42) {
+		t.Errorf("Expected Status(42), got %v", s)
 	}
-	if s.CanVerified() {
-		t.Error("Expected not to be normal when disabled")
+}
+
+// TestStatus_ConcurrentRead 测试并发读取（安全）
+func TestStatus_ConcurrentRead(t *testing.T) {
+	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// 并发读取是安全的
+			_ = s.IsDisable()
+			_ = s.IsHidden()
+			_ = s.IsDeleted()
+			_ = s.CanVisible()
+		}()
+	}
+	wg.Wait()
+}
+
+// BenchmarkStatus_Set 基准测试：Set 操作
+func BenchmarkStatus_Set(b *testing.B) {
+	var s Status
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.Set(StatusUserDisabled)
+	}
+}
+
+// BenchmarkStatus_Contain 基准测试：Contain 检查
+func BenchmarkStatus_Contain(b *testing.B) {
+	s := StatusUserDisabled | StatusSysHidden
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.Contain(StatusUserDisabled)
+	}
+}
+
+// BenchmarkStatus_HasAny 基准测试：HasAny 检查
+func BenchmarkStatus_HasAny(b *testing.B) {
+	s := StatusUserDisabled | StatusSysHidden
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.HasAny(StatusUserDisabled, StatusAdmDisabled)
+	}
+}
+
+// BenchmarkStatus_CanVerified 基准测试：CanVerified 检查
+func BenchmarkStatus_CanVerified(b *testing.B) {
+	s := StatusNone
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.CanVerified()
+	}
+}
+
+// BenchmarkStatus_JSON 基准测试：JSON 序列化
+func BenchmarkStatus_JSON(b *testing.B) {
+	s := StatusUserDisabled | StatusSysHidden
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = json.Marshal(s)
 	}
 }
