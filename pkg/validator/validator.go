@@ -49,14 +49,36 @@ type NestedValidatable interface {
 	ValidateNested(scene ValidateScene) []*FieldError
 }
 
+// StructLevelValidatable 结构体级别验证接口（自动注册）
+// 实现此接口的类型会在首次验证时自动注册到验证器
+// 用于跨字段验证、复杂的业务逻辑验证
+// 注意：不再暴露第三方库类型，使用封装的 StructLevel 接口
+type StructLevelValidatable interface {
+	// StructLevelValidation 结构体级别验证
+	// sl: StructLevel 提供的验证上下文（已封装）
+	// 可以通过 sl.ReportError() 报告验证错误
+	StructLevelValidation(sl StructLevel)
+}
+
+// MapRulesValidatable Map 规则验证接口（自动注册）
+// 实现此接口的类型会在首次验证时自动注册到验证器
+// 用于简单的字段验证规则定义
+type MapRulesValidatable interface {
+	// ValidationMapRules 返回字段验证规则的 map
+	// key: 字段名, value: 验证规则（遵循 go-playground/validator 标签格式）
+	ValidationMapRules() map[string]string
+}
+
 // Validator 验证器，提供结构体字段验证功能
 // 支持场景化验证、嵌套验证、自定义验证等多种验证方式
 // 线程安全，可在多个 goroutine 中并发使用
 type Validator struct {
-	validate       *validator.Validate // 底层验证器实例
-	typeCache      *sync.Map           // 类型信息缓存，key: reflect.Type, value: *typeCache
-	registeredTags *sync.Map           // 已注册的验证标签缓存，key: string(tag), value: bool
-	mu             sync.RWMutex        // 保护注册自定义验证函数的互斥锁
+	validate          *validator.Validate // 底层验证器实例
+	typeCache         *sync.Map           // 类型信息缓存，key: reflect.Type, value: *typeCache
+	registeredTags    *sync.Map           // 已注册的验证标签缓存，key: string(tag), value: bool
+	registeredStructs *sync.Map           // 已注册的结构体验证缓存，key: reflect.Type, value: bool
+	autoRegistered    *sync.Map           // 自动注册的类型缓存，key: reflect.Type, value: bool
+	mu                sync.RWMutex        // 保护注册自定义验证函数的互斥锁
 }
 
 // typeCache 类型信息缓存结构，用于避免重复的类型断言
@@ -65,8 +87,10 @@ type typeCache struct {
 	isValidatable   bool                                // 是否实现了 Validatable 接口
 	validationRules map[ValidateScene]map[string]string // 缓存的验证规则
 
-	isCustomValidatable bool // 是否实现了 CustomValidatable 接口
-	isNestedValidatable bool // 是否实现了 NestedValidatable 接口
+	isCustomValidatable      bool // 是否实现了 CustomValidatable 接口
+	isNestedValidatable      bool // 是否实现了 NestedValidatable 接口
+	isStructLevelValidatable bool // 是否实现了 StructLevelValidatable 接口（自动注册）
+	isMapRulesValidatable    bool // 是否实现了 MapRulesValidatable 接口（自动注册）
 }
 
 var (
@@ -85,6 +109,16 @@ func Default() *Validator {
 	return defaultValidator
 }
 
+// Validate 使用默认验证器验证
+func Validate(obj any, scene ValidateScene) []*FieldError {
+	return Default().Validate(obj, scene)
+}
+
+// ClearTypeCache 清除默认验证器的类型缓存
+func ClearTypeCache() {
+	Default().ClearTypeCache()
+}
+
 // New 创建新的验证器实例
 // 返回一个已配置好的验证器，可独立使用
 func New() *Validator {
@@ -101,9 +135,11 @@ func New() *Validator {
 	})
 
 	return &Validator{
-		validate:       v,
-		typeCache:      &sync.Map{},
-		registeredTags: &sync.Map{},
+		validate:          v,
+		typeCache:         &sync.Map{},
+		registeredTags:    &sync.Map{},
+		registeredStructs: &sync.Map{},
+		autoRegistered:    &sync.Map{},
 	}
 }
 
@@ -139,6 +175,8 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 	}
 	_, cache.isCustomValidatable = obj.(CustomValidatable)
 	_, cache.isNestedValidatable = obj.(NestedValidatable)
+	_, cache.isStructLevelValidatable = obj.(StructLevelValidatable)
+	_, cache.isMapRulesValidatable = obj.(MapRulesValidatable)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := v.typeCache.LoadOrStore(typ, cache)
@@ -147,10 +185,11 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 
 // Validate 验证模型，支持指定场景和嵌套验证
 // 验证流程：
-// 1. 执行结构体标签验证（基于 Validatable 接口的规则）
-// 2. 递归验证嵌套的结构体字段（包括嵌入字段）
-// 3. 执行自定义验证逻辑（CustomValidatable 接口）
-// 4. 验证实现了 NestedValidatable 接口的嵌套字段
+// 1. 自动注册实现了自动注册接口的类型
+// 2. 执行结构体标签验证（基于 Validatable 接口的规则）
+// 3. 递归验证嵌套的结构体字段（包括嵌入字段）
+// 4. 执行自定义验证逻辑（CustomValidatable 接口）
+// 5. 验证实现了 NestedValidatable 接口的嵌套字段
 // 参数：
 //
 //	obj: 待验证的对象
@@ -163,11 +202,14 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 		return []*FieldError{NewFieldError("struct", "required", nil, nil)}
 	}
 
-	// 创建验证上下文
-	ctx := NewValidationContext(scene)
-
 	// 获取类型缓存
 	cache := v.getOrCacheTypeInfo(obj)
+
+	// 0. 自动注册实现了自动注册接口的类型（懒加载，只注册一次）
+	v.autoRegisterIfNeeded(obj, cache)
+
+	// 创建验证上下文
+	ctx := NewValidationContext(scene)
 
 	// 1. 执行结构体标签验证
 	if cache.isValidatable {
@@ -203,6 +245,55 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	}
 
 	return nil
+}
+
+// autoRegisterIfNeeded 自动注册实现了自动注册接口的类型
+// 这是懒加载机制，只在首次验证时注册一次
+func (v *Validator) autoRegisterIfNeeded(obj any, cache *typeCache) {
+	typ := reflect.TypeOf(obj)
+	if typ == nil {
+		return
+	}
+
+	// 检查是否已经自动注册过
+	if _, registered := v.autoRegistered.Load(typ); registered {
+		return
+	}
+
+	// 标记为已检查（即使不需要注册，也避免重复检查）
+	v.autoRegistered.Store(typ, true)
+
+	// 自动注册 StructLevelValidatable
+	if cache.isStructLevelValidatable {
+		structLevelValidatable := obj.(StructLevelValidatable)
+		v.mu.Lock()
+		if _, loaded := v.registeredStructs.LoadOrStore(typ, true); !loaded {
+			// 包装调用对象的 StructLevelValidation 方法，使用封装的 StructLevel
+			v.validate.RegisterStructValidation(func(sl validator.StructLevel) {
+				// 通过类型断言获取当前验证的对象
+				if current, ok := sl.Current().Interface().(StructLevelValidatable); ok {
+					// 包装第三方库的 StructLevel，隐藏实现细节
+					wrapper := &structLevelWrapper{sl: sl}
+					current.StructLevelValidation(wrapper)
+				}
+			}, obj)
+		}
+		v.mu.Unlock()
+		_ = structLevelValidatable // 避免 unused 警告
+	}
+
+	// 自动注册 MapRulesValidatable
+	if cache.isMapRulesValidatable {
+		mapRulesValidatable := obj.(MapRulesValidatable)
+		rules := mapRulesValidatable.ValidationMapRules()
+		if rules != nil && len(rules) > 0 {
+			v.mu.Lock()
+			if _, loaded := v.registeredStructs.LoadOrStore(typ, true); !loaded {
+				v.validate.RegisterStructValidationMapRules(rules, obj)
+			}
+			v.mu.Unlock()
+		}
+	}
 }
 
 // collectValidationErrors 收集验证错误（不中断）
@@ -407,55 +498,6 @@ func (v *Validator) findFieldByJSONTag(val reflect.Value, typ reflect.Type, json
 	return reflect.Value{}
 }
 
-// RegisterValidation 注册自定义验证规则
-// 允许扩展验证器，添加自定义的验证标签
-// 参数：
-//
-//	tag: 验证标签名称
-//	fn: 验证函数
-//
-// 返回：注册错误，nil 表示成功
-// 线程安全
-func (v *Validator) RegisterValidation(tag string, fn validator.Func) error {
-	// 安全检查：防止空标签名
-	if tag == "" {
-		return fmt.Errorf("validation tag cannot be empty")
-	}
-
-	// 安全检查：防止 nil 函数
-	if fn == nil {
-		return fmt.Errorf("validation function cannot be nil")
-	}
-
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	// 检查标签是否已注册
-	if _, loaded := v.registeredTags.LoadOrStore(tag, true); loaded {
-		// 标签已注册，返回 nil
-		return nil
-	}
-
-	// 标签未注册，执行注册
-	return v.validate.RegisterValidation(tag, fn)
-}
-
-// ValidateStruct 简单的结构体验证（不区分场景）
-// 使用 go-playground/validator 的默认验证逻辑
-// 参数：
-//
-//	obj: 待验证的对象
-//
-// 返回：验证错误，nil 表示验证成功
-func (v *Validator) ValidateStruct(obj any) error {
-	// 安全检查：防止 nil 对象
-	if obj == nil {
-		return fmt.Errorf("validation failed: object cannot be nil")
-	}
-
-	return v.validate.Struct(obj)
-}
-
 // ClearTypeCache 清除类型缓存
 // 用于测试或需要重新加载类型信息时
 // 注意：此方法会清空所有缓存的类型信息，可能影响性能
@@ -466,28 +508,7 @@ func (v *Validator) ClearTypeCache() {
 
 // GetUnderlyingValidator 获取底层的 go-playground/validator 实例
 // 用于需要直接访问底层验证器的高级场景
+// 警告：此方法暴露了第三方库的实现细节，仅用于高级场景
 func (v *Validator) GetUnderlyingValidator() *validator.Validate {
 	return v.validate
-}
-
-// 便捷函数
-
-// Validate 使用默认验证器验证
-func Validate(obj any, scene ValidateScene) []*FieldError {
-	return Default().Validate(obj, scene)
-}
-
-// ValidateStruct 使用默认验证器验证结构体
-func ValidateStruct(obj any) error {
-	return Default().ValidateStruct(obj)
-}
-
-// RegisterValidation 注册自定义验证规则到默认验证器
-func RegisterValidation(tag string, fn validator.Func) error {
-	return Default().RegisterValidation(tag, fn)
-}
-
-// ClearTypeCache 清除默认验证器的类型缓存
-func ClearTypeCache() {
-	Default().ClearTypeCache()
 }
