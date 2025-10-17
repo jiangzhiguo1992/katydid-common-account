@@ -52,30 +52,30 @@ status.Unset(types.StatusUserDisabled)
 status.Toggle(types.StatusUserHidden)
 ```
 
-### 状态常量
+## 状态常量
 
-#### 删除状态（位 0-2）
+### 删除状态（位 0-2）
 ```go
 types.StatusSysDeleted   // 系统删除：系统自动标记，通常不可恢复
 types.StatusAdmDeleted   // 管理员删除：管理员操作，可能支持恢复
 types.StatusUserDeleted  // 用户删除：用户主动删除，通常可恢复
 ```
 
-#### 禁用状态（位 3-5）
+### 禁用状态（位 3-5）
 ```go
 types.StatusSysDisabled  // 系统禁用：系统检测异常后自动禁用
 types.StatusAdmDisabled  // 管理员禁用：管理员手动禁用
 types.StatusUserDisabled // 用户禁用：用户主动禁用（如账号冻结）
 ```
 
-#### 隐藏状态（位 6-8）
+### 隐藏状态（位 6-8）
 ```go
 types.StatusSysHidden    // 系统隐藏：系统根据规则自动隐藏
 types.StatusAdmHidden    // 管理员隐藏：管理员手动隐藏内容
 types.StatusUserHidden   // 用户隐藏：用户设置为私密/不公开
 ```
 
-#### 未验证状态（位 9-11）
+### 未验证状态（位 9-11）
 ```go
 types.StatusSysUnverified  // 系统未验证：等待系统自动验证
 types.StatusAdmUnverified  // 管理员未验证：等待管理员审核
@@ -125,7 +125,7 @@ s.Clear()                            // s = 0
 ```go
 var s types.Status
 
-// SetMultiple: 批量设置
+// SetMultiple: 批量设置（推荐，性能更好）
 s.SetMultiple(
     types.StatusUserDisabled,
     types.StatusSysHidden,
@@ -365,17 +365,17 @@ if s.Contain(StatusCustom1) {
 }
 ```
 
-## 性能优化
+## 性能优化指南
 
 ### 1. 使用预定义组合常量
 
 ```go
-// 推荐：使用预定义常量（单次位运算）
+// ✅ 推荐：使用预定义常量（单次位运算，O(1)）
 if status.HasAny(types.StatusAllDeleted) {
     // 检查任意删除状态
 }
 
-// 不推荐：每次调用都要合并（多次位运算）
+// ⚠️ 不推荐：每次调用都要合并（多次位运算）
 if status.HasAny(
     types.StatusSysDeleted,
     types.StatusAdmDeleted,
@@ -400,14 +400,21 @@ db.Where("status & ? = 0", types.StatusAllDeleted).Find(&articles)
 ### 3. 批量操作
 
 ```go
-// 推荐：批量设置
+// ✅ 推荐：批量设置（单次位运算）
 s.SetMultiple(status1, status2, status3)
 
-// 不推荐：多次单独设置
+// ⚠️ 不推荐：多次单独设置（多次位运算）
 s.Set(status1)
 s.Set(status2)
 s.Set(status3)
 ```
+
+### 4. 性能特点
+
+- **时间复杂度**: 所有操作均为 O(1)
+- **内存占用**: 固定 8 字节（int64）
+- **CPU 缓存友好**: 纯位运算，无内存分配
+- **线程安全**: 值类型天然线程安全（读取）
 
 ## 最佳实践
 
@@ -433,12 +440,12 @@ if user.WantsPrivate() {
 ### 2. 业务语义优先
 
 ```go
-// 推荐：使用业务语义方法
+// ✅ 推荐：使用业务语义方法（可读性高）
 if article.Status.CanVisible() {
     renderArticle(article)
 }
 
-// 不推荐：直接位运算判断
+// ⚠️ 不推荐：直接位运算判断（可读性差）
 if article.Status & types.StatusAllHidden == 0 && 
    article.Status & types.StatusAllDeleted == 0 {
     renderArticle(article)
@@ -470,6 +477,16 @@ if !article.Status.IsValid() {
 }
 ```
 
+### 5. 替换状态 vs 追加状态
+
+```go
+// 追加状态：使用 Set 方法
+s.Set(types.StatusUserDisabled)  // 保留原有状态，追加新状态
+
+// 替换状态：直接赋值
+s = types.StatusUserDisabled     // 覆盖所有状态，仅保留指定状态
+```
+
 ## 常见问题
 
 ### Q: 为什么 Set 方法需要指针接收者？
@@ -480,20 +497,22 @@ A: 因为需要修改状态本身。值接收者只会修改副本，不会影�
 var s types.Status
 s.Set(types.StatusUserDisabled) // s 被修改
 
-// 错误用法（编译错误）
-s := types.Status(0)
-s.Set(types.StatusUserDisabled) // 这样写会修改副本，不影响 s
+// 错误示例
+func modifyStatus(s types.Status) {
+    s.Set(types.StatusUserDisabled) // 只修改副本，不影响原值
+}
 ```
 
 ### Q: 如何判断状态是否为"正常"？
 A: 有两种方式：
+
 ```go
-// 方式1：检查是否为零值
+// 方式1：检查是否为零值（完全正常）
 if status == types.StatusNone {
     // 完全正常
 }
 
-// 方式2：检查是否可用
+// 方式2：检查是否可用（业务上可用）
 if status.CanVerified() {
     // 业务上可用
 }
@@ -520,248 +539,95 @@ A: `int64` 的符号位（第 63 位）为 1 表示负数，会与状态位冲�
 A: 使用 `Clear()` 方法或直接赋值为 `StatusNone`：
 
 ```go
-// 方式1
+// 方式1：使用 Clear 方法
 status.Clear()
 
-// 方式2
+// 方式2：直接赋值
 status = types.StatusNone
 ```
 
-## 更新日志
-
-### v1.1.0 (当前版本)
-
-#### 🔥 严重 Bug 修复（核心功能）
-
-**1. Set 方法的严重 bug**
-- **问题**：原始代码使用 `*s = flag`，会**覆盖所有现有状态**而不是追加
-- **影响**：导致多状态管理完全失效，这是核心功能 bug
-- **修复**：改为 `*s |= flag`，正确实现状态追加
+### Q: Set 方法是追加还是覆盖？
+A: Set 方法是**追加**状态，保留原有状态。如果需要覆盖，请直接赋值：
 
 ```go
-// ❌ 错误的原代码
-func (s *Status) Set(flag Status) {
-    *s = flag  // 覆盖所有现有状态
-}
+var s types.Status
+s.Set(types.StatusUserDisabled)  // s = 32
+s.Set(types.StatusSysHidden)     // s = 96 (32 | 64)，保留原有状态
 
-// ✅ 修复后的代码
-func (s *Status) Set(flag Status) {
-    *s |= flag  // 追加状态，保留原有状态
-}
-
-// 实际效果对比
-var s Status
-s.Set(StatusUserDisabled)  // s = 32
-s.Set(StatusSysHidden)     // 修复前: s = 64（丢失 32）
-                           // 修复后: s = 96（32 | 64）
+// 如果需要覆盖
+s = types.StatusSysHidden        // s = 64，覆盖所有状态
 ```
 
-**2. HasAny 和 HasAll 方法的逻辑错误**
-- **问题**：循环中使用 `combined = flag` 会覆盖之前的标志
-- **影响**：批量检查逻辑错误，只能检查最后一个标志
-- **修复**：改为 `combined |= flag` 正确合并所有标志
+### Q: 并发环境下如何使用？
+A: Status 是值类型，读取天然线程安全。写入需要加锁：
 
 ```go
-// ❌ 错误的原代码
-for _, flag := range flags {
-    combined = flag  // 覆盖之前的标志
+type SafeStatus struct {
+    mu     sync.RWMutex
+    status types.Status
 }
 
-// ✅ 修复后的代码
-for _, flag := range flags {
-    combined |= flag  // 合并所有标志
+func (s *SafeStatus) Set(flag types.Status) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    s.status.Set(flag)
+}
+
+func (s *SafeStatus) Get() types.Status {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    return s.status
 }
 ```
 
-**3. SetMultiple 和 UnsetMultiple 的性能问题**
-- **优化前**：多次位运算，O(n) 复杂度
-- **优化后**：预先合并标志，单次位运算，O(1) 复杂度
+## 技术细节
+
+### 位运算原理
 
 ```go
-// 优化后的代码
-func (s *Status) SetMultiple(flags ...Status) {
-    var combined Status
-    for _, flag := range flags {
-        combined |= flag
-    }
-    *s |= combined  // 单次 OR 运算
-}
+// 位设置（OR）
+status |= flag          // 保留原有位，设置新位
+
+// 位清除（AND NOT）
+status &= ^flag         // 保留原有位，清除指定位
+
+// 位检查（AND）
+status & flag == flag   // 检查是否包含所有指定位
+
+// 位切换（XOR）
+status ^= flag          // 切换指定位
 ```
 
-#### 🛡️ 健壮性增强
+### 状态位布局
 
-**Scan 方法的边界检查**
-- **问题**：从数据库读取时缺少负数和溢出检查
-- **风险**：可能导致无效状态值污染数据
-- **修复**：添加完整的边界检查和清晰的错误信息
-
-```go
-// 添加的检查
-case int64:
-    if v < 0 {
-        return fmt.Errorf("invalid Status value: negative number %d is not allowed (sign bit conflict)", v)
-    }
-    *s = Status(v)
-
-case uint64:
-    if v > uint64(MaxStatus) {
-        return fmt.Errorf("invalid Status value: %d exceeds maximum allowed value %d (overflow)", v, MaxStatus)
-    }
-    *s = Status(v)
+```
+位 0-2:   删除状态 (Deleted)   - System/Admin/User
+位 3-5:   禁用状态 (Disabled)  - System/Admin/User
+位 6-8:   隐藏状态 (Hidden)    - System/Admin/User
+位 9-11:  未验证状态 (Unverified) - System/Admin/User
+位 12-62: 自定义扩展状态 (51 个可用位)
+位 63:    符号位（保留，不可使用）
 ```
 
-**错误信息规范化**
-- 统一的英文错误前缀和格式
-- 包含具体的错误上下文（类型、值、原因）
-- 支持错误链（使用 `%w`）
-- 提供问题原因说明（括号内补充）
+### 边界检查
 
-#### 🚀 性能优化
+从数据库读取状态时，会自动进行边界检查：
+- 负数检查：防止符号位冲突
+- 溢出检查：防止超出 int64 最大值
+- 类型检查：仅支持整数类型
 
-**批量操作优化**
+## 总结
 
-| 操作 | 优化前 | 优化后 | 提升 |
-|------|--------|--------|------|
-| HasAny (n个标志) | O(n) 次位运算 | O(1) 单次位运算 | **n倍** |
-| HasAll (n个标志) | O(n) 次位运算 | O(1) 单次位运算 | **n倍** |
-| SetMultiple | O(n) 次赋值 | O(1) 单次 OR | **n倍** |
-| UnsetMultiple | O(n) 次清除 | O(1) 单次 AND NOT | **n倍** |
+Status 模块提供了：
+- ✅ 高性能的位运算状态管理
+- ✅ 清晰的分层状态设计
+- ✅ 丰富的业务语义方法
+- ✅ 完善的数据库集成
+- ✅ 灵活的自定义扩展
 
-**位运算优化特点**
-- CPU 缓存友好：单次位运算利用 CPU 缓存
-- 无内存分配：纯位运算，零内存开销
-- 指令级并行：现代 CPU 可并行执行
-
-#### 📚 文档完善
-
-**代码注释 100% 覆盖**
-- 每个方法都包含：功能描述、使用场景、时间复杂度、参数说明、示例代码、注意事项
-- 顶层类型注释包含：设计说明、性能特点、位运算原理、注意事项
-- 内联注释：算法说明、边界检查说明、性能优化说明
-
-**50+ 实际使用示例**
-- 基本位运算操作
-- 4个完整业务场景（审核流程、权限管理、软删除、可见性控制）
-- 数据库查询优化
-- 自定义状态扩展
-
-**业务场景示例完整性**
-1. 内容审核流程：等待审核 → 审核通过/不通过
-2. 用户权限管理：异常检测 → 自动禁用 → 申诉解除
-3. 软删除和回收站：用户删除 → 回收站 → 恢复/永久删除
-4. 内容可见性控制：私密设置 → 可见性检查 → 强制公开
-
-#### ✅ 测试增强
-
-**新增测试用例**
-- `TestStatusSetAndUnset`：验证 Set 方法 bug 修复
-- `TestStatusBatchOperations`：批量操作测试
-- `TestStatusBusinessLogic`：业务逻辑完整性测试
-- `TestStatusDatabaseScan`：数据库边界检查测试
-
-**测试覆盖率提升**
-- 从 ~50% 提升到 ~95%
-- 位运算操作：100% 覆盖
-- 状态检查：所有组合场景
-- 数据库接口：所有类型和错误情况
-- 业务语义：所有逻辑分支
-
-**基准测试完善**
-```go
-BenchmarkStatus_Set           // 位设置性能
-BenchmarkStatus_Contain       // 状态检查性能
-BenchmarkStatus_HasAll        // 批量检查性能
-BenchmarkStatus_JSONMarshal   // JSON 序列化性能
-```
-
-#### 📊 改进成果统计
-
-**代码质量提升**
-
-| 指标 | 改进前 | 改进后 | 提升 |
-|------|--------|--------|------|
-| 严重 Bug | 3个 | 0个 | ✅ 100% |
-| 边界检查 | 部分 | 完整 | ✅ 显著 |
-| 性能优化 | 基础 | 高效 | ✅ n倍 |
-| 测试覆盖 | ~50% | ~95% | ✅ +45% |
-
-**性能提升**
-- 批量状态检查：从 O(n) 优化到 O(1)
-- CPU 指令减少：预先合并，单次位运算
-- 无内存分配：纯位运算，零内存开销
-
-#### ⚠️ 重要变更说明
-
-**Status.Set 行为变更（bug 修复）**
-- **旧行为**：覆盖所有状态（错误的）
-- **新行为**：追加状态（正确的位运算语义）
-- **影响**：所有使用 Set 方法的代码
-- **迁移指南**：
-  ```go
-  // 如果确实需要覆盖（替换）所有状态
-  // 旧代码：s.Set(flag)  // 期望覆盖
-  // 新代码：s = flag     // 直接赋值
-  
-  // 如果需要追加状态（大部分场景）
-  s.Set(flag)  // 正确的行为
-  ```
-
-**检查清单**
-- [ ] 检查 Status.Set 的使用是否符合预期（追加而非覆盖）
-- [ ] 验证数据库查询使用位运算正确
-- [ ] 确认状态组合逻辑符合业务需求
-- [ ] 检查并发场景（Status 值类型天然线程安全）
-
-#### 🎯 最佳实践建议
-
-**1. 使用预定义组合常量**
-```go
-// ✅ 推荐：使用预定义常量（单次位运算）
-if status.HasAny(StatusAllDeleted) {
-    // 检查任意删除状态
-}
-
-// ⚠️ 不推荐：每次调用都要合并（性能略低）
-if status.HasAny(StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted) {
-    // 多次位运算
-}
-```
-
-**2. 批量操作优先**
-```go
-// ✅ 推荐：批量设置
-s.SetMultiple(status1, status2, status3)
-
-// ⚠️ 不推荐：多次单独设置
-s.Set(status1)
-s.Set(status2)
-s.Set(status3)
-```
-
-**3. 业务语义方法优先**
-```go
-// ✅ 推荐：使用业务语义方法
-if article.Status.CanVisible() {
-    renderArticle(article)
-}
-
-// ⚠️ 不推荐：直接位运算判断
-if article.Status & StatusAllHidden == 0 && 
-   article.Status & StatusAllDeleted == 0 {
-    renderArticle(article)
-}
-```
-
-#### 🔄 向后兼容性
-
-- ✅ 除 Set 方法 bug 修复外，所有改进都向后兼容
-- ✅ 数据库存储格式不变（int64）
-- ✅ JSON 序列化格式不变（数字）
-- ⚠️ Set 方法行为变更是 bug 修复，不是破坏性变更
-
-### v1.0.0
-- 初始版本发布
-- 基础位运算操作
-- 预定义状态常量
-- 数据库集成
-- 业务语义方法
+适用场景：
+- 用户账号状态管理
+- 内容审核流程
+- 软删除和回收站
+- 多维度可见性控制
+- 任何需要多状态并存的场景
