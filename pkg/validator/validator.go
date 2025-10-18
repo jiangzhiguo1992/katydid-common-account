@@ -16,7 +16,6 @@ import (
 //   - SceneUpdate: 更新场景（通常允许部分字段为空）
 //   - SceneDelete: 删除场景（通常只需要 ID）
 //
-// TODO:GG 改成int64，适配位运算
 type ValidateScene string
 
 // 验证器配置常量
@@ -233,7 +232,7 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 步骤1: 执行结构体标签验证（RuleValidator 直接读取规则，无需注册）
 	if cache.isRuleValidator {
 		if cache.validationRules != nil {
-			// TODO:GG 和下面哪个更快?不需要自动注册？
+			// 这个不使用使用标准的 validate tag 标签，而是使用 RuleValidator 提供的规则
 			v.collectValidationErrors(obj, cache.validationRules, ctx)
 		}
 	} else {
@@ -414,6 +413,7 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 		}
 
 		// 验证字段（使用底层验证器的 Var 方法）
+		// 只验证一个变量，不涉及结构体，不需要提前注册
 		if err := v.validate.Var(field.Interface(), rule); err != nil {
 			v.addFieldErrors(obj, err, ctx)
 		}
