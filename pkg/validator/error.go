@@ -228,7 +228,7 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 //	param: 验证参数
 //	message: 自定义错误消息
 //	namespace: 字段命名空间
-func (vc *ValidationContext) AddErrorByDetail(fieldName, jsonName, tag, param, namespace, message string, value any) {
+func (vc *ValidationContext) AddErrorByDetail(fieldName, jsonName, tag, param string, value any, namespace, message string) {
 	// 安全检查：防止恶意数据导致内存溢出
 	if len(vc.Errors) >= maxErrorsCapacity {
 		return

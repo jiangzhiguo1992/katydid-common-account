@@ -48,14 +48,13 @@ func (u *TestUser) RuleValidation() map[ValidateScene]map[string]string {
 }
 
 // CrossFieldValidation 实现 CustomValidator 接口
-func (u *TestUser) CustomValidation(scene ValidateScene) []*FieldError {
+func (u *TestUser) CustomValidation(scene ValidateScene, reportError FuncReportError) {
 	if scene&SceneCreate != 0 {
 		// 创建时，用户名不能是admin
 		if u.Username == "admin" {
-			return []*FieldError{}
+			reportError(u.Username, "Username", "username", "reserved", "admin")
 		}
 	}
-	return nil
 }
 
 // GetErrorMessage 实现 ErrorMessageProvider 接口，自定义错误消息
@@ -582,4 +581,253 @@ func BenchmarkValidate_Parallel(b *testing.B) {
 			_ = v.Validate(user, SceneCreate)
 		}
 	})
+}
+
+// User 用户模型 - 演示使用 FuncReportError 的新方式
+type User struct {
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	ConfirmPassword string `json:"confirm_password"`
+	Email           string `json:"email"`
+	Age             int    `json:"age"`
+}
+
+// CustomValidation 实现 CustomValidator 接口
+// 所有错误都通过 reportError 报告
+func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
+	// 跨字段验证：密码和确认密码必须一致
+	if u.Password != u.ConfirmPassword {
+		reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+	}
+
+	// 场景化验证：创建时必须年满18岁
+	if scene == SceneCreate && u.Age < 18 {
+		reportError(u.Age, "Age", "age", "min_age", "18")
+	}
+
+	// 场景化验证：更新时用户名不能为空
+	if scene == SceneUpdate && u.Username == "" {
+		reportError(u.Username, "Username", "username", "required", "")
+	}
+}
+
+// Product 商品模型 - 演示混合使用两种方式
+type Product struct {
+	Name          string  `json:"name"`
+	OriginalPrice float64 `json:"original_price"`
+	DiscountPrice float64 `json:"discount_price"`
+	Category      string  `json:"category"`
+	Brand         string  `json:"brand"`
+}
+
+// CustomValidation 实现 CustomValidator 接口
+// 所有错误都通过 reportError 报告
+func (p *Product) CustomValidation(scene ValidateScene, reportError FuncReportError) {
+	// 使用 reportError 报告简单错误
+	if p.DiscountPrice > p.OriginalPrice {
+		reportError(p.DiscountPrice, "DiscountPrice", "discount_price", "price_check", "")
+	}
+
+	// 复杂验证：电子产品必须有品牌
+	if p.Category == "electronics" && p.Brand == "" {
+		reportError(p.Brand, "Brand", "brand", "required_for_electronics", "")
+	}
+
+	// 场景化验证
+	if scene == SceneCreate && p.Name == "" {
+		reportError(p.Name, "Name", "name", "required", "")
+	}
+}
+
+// Order 订单模型 - 演示使用 reportError
+type Order struct {
+	OrderID    string  `json:"order_id"`
+	TotalPrice float64 `json:"total_price"`
+	ItemCount  int     `json:"item_count"`
+}
+
+// CustomValidation 实现 CustomValidator 接口
+// 所有错误都通过 reportError 报告
+func (o *Order) CustomValidation(_ ValidateScene, reportError FuncReportError) {
+	if o.TotalPrice < 0 {
+		reportError(o.TotalPrice, "TotalPrice", "total_price", "min", "0")
+	}
+
+	if o.ItemCount <= 0 {
+		reportError(o.ItemCount, "ItemCount", "item_count", "min", "1")
+	}
+}
+
+// TestUserValidation_WithReportError 测试使用 reportError 的用户验证
+func TestUserValidation_WithReportError(t *testing.T) {
+	// 测试密码不匹配
+	user := &User{
+		Username:        "john",
+		Password:        "password123",
+		ConfirmPassword: "password456",
+		Email:           "john@example.com",
+		Age:             25,
+	}
+
+	errs := Validate(user, SceneCreate)
+	if errs == nil {
+		t.Error("Expected validation errors, got nil")
+	}
+
+	// 检查是否有密码不匹配的错误
+	found := false
+	for _, err := range errs {
+		if err.Tag == "password_mismatch" {
+			found = true
+			fmt.Printf("✓ 密码不匹配错误: field=%s, tag=%s\n", err.JsonName, err.Tag)
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected password_mismatch error")
+	}
+}
+
+// TestUserValidation_AgeCheck 测试年龄验证
+func TestUserValidation_AgeCheck(t *testing.T) {
+	user := &User{
+		Username:        "teen",
+		Password:        "pass123",
+		ConfirmPassword: "pass123",
+		Email:           "teen@example.com",
+		Age:             16, // 未满18岁
+	}
+
+	errs := Validate(user, SceneCreate)
+	if errs == nil {
+		t.Error("Expected validation errors for underage user")
+	}
+
+	// 检查年龄错误
+	found := false
+	for _, err := range errs {
+		if err.Tag == "min_age" && err.Param == "18" {
+			found = true
+			fmt.Printf("✓ 年龄验证错误: field=%s, tag=%s, param=%s\n", err.JsonName, err.Tag, err.Param)
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected min_age error")
+	}
+}
+
+// TestProductValidation_MixedApproach 测试混合使用两种错误报告方式
+func TestProductValidation_MixedApproach(t *testing.T) {
+	product := &Product{
+		Name:          "iPhone",
+		OriginalPrice: 999.99,
+		DiscountPrice: 1099.99, // 错误：折扣价高于原价
+		Category:      "electronics",
+		Brand:         "", // 错误：电子产品缺少品牌
+	}
+
+	errs := Validate(product, SceneCreate)
+	if errs == nil {
+		t.Error("Expected validation errors")
+	}
+
+	fmt.Printf("\n商品验证错误 (共 %d 个):\n", len(errs))
+	for i, err := range errs {
+		fmt.Printf("  %d. field=%s, tag=%s, message=%s\n", i+1, err.JsonName, err.Tag, err.Message)
+	}
+
+	// 验证包含价格检查错误
+	hasPrice := false
+	hasBrand := false
+	for _, err := range errs {
+		if err.Tag == "price_check" {
+			hasPrice = true
+		}
+		if err.Tag == "required_for_electronics" {
+			hasBrand = true
+		}
+	}
+
+	if !hasPrice {
+		t.Error("Expected price_check error")
+	}
+	if !hasBrand {
+		t.Error("Expected required_for_electronics error")
+	}
+}
+
+// TestOrderValidation_BackwardCompatible 测试向后兼容（完全使用返回值）
+func TestOrderValidation_BackwardCompatible(t *testing.T) {
+	order := &Order{
+		OrderID:    "ORD001",
+		TotalPrice: -100.0, // 错误：负数价格
+		ItemCount:  0,      // 错误：商品数量为0
+	}
+
+	errs := Validate(order, SceneCreate)
+	if errs == nil {
+		t.Error("Expected validation errors")
+	}
+
+	if len(errs) != 2 {
+		t.Errorf("Expected 2 errors, got %d", len(errs))
+	}
+
+	fmt.Printf("\n订单验证错误 (向后兼容模式):\n")
+	for i, err := range errs {
+		fmt.Printf("  %d. %s\n", i+1, err.Message)
+	}
+}
+
+// TestValidUser 测试验证通过的情况
+func TestValidUser(t *testing.T) {
+	user := &User{
+		Username:        "alice",
+		Password:        "securepass123",
+		ConfirmPassword: "securepass123",
+		Email:           "alice@example.com",
+		Age:             25,
+	}
+
+	errs := Validate(user, SceneCreate)
+	if errs != nil {
+		t.Errorf("Expected no errors, got %d errors", len(errs))
+		for _, err := range errs {
+			t.Logf("  - %s: %s", err.JsonName, err.Message)
+		}
+	} else {
+		fmt.Println("\n✓ 用户验证通过！")
+	}
+}
+
+// ExampleCustomValidator_reportError 演示如何使用 FuncReportError
+func ExampleCustomValidator_reportError() {
+	// 创建一个有错误的用户
+	user := &User{
+		Username:        "bob",
+		Password:        "pass123",
+		ConfirmPassword: "pass456", // 密码不匹配
+		Email:           "bob@example.com",
+		Age:             16, // 未满18岁
+	}
+
+	// 执行验证
+	errs := Validate(user, SceneCreate)
+
+	// 输出错误
+	fmt.Printf("验证失败，共 %d 个错误:\n", len(errs))
+	for i, err := range errs {
+		param := err.Param
+		if param == "" {
+			param = ""
+		}
+		fmt.Printf("%d. 字段: %s, 标签: %s, 参数: %s\n",
+			i+1, err.JsonName, err.Tag, param)
+	}
+
+	// Output:
+	// 验证失败，共 2 个错误:
+	// 1. 字段: confirm_password, 标签: password_mismatch, 参数:
+	// 2. 字段: age, 标签: min_age, 参数: 18
 }

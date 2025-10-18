@@ -82,9 +82,9 @@ func (up *TestUserProfile) ValidateRules() map[ValidateScene]map[string]string {
 }
 
 // CrossFieldValidation 验证 Extras 中的社交媒体链接
-func (up *TestUserProfile) CustomValidation(scene ValidateScene) []*FieldError {
+func (up *TestUserProfile) CustomValidation(scene ValidateScene, reportError FuncReportError) {
 	if up.Extras == nil || len(up.Extras) == 0 {
-		return nil
+		return
 	}
 
 	extrasValidator := &MapValidator{
@@ -114,10 +114,11 @@ func (up *TestUserProfile) CustomValidation(scene ValidateScene) []*FieldError {
 	}
 
 	if errs := ValidateMap(up.Extras, extrasValidator); errs != nil {
-		return errs
+		// 将 map 验证错误转换为通过 reportError 报告
+		for _, err := range errs {
+			reportError(err.Value, err.FieldName, err.JsonName, err.Tag, err.Param)
+		}
 	}
-
-	return nil
 }
 
 // ============================================================================

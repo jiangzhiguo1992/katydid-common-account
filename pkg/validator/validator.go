@@ -77,6 +77,7 @@ type RuleValidator interface {
 // 设计目标：
 //   - 单一职责：只负责复杂的业务逻辑验证
 //   - 开放封闭：通过接口扩展，无需修改验证器核心代码
+//   - 简化错误报告：通过 FuncReportError 统一报告错误，无需返回值
 //
 // 用途：验证多个字段之间的关系和约束，支持复杂业务逻辑验证
 //
@@ -90,34 +91,53 @@ type RuleValidator interface {
 //
 // 优势：
 //   - 支持场景化验证，不同场景可以有不同的验证逻辑
-//   - 返回 []*FieldError，可以一次返回多个错误
-//   - 使用简单直观，无需手动报告错误
+//   - 使用 reportError 统一报告错误，代码更简洁
+//   - 无需手动构造 FieldError 对象
 //   - 自动注册到底层验证器，性能优异
 //   - 集成到 go-playground/validator 的验证流程
 //
 // 示例：
 //
-//	func (p *Product) CustomValidation(scene ValidateScene) []*FieldError {
-//	    var errors []*FieldError
-//
+//	func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
 //	    // 简单跨字段验证
-//	    if p.Password != p.ConfirmPassword {
-//	        errors = append(errors, NewFieldError("confirm_password", "密码和确认密码不一致", nil, nil))
+//	    if u.Password != u.ConfirmPassword {
+//	        reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
 //	    }
 //
-//	    // 场景化的跨字段验证
-//	    if scene == SceneCreate && p.DiscountPrice >= p.OriginalPrice {
-//	        errors = append(errors, NewFieldError("discount_price", "折扣价必须低于原价", nil, nil))
+//	    // 场景化验证
+//	    if scene == SceneCreate && u.Age < 18 {
+//	        reportError(u.Age, "Age", "age", "min_age", "18")
 //	    }
-//
-//	    return errors
 //	}
 type CustomValidator interface {
 	// CustomValidation 执行业务验证逻辑
-	// 参数 scene：当前验证场景，可根据场景执行不同的验证逻辑
-	// 返回：验证错误列表，nil 或空切片表示验证通过
-	CustomValidation(scene ValidateScene) []*FieldError
+	// 参数：
+	//   - scene：当前验证场景，可根据场景执行不同的验证逻辑
+	//   - reportError：错误报告函数，用于向验证器报告错误
+	//
+	// 注意：所有错误都通过 reportError 函数报告，无需返回值
+	CustomValidation(scene ValidateScene, reportError FuncReportError)
 }
+
+// FuncReportError 错误报告函数类型
+// 设计目标：简化模型中的错误报告，减少样板代码
+// 用途：在 CustomValidator 中使用，向验证器报告错误而无需手动构造 FieldError 对象
+//
+// 参数：
+//   - value: 字段的实际值
+//   - fieldName: 结构体字段名（如："Username"）
+//   - jsonName: JSON 字段名（如："username"，用于 API 响应）
+//   - tag: 验证标签（如："required", "custom_check"）
+//   - param: 验证参数（如："min=3" 中的 "3"）
+//
+// 示例：
+//
+//	func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
+//	    if u.Password != u.ConfirmPassword {
+//	        reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+//	    }
+//	}
+type FuncReportError func(value any, fieldName, jsonName, tag, param string)
 
 // Validator 验证器，提供结构体字段验证功能
 // 设计原则：
@@ -249,7 +269,7 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 防御性编程：防止 nil 对象
 	if obj == nil {
 		return []*FieldError{
-			NewFieldError("struct", "struct", "required", "", "").
+			NewFieldError("", "", "required", "", "struct").
 				WithMessage("validation target cannot be nil"),
 		}
 	}
@@ -451,9 +471,8 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 	// 防止栈溢出：限制最大递归深度
 	if depth > maxNestedDepth {
 		ctx.AddErrorByDetail(
-			"Struct", "Struct", "nest_depth", "", "",
+			"", "", "nest_depth", "", obj, "Struct",
 			fmt.Sprintf("nested validation depth exceeds maximum limit %d", maxNestedDepth),
-			obj,
 		)
 		return
 	}
@@ -535,6 +554,7 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 //   - 执行 CustomValidator 接口的验证逻辑
 //   - 支持场景化验证（每次使用正确的 scene）
 //   - 不依赖底层验证器的回调（避免 scene 问题）
+//   - 提供 FuncReportError 函数，简化模型中的错误报告
 //
 // 参数：
 //
@@ -548,10 +568,14 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 		return
 	}
 
-	// 调用自定义验证逻辑（使用正确的 scene）
-	if errs := customValidator.CustomValidation(scene); errs != nil {
-		ctx.AddErrors(errs)
+	// 创建 reportError 函数，用于简化模型中的错误报告
+	reportError := func(value any, fieldName, jsonName, tag, param string) {
+		// TODO:GG namespace
+		ctx.AddErrorByDetail(fieldName, jsonName, tag, param, value, "", "")
 	}
+
+	// 调用自定义验证逻辑（使用正确的 scene 和 reportError 函数）
+	customValidator.CustomValidation(scene, reportError)
 }
 
 // buildValidationResult 构建验证结果
@@ -675,7 +699,7 @@ func (v *Validator) addFieldErrors(_ any, err error, ctx *ValidationContext) {
 	ok := errors.As(err, &validationErrors)
 	if !ok {
 		// 不是标准的验证错误，作为普通错误处理
-		ctx.AddErrorByDetail("", "", "", "", "", err.Error(), "")
+		ctx.AddErrorByDetail("", "", "", "", "", "", err.Error())
 		return
 	}
 
