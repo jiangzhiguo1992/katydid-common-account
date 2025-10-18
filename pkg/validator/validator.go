@@ -137,7 +137,7 @@ type CustomValidator interface {
 //	        reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
 //	    }
 //	}
-type FuncReportError func(value any, fieldName, jsonName, tag, param string)
+type FuncReportError func(namespace, tag, param string)
 
 // Validator 验证器，提供结构体字段验证功能
 // 设计原则：
@@ -569,9 +569,8 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 	}
 
 	// 创建 reportError 函数，用于简化模型中的错误报告
-	reportError := func(value any, fieldName, jsonName, tag, param string) {
-		// TODO:GG namespace
-		ctx.AddErrorByDetail(fieldName, jsonName, tag, param, value, "", "")
+	reportError := func(namespace, tag, param string) {
+		ctx.AddErrorByDetail("", "", tag, param, nil, namespace, "")
 	}
 
 	// 调用自定义验证逻辑（使用正确的 scene 和 reportError 函数）
