@@ -116,7 +116,7 @@ func (up *TestUserProfile) CustomValidation(scene ValidateScene, reportError Fun
 	if errs := ValidateMap(up.Extras, extrasValidator); errs != nil {
 		// 将 map 验证错误转换为通过 reportError 报告
 		for _, err := range errs {
-			reportError(err.Value, err.FieldName, err.JsonName, err.Tag, err.Param)
+			reportError(err.Namespace, err.Tag, err.Param)
 		}
 	}
 }

@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
+// MapValidators 场景化的Map验证器集合
+// 设计目标：支持不同验证场景使用不同的验证规则
 type MapValidators struct {
+	// Validators 场景到验证器的映射
 	Validators map[ValidateScene]*MapValidator
 }
 
@@ -44,11 +47,27 @@ type MapValidator struct {
 const (
 	// maxMapKeyLength 最大键名长度，防止恶意超长键名
 	maxMapKeyLength = 256
+
 	// maxMapSize 最大 map 大小，防止 DoS 攻击
 	maxMapSize = 10000
+
+	// maxMapValueSize 单个值的最大大小（字节），防止内存溢出
+	maxMapValueSize = 1024 * 1024 // 1MB
 )
 
+// ValidateMaps 验证 map 字段（场景化）
+// 根据验证场景匹配相应的验证器并执行验证
+// 参数：
+//
+//	scene: 验证场景
+//	kvs: 待验证的 map 数据
+//	validators: 场景化的验证器集合
+//
+// 返回：
+//
+//	验证错误列表，nil 表示验证通过
 func ValidateMaps(scene ValidateScene, kvs map[string]any, validators *MapValidators) []*FieldError {
+	// 防御性编程：参数校验
 	if validators == nil || len(validators.Validators) == 0 {
 		return nil
 	}
@@ -57,21 +76,24 @@ func ValidateMaps(scene ValidateScene, kvs map[string]any, validators *MapValida
 	// 支持场景组合：例如 SceneCreate | SceneUpdate 可以匹配多个场景
 	var matchedValidators []*MapValidator
 	for configScene, validator := range validators.Validators {
+		if validator == nil {
+			continue // 跳过 nil 验证器
+		}
 		if scene&configScene != 0 {
 			// 找到匹配的场景验证器
 			matchedValidators = append(matchedValidators, validator)
 		}
 	}
 
-	if matchedValidators == nil || len(matchedValidators) == 0 {
+	if len(matchedValidators) == 0 {
 		return nil
 	}
 
-	// 遍历验证
+	// 遍历验证，收集所有错误
 	var allErrors []*FieldError
 	for _, mv := range matchedValidators {
 		errors := ValidateMap(kvs, mv)
-		if errors != nil && len(errors) > 0 {
+		if len(errors) > 0 {
 			allErrors = append(allErrors, errors...)
 		}
 	}
@@ -104,7 +126,6 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		// 如果有必填键要求，则 nil map 是错误的
 		if len(v.RequiredKeys) > 0 {
 			return []*FieldError{
-				// 这里的namespace不填，统一错误信息模板
 				NewFieldError("map", "required", "").
 					WithMessage("map field cannot be nil when required keys are specified"),
 			}
@@ -120,7 +141,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		}
 	}
 
-	// 创建验证上下文（场景为空字符串，因为 map 验证场景已在外部区分）
+	// 创建验证上下文（场景为0，因为 map 验证场景已在外部区分）
 	ctx := NewValidationContext(0)
 
 	// 1. 验证必填键（业务逻辑错误）
@@ -141,8 +162,8 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	// 返回验证结果
 	if ctx.HasErrors() {
 		return ctx.Errors
-	} else if len(ctx.Message) != 0 {
-		// 这里的namespace不填，统一错误信息模板
+	}
+	if len(ctx.Message) != 0 {
 		return []*FieldError{NewFieldError("", "", "").WithMessage(ctx.Message)}
 	}
 
@@ -153,6 +174,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 // 遍历所有必填键，检查它们是否存在于 map 中
 // 性能优化：map 查找的时间复杂度为 O(1)
 func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *ValidationContext) {
+	// 防御性编程：参数校验
 	if ctx == nil || len(mv.RequiredKeys) == 0 {
 		return
 	}
@@ -160,10 +182,9 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 	for _, key := range mv.RequiredKeys {
 		// 安全检查：防止超长键名攻击
 		if len(key) > maxMapKeyLength {
-			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
 				"map", "key_len", strconv.Itoa(maxMapKeyLength), len(key),
-				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
+				fmt.Sprintf("required key name exceeds maximum length %d", maxMapKeyLength),
 			)
 			continue
 		}
@@ -172,11 +193,12 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 		if err := validateKeyName(key); err != nil {
 			ctx.AddErrorByDetail(
 				"map", "invalid_key", "", key,
-				fmt.Sprintf("invalid key name '%s': %v", key, err),
+				fmt.Sprintf("invalid required key name '%s': %v", key, err),
 			)
 			continue
 		}
 
+		// 检查键是否存在
 		if _, exists := kvs[key]; !exists {
 			ctx.AddErrorByDetail(
 				mv.getNamespace(key), "required", "", nil,
@@ -187,8 +209,9 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 }
 
 // collectAllowedKeyErrors 收集非法键错误（白名单验证）
-// 使用懒加载+双重检查锁模式构建允许键缓存，提升性能
+// 使用懒加载+线程安全的方式构建允许键缓存，提升性能
 func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *ValidationContext) {
+	// 防御性编程：参数校验
 	if ctx == nil || len(mv.AllowedKeys) == 0 {
 		return
 	}
@@ -206,7 +229,6 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 	for key := range kvs {
 		// 安全检查：防止超长键名攻击
 		if len(key) > maxMapKeyLength {
-			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
 				"map", "key_len", strconv.Itoa(maxMapKeyLength), len(key),
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
@@ -223,9 +245,10 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 			continue
 		}
 
+		// 检查键是否在白名单中
 		if !mv.allowedKeysMap[key] {
 			ctx.AddErrorByDetail(
-				mv.getNamespace(key), "allowed", "", key,
+				mv.getNamespace(key), "not_allowed", "", key,
 				fmt.Sprintf("key '%s' is not in the allowed list", key),
 			)
 		}
@@ -236,6 +259,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 // 执行用户定义的复杂验证逻辑
 // 错误恢复：即使某个验证函数 panic，也不影响其他验证
 func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *ValidationContext) {
+	// 防御性编程：参数校验
 	if ctx == nil || len(mv.KeyValidators) == 0 {
 		return
 	}
@@ -255,10 +279,9 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// 这里的namespace不填，统一错误信息模板
 					ctx.AddErrorByDetail(
 						"map", "validator_panic", "", value,
-						fmt.Sprintf("validator function panicked: %v", r),
+						fmt.Sprintf("validator function for namsepace '%s' panicked: %v", mv.getNamespace(key), r),
 					)
 				}
 			}()
@@ -275,6 +298,13 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 
 // validateKeyName 验证键名的有效性
 // 防止注入攻击和非法字符
+// 参数：
+//
+//	key: 待验证的键名
+//
+// 返回：
+//
+//	error: 如果键名无效返回错误，否则返回 nil
 func validateKeyName(key string) error {
 	if key == "" {
 		return fmt.Errorf("key name cannot be empty")
@@ -285,6 +315,10 @@ func validateKeyName(key string) error {
 		if r < 32 {
 			return fmt.Errorf("key name contains control character (code %d)", r)
 		}
+		// 检查是否包含危险字符（防止注入攻击）
+		if r == 0x7F { // DEL 字符
+			return fmt.Errorf("key name contains delete character")
+		}
 	}
 
 	return nil
@@ -292,6 +326,13 @@ func validateKeyName(key string) error {
 
 // getNamespace 获取完整的命名空间路径
 // 用于生成准确的错误定位信息
+// 参数：
+//
+//	key: 键名
+//
+// 返回：
+//
+//	完整的命名空间路径
 func (mv *MapValidator) getNamespace(key string) string {
 	if mv.ParentNameSpace == "" {
 		return key
@@ -330,6 +371,11 @@ func ValidateMapKey(kvs map[string]any, key string, validatorFunc func(value any
 	// 安全检查：防止空键名
 	if key == "" {
 		return fmt.Errorf("map key validation failed: key name cannot be empty")
+	}
+
+	// 安全检查：验证键名有效性
+	if err := validateKeyName(key); err != nil {
+		return fmt.Errorf("map key validation failed: %w", err)
 	}
 
 	value, exists := kvs[key]
@@ -376,6 +422,11 @@ func ValidateMapMustHaveKey(kvs map[string]any, key string) error {
 		return fmt.Errorf("map validation failed: key name cannot be empty")
 	}
 
+	// 安全检查：验证键名有效性
+	if err := validateKeyName(key); err != nil {
+		return fmt.Errorf("map validation failed: %w", err)
+	}
+
 	if _, exists := kvs[key]; !exists {
 		return fmt.Errorf("map validation failed: missing required key '%s'", key)
 	}
@@ -407,17 +458,41 @@ func ValidateMapMustHaveKeys(kvs map[string]any, keys ...string) error {
 
 	// 性能优化：收集所有缺失的键，一次性报告（而非遇到第一个就返回）
 	var missingKeys []string
+	var invalidKeys []string
+
 	for _, key := range keys {
 		if key == "" {
 			continue // 忽略空键名
 		}
+
+		// 验证键名有效性
+		if err := validateKeyName(key); err != nil {
+			invalidKeys = append(invalidKeys, key)
+			continue
+		}
+
 		if _, exists := kvs[key]; !exists {
 			missingKeys = append(missingKeys, key)
 		}
 	}
 
-	if len(missingKeys) > 0 {
-		return fmt.Errorf("map validation failed: missing required keys: %s", strings.Join(missingKeys, ", "))
+	// 构建错误消息
+	if len(invalidKeys) > 0 || len(missingKeys) > 0 {
+		var errMsg strings.Builder
+		errMsg.WriteString("map validation failed: ")
+
+		if len(invalidKeys) > 0 {
+			errMsg.WriteString(fmt.Sprintf("invalid key names: %s", strings.Join(invalidKeys, ", ")))
+		}
+
+		if len(missingKeys) > 0 {
+			if len(invalidKeys) > 0 {
+				errMsg.WriteString("; ")
+			}
+			errMsg.WriteString(fmt.Sprintf("missing required keys: %s", strings.Join(missingKeys, ", ")))
+		}
+
+		return fmt.Errorf("%s", errMsg.String())
 	}
 
 	return nil
@@ -515,15 +590,18 @@ func ValidateMapIntKey(kvs map[string]any, key string, min, max int) error {
 
 	// 性能优化：尝试转换为整数（支持多种数值类型）
 	var intValue int
+	var convertErr error
+
 	switch v := value.(type) {
 	case int:
 		intValue = v
 	case int64:
 		// 安全检查：防止整数溢出
-		if v > math.MaxInt || v < math.MinInt {
-			return fmt.Errorf("map key '%s' validation failed: int64 value %d overflows int type", key, v)
+		if v > int64(math.MaxInt) || v < int64(math.MinInt) {
+			convertErr = fmt.Errorf("int64 value %d overflows int type", v)
+		} else {
+			intValue = int(v)
 		}
-		intValue = int(v)
 	case int32:
 		intValue = int(v)
 	case int16:
@@ -533,21 +611,24 @@ func ValidateMapIntKey(kvs map[string]any, key string, min, max int) error {
 	case uint:
 		// 安全检查：防止整数溢出
 		if v > uint(math.MaxInt) {
-			return fmt.Errorf("map key '%s' validation failed: uint value %d overflows int type", key, v)
+			convertErr = fmt.Errorf("uint value %d overflows int type", v)
+		} else {
+			intValue = int(v)
 		}
-		intValue = int(v)
 	case uint64:
 		// 安全检查：防止整数溢出
 		if v > uint64(math.MaxInt) {
-			return fmt.Errorf("map key '%s' validation failed: uint64 value %d overflows int type", key, v)
+			convertErr = fmt.Errorf("uint64 value %d overflows int type", v)
+		} else {
+			intValue = int(v)
 		}
-		intValue = int(v)
 	case uint32:
 		// 安全检查：防止整数溢出（在 32 位系统上可能溢出）
 		if uint64(v) > uint64(math.MaxInt) {
-			return fmt.Errorf("map key '%s' validation failed: uint32 value %d overflows int type", key, v)
+			convertErr = fmt.Errorf("uint32 value %d overflows int type", v)
+		} else {
+			intValue = int(v)
 		}
-		intValue = int(v)
 	case uint16:
 		intValue = int(v)
 	case uint8:
@@ -555,21 +636,26 @@ func ValidateMapIntKey(kvs map[string]any, key string, min, max int) error {
 	case float64:
 		// 检查是否为整数
 		if v != float64(int(v)) {
-			return fmt.Errorf("map key '%s' validation failed: float64 value %f is not an integer", key, v)
+			convertErr = fmt.Errorf("float64 value %f is not an integer", v)
+		} else if v > float64(math.MaxInt) || v < float64(math.MinInt) {
+			// 安全检查：防止整数溢出
+			convertErr = fmt.Errorf("float64 value %f overflows int type", v)
+		} else {
+			intValue = int(v)
 		}
-		// 安全检查：防止整数溢出
-		if v > float64(math.MaxInt) || v < float64(math.MinInt) {
-			return fmt.Errorf("map key '%s' validation failed: float64 value %f overflows int type", key, v)
-		}
-		intValue = int(v)
 	case float32:
 		// 检查是否为整数
 		if v != float32(int(v)) {
-			return fmt.Errorf("map key '%s' validation failed: float32 value %f is not an integer", key, v)
+			convertErr = fmt.Errorf("float32 value %f is not an integer", v)
+		} else {
+			intValue = int(v)
 		}
-		intValue = int(v)
 	default:
 		return fmt.Errorf("map key '%s' validation failed: value must be integer type, got %T", key, value)
+	}
+
+	if convertErr != nil {
+		return fmt.Errorf("map key '%s' validation failed: %w", key, convertErr)
 	}
 
 	// 范围检查
@@ -773,6 +859,7 @@ func (mv *MapValidator) WithAllowedKeys(keys ...string) *MapValidator {
 
 	// 清除缓存，下次验证时重新构建
 	mv.allowedKeysMap = nil
+
 	return mv
 }
 
@@ -843,8 +930,10 @@ func (mv *MapValidator) AddAllowedKey(key string) *MapValidator {
 	}
 
 	mv.AllowedKeys = append(mv.AllowedKeys, key)
+
 	// 清除缓存，下次验证时重新构建
 	mv.allowedKeysMap = nil
+
 	return mv
 }
 
@@ -866,6 +955,48 @@ func (mv *MapValidator) Reset() {
 	mv.allowedKeysMap = nil
 }
 
-func (mv *MapValidators) Validate(scene ValidateScene, kvs map[string]any) []*FieldError {
-	return ValidateMaps(scene, kvs, mv)
+// Validate 场景化Map验证（MapValidators的方法）
+// 参数：
+//
+//	scene: 验证场景
+//	kvs: 待验证的 map
+//
+// 返回：
+//
+//	验证错误列表，nil 表示验证成功
+func (mvs *MapValidators) Validate(scene ValidateScene, kvs map[string]any) []*FieldError {
+	return ValidateMaps(scene, kvs, mvs)
+}
+
+// NewMapValidators 创建场景化的Map验证器集合
+// 工厂方法模式，确保对象正确初始化
+// 返回：
+//
+//	已初始化的 MapValidators 实例
+func NewMapValidators() *MapValidators {
+	return &MapValidators{
+		Validators: make(map[ValidateScene]*MapValidator),
+	}
+}
+
+// AddValidator 添加场景验证器
+// 参数：
+//
+//	scene: 验证场景
+//	validator: 验证器实例
+//
+// 返回：
+//
+//	MapValidators 实例，支持链式调用
+func (mvs *MapValidators) AddValidator(scene ValidateScene, validator *MapValidator) *MapValidators {
+	if mvs == nil {
+		return nil
+	}
+
+	if mvs.Validators == nil {
+		mvs.Validators = make(map[ValidateScene]*MapValidator)
+	}
+
+	mvs.Validators[scene] = validator
+	return mvs
 }

@@ -52,7 +52,7 @@ func (u *TestUser) CustomValidation(scene ValidateScene, reportError FuncReportE
 	if scene&SceneCreate != 0 {
 		// 创建时，用户名不能是admin
 		if u.Username == "admin" {
-			reportError(u.Username, "Username", "username", "reserved", "admin")
+			reportError("Username", "reserved", "admin")
 		}
 	}
 }
@@ -597,17 +597,17 @@ type User struct {
 func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
 	// 跨字段验证：密码和确认密码必须一致
 	if u.Password != u.ConfirmPassword {
-		reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+		reportError("ConfirmPassword", "password_mismatch", "")
 	}
 
 	// 场景化验证：创建时必须年满18岁
 	if scene == SceneCreate && u.Age < 18 {
-		reportError(u.Age, "Age", "age", "min_age", "18")
+		reportError("Age", "min_age", "18")
 	}
 
 	// 场景化验证：更新时用户名不能为空
 	if scene == SceneUpdate && u.Username == "" {
-		reportError(u.Username, "Username", "username", "required", "")
+		reportError("Username", "required", "")
 	}
 }
 
@@ -625,17 +625,17 @@ type Product struct {
 func (p *Product) CustomValidation(scene ValidateScene, reportError FuncReportError) {
 	// 使用 reportError 报告简单错误
 	if p.DiscountPrice > p.OriginalPrice {
-		reportError(p.DiscountPrice, "DiscountPrice", "discount_price", "price_check", "")
+		reportError("DiscountPrice", "price_check", "")
 	}
 
 	// 复杂验证：电子产品必须有品牌
 	if p.Category == "electronics" && p.Brand == "" {
-		reportError(p.Brand, "Brand", "brand", "required_for_electronics", "")
+		reportError("Brand", "required_for_electronics", "")
 	}
 
 	// 场景化验证
 	if scene == SceneCreate && p.Name == "" {
-		reportError(p.Name, "Name", "name", "required", "")
+		reportError("Name", "required", "")
 	}
 }
 
@@ -650,11 +650,11 @@ type Order struct {
 // 所有错误都通过 reportError 报告
 func (o *Order) CustomValidation(_ ValidateScene, reportError FuncReportError) {
 	if o.TotalPrice < 0 {
-		reportError(o.TotalPrice, "TotalPrice", "total_price", "min", "0")
+		reportError("TotalPrice", "min", "0")
 	}
 
 	if o.ItemCount <= 0 {
-		reportError(o.ItemCount, "ItemCount", "item_count", "min", "1")
+		reportError("ItemCount", "min", "1")
 	}
 }
 
@@ -679,7 +679,7 @@ func TestUserValidation_WithReportError(t *testing.T) {
 	for _, err := range errs {
 		if err.Tag == "password_mismatch" {
 			found = true
-			fmt.Printf("✓ 密码不匹配错误: field=%s, tag=%s\n", err.JsonName, err.Tag)
+			fmt.Printf("✓ 密码不匹配错误: field=%s, tag=%s\n", err.Namespace, err.Tag)
 			break
 		}
 	}
@@ -708,7 +708,7 @@ func TestUserValidation_AgeCheck(t *testing.T) {
 	for _, err := range errs {
 		if err.Tag == "min_age" && err.Param == "18" {
 			found = true
-			fmt.Printf("✓ 年龄验证错误: field=%s, tag=%s, param=%s\n", err.JsonName, err.Tag, err.Param)
+			fmt.Printf("✓ 年龄验证错误: field=%s, tag=%s, param=%s\n", err.Namespace, err.Tag, err.Param)
 			break
 		}
 	}
@@ -734,7 +734,7 @@ func TestProductValidation_MixedApproach(t *testing.T) {
 
 	fmt.Printf("\n商品验证错误 (共 %d 个):\n", len(errs))
 	for i, err := range errs {
-		fmt.Printf("  %d. field=%s, tag=%s, message=%s\n", i+1, err.JsonName, err.Tag, err.Message)
+		fmt.Printf("  %d. field=%s, tag=%s, message=%s\n", i+1, err.Namespace, err.Tag, err.Message)
 	}
 
 	// 验证包含价格检查错误
@@ -794,7 +794,7 @@ func TestValidUser(t *testing.T) {
 	if errs != nil {
 		t.Errorf("Expected no errors, got %d errors", len(errs))
 		for _, err := range errs {
-			t.Logf("  - %s: %s", err.JsonName, err.Message)
+			t.Logf("  - %s: %s", err.Namespace, err.Message)
 		}
 	} else {
 		fmt.Println("\n✓ 用户验证通过！")
@@ -823,7 +823,7 @@ func ExampleCustomValidator_reportError() {
 			param = ""
 		}
 		fmt.Printf("%d. 字段: %s, 标签: %s, 参数: %s\n",
-			i+1, err.JsonName, err.Tag, param)
+			i+1, err.Namespace, err.Tag, param)
 	}
 
 	// Output:

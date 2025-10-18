@@ -13,8 +13,10 @@ import (
 type ValidationContext struct {
 	// Scene 验证场景，用于区分不同的业务场景（如：创建、更新、删除等）
 	Scene ValidateScene `json:"scene"`
+
 	// Message 总体错误消息（可选），用于描述整体验证失败的原因
 	Message string `json:"message,omitempty"`
+
 	// Errors 所有验证错误的集合，每个元素代表一个字段的验证错误
 	Errors []*FieldError `json:"errors"`
 }
@@ -47,12 +49,22 @@ type FieldError struct {
 const (
 	// errorMessageEstimatedLength 单个错误消息的预估长度
 	errorMessageEstimatedLength = 80
+
 	// namespaceEstimatedLength 命名空间的预估长度
 	namespaceEstimatedLength = 50
+
 	// maxErrorsCapacity 错误列表的最大容量，防止恶意数据导致内存溢出
 	maxErrorsCapacity = 1000
+
 	// maxNamespaceLength 最大命名空间长度，防止超长命名空间攻击
 	maxNamespaceLength = 512
+
+	// maxTagLength 最大标签长度，防止超长标签攻击
+	maxTagLength = 128 // TODO:GG 可能没用?
+
+	// maxParamLength 最大参数长度，防止超长参数攻击
+	maxParamLength = 256 // TODO:GG 没用
+
 	// maxMessageLength 最大错误消息长度，防止超长消息攻击
 	maxMessageLength = 2048
 )
@@ -80,18 +92,28 @@ func NewValidationContext(scene ValidateScene) *ValidationContext {
 //	namespace: 字段命名空间（如 User.Profile.Email）
 //	tag: 验证标签（required, email, min 等）
 //	param: 验证参数（如 min=3 中的 "3"）
-//	value: 字段的实际值
 //
 // 返回：
 //
 //	已初始化的 FieldError 实例
 func NewFieldError(namespace, tag, param string) *FieldError {
+	// 防御性编程：安全检查并截断超长字段
+	if len(namespace) > maxNamespaceLength {
+		namespace = namespace[:maxNamespaceLength] + "..."
+	}
+	if len(tag) > maxTagLength {
+		tag = tag[:maxTagLength] + "..."
+	}
+	if len(param) > maxParamLength {
+		param = param[:maxParamLength] + "..."
+	}
+
 	return &FieldError{
 		Namespace: namespace,
 		Tag:       tag,
 		Param:     param,
-		Value:     nil, // 不是必需
-		Message:   "",  // 不是必需
+		Value:     nil, // 默认不设置值
+		Message:   "",  // 默认不设置消息
 	}
 }
 
@@ -108,15 +130,35 @@ func (vc *ValidationContext) Error() string {
 	}
 
 	// 内存优化：预分配足够的容量，减少动态扩容
+	estimatedSize := len(vc.Errors) * errorMessageEstimatedLength
+	if estimatedSize > 10*1024 { // 限制最大10KB，防止过度分配
+		estimatedSize = 10 * 1024
+	}
+
 	var builder strings.Builder
-	builder.Grow(len(vc.Errors) * errorMessageEstimatedLength)
+	builder.Grow(estimatedSize)
 
 	builder.WriteString("validation failed: ")
-	for i, err := range vc.Errors {
+
+	// 限制显示的错误数量，防止错误信息过长
+	maxDisplayErrors := 10
+	displayCount := len(vc.Errors)
+	if displayCount > maxDisplayErrors {
+		displayCount = maxDisplayErrors
+	}
+
+	for i := 0; i < displayCount; i++ {
 		if i > 0 {
 			builder.WriteString("; ")
 		}
-		builder.WriteString(err.String())
+		if vc.Errors[i] != nil {
+			builder.WriteString(vc.Errors[i].String())
+		}
+	}
+
+	// 如果有更多错误，显示省略提示
+	if len(vc.Errors) > maxDisplayErrors {
+		builder.WriteString(fmt.Sprintf("; ... and %d more errors", len(vc.Errors)-maxDisplayErrors))
 	}
 
 	return builder.String()
@@ -134,7 +176,8 @@ func (fe *FieldError) String() string {
 	// 生成默认错误消息（用于调试）
 	if fe.Namespace != "" && fe.Tag != "" {
 		if fe.Param != "" {
-			return fmt.Sprintf("field '%s' validation failed on tag '%s' with param '%s'", fe.Namespace, fe.Tag, fe.Param)
+			return fmt.Sprintf("field '%s' validation failed on tag '%s' with param '%s'",
+				fe.Namespace, fe.Tag, fe.Param)
 		}
 		return fmt.Sprintf("field '%s' validation failed on tag '%s'", fe.Namespace, fe.Tag)
 	}
@@ -166,6 +209,12 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 	if len(err.Namespace) > maxNamespaceLength {
 		err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
 	}
+	if len(err.Tag) > maxTagLength {
+		err.Tag = err.Tag[:maxTagLength] + "..."
+	}
+	if len(err.Param) > maxParamLength {
+		err.Param = err.Param[:maxParamLength] + "..."
+	}
 	if len(err.Message) > maxMessageLength {
 		err.Message = err.Message[:maxMessageLength] + "..."
 	}
@@ -180,7 +229,7 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 //	verr: validator 库产生的字段错误
 func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 	if verr == nil {
-		return
+		return // 防御性编程：忽略 nil 参数
 	}
 
 	// 安全检查：防止恶意数据导致内存溢出
@@ -188,9 +237,20 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 		return
 	}
 
+	// 提取并验证字段信息
 	namespace := verr.Namespace()
 	if len(namespace) > maxNamespaceLength {
 		namespace = namespace[:maxNamespaceLength] + "..."
+	}
+
+	tag := verr.Tag()
+	if len(tag) > maxTagLength {
+		tag = tag[:maxTagLength] + "..."
+	}
+
+	param := verr.Param()
+	if len(param) > maxParamLength {
+		param = param[:maxParamLength] + "..."
 	}
 
 	message := verr.Error()
@@ -200,8 +260,8 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 
 	vc.Errors = append(vc.Errors, NewFieldError(
 		namespace,
-		verr.Tag(),
-		verr.Param(),
+		tag,
+		param,
 	).WithValue(verr.Value()).WithMessage(message))
 }
 
@@ -224,6 +284,12 @@ func (vc *ValidationContext) AddErrorByDetail(namespace, tag, param string, valu
 	if len(namespace) > maxNamespaceLength {
 		namespace = namespace[:maxNamespaceLength] + "..."
 	}
+	if len(tag) > maxTagLength {
+		tag = tag[:maxTagLength] + "..."
+	}
+	if len(param) > maxParamLength {
+		param = param[:maxParamLength] + "..."
+	}
 	if len(message) > maxMessageLength {
 		message = message[:maxMessageLength] + "..."
 	}
@@ -236,7 +302,7 @@ func (vc *ValidationContext) AddErrorByDetail(namespace, tag, param string, valu
 }
 
 // AddErrors 批量添加字段错误
-// 提高批量操作的效率，减少锁的获取次数
+// 提高批量操作的效率，减少函数调用次数
 // 参数：
 //
 //	errors: 待添加的错误列表
@@ -269,21 +335,28 @@ func (vc *ValidationContext) AddErrors(errors []*FieldError) {
 		vc.Errors = newErrors
 	}
 
-	// 对每个错误进行长度验证
+	// 对每个错误进行长度验证和添加
 	for _, err := range errors {
 		if err == nil {
 			continue
 		}
+
 		// 安全检查：验证字段长度
 		if len(err.Namespace) > maxNamespaceLength {
 			err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
 		}
+		if len(err.Tag) > maxTagLength {
+			err.Tag = err.Tag[:maxTagLength] + "..."
+		}
+		if len(err.Param) > maxParamLength {
+			err.Param = err.Param[:maxParamLength] + "..."
+		}
 		if len(err.Message) > maxMessageLength {
 			err.Message = err.Message[:maxMessageLength] + "..."
 		}
-	}
 
-	vc.Errors = append(vc.Errors, errors...)
+		vc.Errors = append(vc.Errors, err)
+	}
 }
 
 // ToJSON 将验证上下文转换为 JSON 格式
@@ -316,7 +389,7 @@ func (vc *ValidationContext) GetErrorsByNamespace(namespace string) []*FieldErro
 	// 内存优化：预分配合理的容量
 	errors := make([]*FieldError, 0, len(vc.Errors)/4)
 	for _, err := range vc.Errors {
-		if err.Namespace == namespace {
+		if err != nil && err.Namespace == namespace {
 			errors = append(errors, err)
 		}
 	}
@@ -340,13 +413,22 @@ func (vc *ValidationContext) GetErrorsByTag(tag string) []*FieldError {
 	// 内存优化：预分配合理的容量
 	errors := make([]*FieldError, 0, len(vc.Errors)/4)
 	for _, err := range vc.Errors {
-		if err.Tag == tag {
+		if err != nil && err.Tag == tag {
 			errors = append(errors, err)
 		}
 	}
 	return errors
 }
 
+// WithValue 设置字段值（链式调用）
+// 流式接口模式，提升代码可读性和易用性
+// 参数：
+//
+//	value: 字段值
+//
+// 返回：
+//
+//	FieldError 实例，支持链式调用
 func (fe *FieldError) WithValue(value any) *FieldError {
 	fe.Value = value
 	return fe
@@ -362,6 +444,11 @@ func (fe *FieldError) WithValue(value any) *FieldError {
 //
 //	FieldError 实例，支持链式调用
 func (fe *FieldError) WithMessage(message string) *FieldError {
+	// 安全检查：截断超长消息
+	if len(message) > maxMessageLength {
+		message = message[:maxMessageLength] + "..."
+	}
+
 	fe.Message = message
 	return fe
 }
@@ -379,13 +466,16 @@ func (fe *FieldError) ToLocalizes() (key string, param string) {
 
 	builder.WriteString(fe.Namespace)
 	if fe.Tag != "" {
-		builder.WriteString(".")
+		if fe.Namespace != "" {
+			builder.WriteString(".")
+		}
+		builder.WriteString(fe.Tag)
 	}
-	builder.WriteString(fe.Tag)
 
+	// 处理自定义错误消息
 	if fe.Namespace == "" && fe.Tag == "" {
 		builder.WriteString(fe.Message)
-	} else if fe.Tag == "custom" {
+	} else if fe.Tag == "custom" && fe.Message != "" {
 		builder.WriteString(".")
 		builder.WriteString(fe.Message)
 	}
@@ -451,8 +541,27 @@ func (vc *ValidationContext) SanitizeValues() *ValidationContext {
 //
 //	第一个 FieldError，如果没有错误则返回 nil
 func (vc *ValidationContext) GetFirstError() *FieldError {
-	if len(vc.Errors) > 0 {
-		return vc.Errors[0]
+	if len(vc.Errors) == 0 {
+		return nil
 	}
-	return nil
+	return vc.Errors[0]
+}
+
+// SetMessage 设置总体错误消息
+// 参数：
+//
+//	message: 总体错误消息
+func (vc *ValidationContext) SetMessage(message string) {
+	// 安全检查：截断超长消息
+	if len(message) > maxMessageLength {
+		message = message[:maxMessageLength] + "..."
+	}
+
+	vc.Message = message
+}
+
+// IsEmpty 检查验证上下文是否为空（既没有错误也没有消息）
+// 返回：true 表示为空
+func (vc *ValidationContext) IsEmpty() bool {
+	return len(vc.Errors) == 0 && vc.Message == ""
 }

@@ -36,14 +36,21 @@ type ValidateScene int64
 
 // 预定义的通用验证场景常量
 const (
-	SceneNone ValidateScene = 0  // 无场景
-	SceneAll  ValidateScene = -1 // 所有场景(111...111)
+	SceneNone ValidateScene = 0  // 无场景：不执行任何场景特定的验证
+	SceneAll  ValidateScene = -1 // 所有场景(111...111)：匹配所有场景的验证规则
 )
 
 // 验证器配置常量
 const (
 	// maxNestedDepth 最大嵌套验证深度，防止无限递归导致栈溢出
+	// 合理值：100层足以覆盖绝大多数实际业务场景
 	maxNestedDepth = 100
+
+	// typeCacheInitialCapacity 类型缓存初始容量（性能优化）
+	typeCacheInitialCapacity = 32
+
+	// maxValidationErrors 单次验证允许收集的最大错误数，防止内存溢出
+	maxValidationErrors = 1000
 )
 
 // ============================================================================
@@ -62,8 +69,8 @@ const (
 //
 //	func (u *User) RuleValidation() map[ValidateScene]map[string]string {
 //	    return map[ValidateScene]map[string]string{
-//	        "create": {"Username": "required,min=3", "Email": "required,email"},
-//	        "update": {"Username": "omitempty,min=3", "Email": "omitempty,email"},
+//	        SceneCreate: {"Username": "required,min=3", "Email": "required,email"},
+//	        SceneUpdate: {"Username": "omitempty,min=3", "Email": "omitempty,email"},
 //	    }
 //	}
 type RuleValidator interface {
@@ -101,12 +108,12 @@ type RuleValidator interface {
 //	func (u *User) CustomValidation(scene ValidateScene, report FuncReportError) {
 //	    // 简单跨字段验证
 //	    if u.Password != u.ConfirmPassword {
-//	        report(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+//	        report("User.ConfirmPassword", "confirm_password", "password_mismatch")
 //	    }
 //
 //	    // 场景化验证
 //	    if scene == SceneCreate && u.Age < 18 {
-//	        report(u.Age, "Age", "age", "min_age", "18")
+//	        report("User.Age", "min_age", "18")
 //	    }
 //	}
 type CustomValidator interface {
@@ -132,7 +139,7 @@ type CustomValidator interface {
 //
 //	func (u *User) CustomValidation(scene ValidateScene, report FuncReportError) {
 //	    if u.Password != u.ConfirmPassword {
-//	        report("User.Password", "ConfirmPassword", "param")
+//	        report("User.ConfirmPassword", "password_mismatch", "")
 //	    }
 //	}
 type FuncReportError func(namespace, tag, param string)
@@ -147,12 +154,15 @@ type FuncReportError func(namespace, tag, param string)
 //   - 支持场景化验证、嵌套验证、自定义验证等多种验证方式
 //   - 类型信息缓存，避免重复的反射操作，提升性能
 //   - 懒加载注册，只在首次使用时注册验证函数
+//   - 线程安全：使用 sync.Map 保证并发读写安全
 type Validator struct {
 	// validate 底层验证器实例（go-playground/validator）
 	validate *validator.Validate
+
 	// typeCache 类型信息缓存，key: reflect.Type, value: *typeCache
 	// 使用 sync.Map 而非 map+mutex，提升并发读性能
 	typeCache *sync.Map
+
 	// registeredCache 已注册的类型缓存，key: reflect.Type, value: bool
 	// 记录已注册的类型，避免重复注册
 	registeredCache *sync.Map
@@ -163,8 +173,10 @@ type Validator struct {
 type typeCache struct {
 	// isRuleValidator 是否实现了 RuleValidator 接口
 	isRuleValidator bool
+
 	// isCustomValidator 是否实现了 CustomValidator 接口
 	isCustomValidator bool
+
 	// validationRules 缓存的验证规则（来自 RuleValidator）
 	validationRules map[ValidateScene]map[string]string
 }
@@ -173,6 +185,7 @@ var (
 	// defaultValidator 默认验证器实例，全局单例
 	// 使用单例模式减少资源消耗，提升性能
 	defaultValidator *Validator
+
 	// once 确保默认验证器只初始化一次（线程安全）
 	once sync.Once
 )
@@ -191,7 +204,7 @@ func Default() *Validator {
 // 便捷函数，简化验证调用
 // 参数：
 //
-//	obj: 待验证的对象
+//	obj: 待验证的对象（必须是结构体或结构体指针）
 //	scene: 验证场景标识
 //
 // 返回：
@@ -203,7 +216,7 @@ func Validate(obj any, scene ValidateScene) []*FieldError {
 
 // ClearTypeCache 清除默认验证器的类型缓存
 // 用于测试或需要重新加载类型信息时
-// 注意：此方法会影响性能，仅用于特殊场景
+// 注意：此方法会影响性能，仅用于特殊场景（如：热重载、单元测试）
 func ClearTypeCache() {
 	Default().ClearTypeCache()
 }
@@ -267,8 +280,17 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 防御性编程：防止 nil 对象
 	if obj == nil {
 		return []*FieldError{
-			NewFieldError("struct", "", "required").
+			NewFieldError("struct", "required", "").
 				WithMessage("validation target cannot be nil"),
+		}
+	}
+
+	// 防御性编程：验证对象类型是否有效
+	objType := reflect.TypeOf(obj)
+	if objType == nil {
+		return []*FieldError{
+			NewFieldError("struct", "invalid_type", "").
+				WithMessage("validation target has invalid type"),
 		}
 	}
 
@@ -331,6 +353,11 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 //
 //	obj: 待注册的对象
 func (v *Validator) registerStructValidator(obj any) {
+	// 防御性编程：防止 nil 对象
+	if obj == nil {
+		return
+	}
+
 	typ := reflect.TypeOf(obj)
 	if typ == nil {
 		return
@@ -341,8 +368,10 @@ func (v *Validator) registerStructValidator(obj any) {
 		return // 已注册，直接返回
 	}
 
-	// 标记为已注册
-	v.registeredCache.Store(typ, true)
+	// 标记为已注册（使用 LoadOrStore 保证线程安全）
+	if _, loaded := v.registeredCache.LoadOrStore(typ, true); loaded {
+		return // 其他 goroutine 已经注册
+	}
 
 	// 注册到底层验证器（用于缓存优化）
 	// 注意：这里提供空回调，实际验证在步骤4执行
@@ -369,7 +398,13 @@ func (v *Validator) registerStructValidator(obj any) {
 //	rules: 场景化的验证规则映射
 //	ctx: 验证上下文
 func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext) {
+	// 防御性编程：参数校验
 	if rules == nil || ctx == nil {
+		return
+	}
+
+	// 防御性编程：防止收集过多错误导致内存溢出
+	if len(ctx.Errors) >= maxValidationErrors {
 		return
 	}
 
@@ -411,6 +446,11 @@ func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[s
 
 	// 验证所有字段（使用内置规则）
 	for fieldName, rule := range matchedRules {
+		// 防御性编程：防止收集过多错误
+		if len(ctx.Errors) >= maxValidationErrors {
+			return
+		}
+
 		if rule == "" {
 			continue // 跳过空规则
 		}
@@ -447,6 +487,11 @@ func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[s
 //	obj: 待验证的对象
 //	ctx: 验证上下文
 func (v *Validator) validateFieldsByTags(obj any, ctx *ValidationContext) {
+	// 防御性编程：防止收集过多错误
+	if ctx == nil || len(ctx.Errors) >= maxValidationErrors {
+		return
+	}
+
 	// 使用底层验证器的标准 Struct 验证
 	if err := v.validate.Struct(obj); err != nil {
 		v.addFieldErrors(obj, err, ctx)
@@ -459,6 +504,7 @@ func (v *Validator) validateFieldsByTags(obj any, ctx *ValidationContext) {
 //   - 深度优先遍历
 //   - 支持嵌入字段（匿名字段）
 //   - 防止无限递归（最大深度限制）
+//   - 防止收集过多错误（最大错误数限制）
 //
 // 参数：
 //
@@ -466,10 +512,15 @@ func (v *Validator) validateFieldsByTags(obj any, ctx *ValidationContext) {
 //	ctx: 验证上下文
 //	depth: 当前递归深度
 func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth int) {
+	// 防御性编程：防止收集过多错误
+	if ctx == nil || len(ctx.Errors) >= maxValidationErrors {
+		return
+	}
+
 	// 防止栈溢出：限制最大递归深度
 	if depth > maxNestedDepth {
 		ctx.AddErrorByDetail(
-			"Struct", "nest_depth", "", obj,
+			"Struct", "nest_depth", fmt.Sprintf("%d", maxNestedDepth), obj,
 			fmt.Sprintf("nested validation depth exceeds maximum limit %d", maxNestedDepth),
 		)
 		return
@@ -498,6 +549,11 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 
 	// 遍历所有字段
 	for i := 0; i < numField; i++ {
+		// 防御性编程：防止收集过多错误
+		if len(ctx.Errors) >= maxValidationErrors {
+			return
+		}
+
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
@@ -519,7 +575,8 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 			fieldKind = field.Elem().Kind()
 		}
 
-		if fieldKind == reflect.Struct || fieldType.Anonymous {
+		// 只处理匿名（嵌入）的结构体字段
+		if fieldKind == reflect.Struct && fieldType.Anonymous {
 			// 对嵌套结构体执行完整验证流程
 			cache := v.getOrCacheTypeInfo(fieldValue)
 
@@ -553,6 +610,7 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 //   - 支持场景化验证（每次使用正确的 scene）
 //   - 不依赖底层验证器的回调（避免 scene 问题）
 //   - 提供 FuncReportError 函数，简化模型中的错误报告
+//   - panic 恢复：防止自定义验证函数 panic 导致整个验证流程中断
 //
 // 参数：
 //
@@ -560,6 +618,11 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 //	scene: 当前验证场景
 //	ctx: 验证上下文
 func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *ValidationContext) {
+	// 防御性编程：防止收集过多错误
+	if ctx == nil || len(ctx.Errors) >= maxValidationErrors {
+		return
+	}
+
 	// 类型断言：确保对象实现了 CustomValidator 接口
 	customValidator, ok := obj.(CustomValidator)
 	if !ok {
@@ -568,8 +631,22 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 
 	// 创建 report 函数，用于简化模型中的错误报告
 	report := func(namespace, tag, param string) {
+		// 防御性编程：防止收集过多错误
+		if len(ctx.Errors) >= maxValidationErrors {
+			return
+		}
 		ctx.AddErrorByDetail(namespace, tag, param, nil, "")
 	}
+
+	// panic 恢复：防止自定义验证函数 panic 导致整个验证流程中断
+	defer func() {
+		if r := recover(); r != nil {
+			ctx.AddErrorByDetail(
+				"", "validation_panic", "", obj,
+				fmt.Sprintf("custom validation panicked: %v", r),
+			)
+		}
+	}()
 
 	// 调用自定义验证逻辑（使用正确的 scene 和 report 函数）
 	customValidator.CustomValidation(scene, report)
@@ -585,6 +662,10 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 //
 //	验证错误列表
 func (v *Validator) buildValidationResult(ctx *ValidationContext) []*FieldError {
+	if ctx == nil {
+		return nil
+	}
+
 	if ctx.HasErrors() {
 		return ctx.Errors
 	}
@@ -621,9 +702,9 @@ func (v *Validator) GetUnderlyingValidator() *validator.Validate {
 // 用于监控和调试，了解缓存使用情况
 // 返回：
 //
-//	缓存的类型数量
+//	typeCacheCount: 缓存的类型数量
+//	autoRegisteredCount: 已自动注册的类型数量
 func (v *Validator) TypeCacheStats() (typeCacheCount, autoRegisteredCount int) {
-
 	// 统计 typeCache 中的条目数
 	v.typeCache.Range(func(key, value interface{}) bool {
 		typeCacheCount++
@@ -673,6 +754,7 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 	// 接口检查：判断对象实现了哪些验证接口
 	if ruleValidator, ok := obj.(RuleValidator); ok {
 		cache.isRuleValidator = true
+		// 不用深拷贝验证规则，外部不会修改影响缓存
 		cache.validationRules = ruleValidator.RuleValidation()
 	}
 	_, cache.isCustomValidator = obj.(CustomValidator)
@@ -690,17 +772,31 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 //	err: 底层验证器产生的错误
 //	ctx: 验证上下文
 func (v *Validator) addFieldErrors(_ any, err error, ctx *ValidationContext) {
+	// 防御性编程：参数校验
+	if err == nil || ctx == nil {
+		return
+	}
+
+	// 防御性编程：防止收集过多错误
+	if len(ctx.Errors) >= maxValidationErrors {
+		return
+	}
+
 	// 尝试转换为 ValidationErrors 类型
 	var validationErrors validator.ValidationErrors
 	ok := errors.As(err, &validationErrors)
 	if !ok {
 		// 不是标准的验证错误，作为普通错误处理
-		ctx.AddErrorByDetail("", "", "", "", err.Error())
+		ctx.AddErrorByDetail("", "validation_error", "", "", err.Error())
 		return
 	}
 
 	// 逐个添加字段错误
 	for _, e := range validationErrors {
+		// 防御性编程：防止收集过多错误
+		if len(ctx.Errors) >= maxValidationErrors {
+			return
+		}
 		ctx.AddErrorByValidator(e)
 	}
 }
@@ -718,13 +814,22 @@ func (v *Validator) addFieldErrors(_ any, err error, ctx *ValidationContext) {
 //
 //	匹配的字段反射值，如果未找到返回零值
 func (v *Validator) findFieldByJSONTag(val reflect.Value, typ reflect.Type, jsonTag string) reflect.Value {
+	// 防御性编程：参数校验
+	if !val.IsValid() || typ == nil || jsonTag == "" {
+		return reflect.Value{}
+	}
+
 	numField := typ.NumField()
 	for i := 0; i < numField; i++ {
 		fieldType := typ.Field(i)
 		// 提取 json tag 的第一部分（逗号前）
 		tag := strings.SplitN(fieldType.Tag.Get("json"), ",", 2)[0]
 		if tag == jsonTag {
-			return val.Field(i)
+			field := val.Field(i)
+			// 确保字段可访问
+			if field.CanInterface() {
+				return field
+			}
 		}
 	}
 	return reflect.Value{} // 未找到，返回零值
