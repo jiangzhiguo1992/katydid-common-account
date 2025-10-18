@@ -668,6 +668,7 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 
 // buildValidationResult 构建验证结果
 // 需要复制错误列表，因为 ctx 来自对象池会被归还
+// 内存优化：使用对象池减少切片分配
 //
 // 参数：
 //

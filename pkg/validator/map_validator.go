@@ -149,6 +149,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 
 	// 创建验证上下文（场景为0，因为 map 验证场景已在外部区分）
 	ctx := NewValidationContext(0)
+	defer ReleaseValidationContext(ctx) // 使用后归还到池
 
 	// 1. 验证必填键（业务逻辑错误）
 	if len(v.RequiredKeys) > 0 {
@@ -165,15 +166,17 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		v.collectCustomKeyErrors(kvs, ctx)
 	}
 
-	// 返回验证结果
-	if ctx.HasErrors() {
-		return ctx.Errors
-	}
-	if len(ctx.Message) != 0 {
-		return []*FieldError{NewFieldError("", "", "").WithMessage(ctx.Message)}
+	if !ctx.HasErrors() {
+		if len(ctx.Message) != 0 {
+			return []*FieldError{NewFieldError("", "", "").WithMessage(ctx.Message)}
+		}
 	}
 
-	return nil
+	// 必须复制错误列表，因为 ctx 会被归还到对象池
+	// 内存优化：精确分配容量，避免浪费
+	errs := make([]*FieldError, len(ctx.Errors))
+	copy(errs, ctx.Errors)
+	return errs
 }
 
 // collectRequiredKeyErrors 收集必填键错误
@@ -343,8 +346,11 @@ func (mv *MapValidator) getNamespace(key string) string {
 	if mv.ParentNameSpace == "" {
 		return key
 	}
-	// 内存优化：使用 strings.Builder
-	var builder strings.Builder
+
+	// 内存优化：从对象池获取 strings.Builder
+	builder := acquireStringBuilder()
+	defer releaseStringBuilder(builder)
+
 	builder.Grow(len(mv.ParentNameSpace) + len(key) + 1)
 	builder.WriteString(mv.ParentNameSpace)
 	builder.WriteString(".")
@@ -484,7 +490,10 @@ func ValidateMapMustHaveKeys(kvs map[string]any, keys ...string) error {
 
 	// 构建错误消息
 	if len(invalidKeys) > 0 || len(missingKeys) > 0 {
-		var errMsg strings.Builder
+		// 内存优化：从对象池获取 strings.Builder
+		errMsg := acquireStringBuilder()
+		defer releaseStringBuilder(errMsg)
+
 		errMsg.WriteString("map validation failed: ")
 
 		if len(invalidKeys) > 0 {

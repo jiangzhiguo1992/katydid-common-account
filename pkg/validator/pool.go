@@ -21,28 +21,11 @@ var (
 		},
 	}
 
-	// fieldErrorPool FieldError 对象池
-	// 用途：复用 FieldError 对象，减少小对象分配
-	fieldErrorPool = sync.Pool{
-		New: func() interface{} {
-			return &FieldError{}
-		},
-	}
-
 	// stringBuilderPool strings.Builder 对象池
 	// 用途：复用字符串构建器，减少字符串拼接时的内存分配
 	stringBuilderPool = sync.Pool{
 		New: func() interface{} {
 			return &strings.Builder{}
-		},
-	}
-
-	// fieldErrorSlicePool FieldError 切片池
-	// 用途：复用错误切片，避免频繁的切片分配
-	fieldErrorSlicePool = sync.Pool{
-		New: func() interface{} {
-			slice := make([]*FieldError, 0, 16) // 预分配16个容量
-			return &slice
 		},
 	}
 )
@@ -87,43 +70,6 @@ func releaseValidationContext(ctx *ValidationContext) {
 	validationContextPool.Put(ctx)
 }
 
-// acquireFieldError 从对象池获取 FieldError
-// 使用后必须调用 releaseFieldError 归还
-// 参数：
-//   - namespace: 字段命名空间
-//   - tag: 验证标签
-//   - param: 验证参数
-//
-// 返回：
-//   - 已初始化的 FieldError 实例
-func acquireFieldError(namespace, tag, param string) *FieldError {
-	fe := fieldErrorPool.Get().(*FieldError)
-	fe.Namespace = truncateString(namespace, maxNamespaceLength)
-	fe.Tag = truncateString(tag, maxTagLength)
-	fe.Param = truncateString(param, maxParamLength)
-	fe.Value = nil
-	fe.Message = ""
-	return fe
-}
-
-// releaseFieldError 将 FieldError 归还到对象池
-// 参数：
-//   - fe: 待归还的 FieldError
-func releaseFieldError(fe *FieldError) {
-	if fe == nil {
-		return
-	}
-
-	// 清空字段，防止内存泄漏
-	fe.Namespace = ""
-	fe.Tag = ""
-	fe.Param = ""
-	fe.Value = nil
-	fe.Message = ""
-
-	fieldErrorPool.Put(fe)
-}
-
 // acquireStringBuilder 从对象池获取 strings.Builder
 // 使用后必须调用 releaseStringBuilder 归还
 // 返回：
@@ -150,108 +96,6 @@ func releaseStringBuilder(sb *strings.Builder) {
 
 	sb.Reset()
 	stringBuilderPool.Put(sb)
-}
-
-// acquireFieldErrorSlice 从对象池获取 FieldError 切片
-// 使用后必须调用 releaseFieldErrorSlice 归还
-// 返回：
-//   - 已重置的 []*FieldError 切片
-func acquireFieldErrorSlice() *[]*FieldError {
-	slice := fieldErrorSlicePool.Get().(*[]*FieldError)
-	*slice = (*slice)[:0]
-	return slice
-}
-
-// releaseFieldErrorSlice 将 FieldError 切片归还到对象池
-// 参数：
-//   - slice: 待归还的切片
-func releaseFieldErrorSlice(slice *[]*FieldError) {
-	if slice == nil {
-		return
-	}
-
-	// 防止内存泄漏：清空引用
-	for i := range *slice {
-		(*slice)[i] = nil
-	}
-
-	// 防止内存泄漏：容量过大时不归还
-	if cap(*slice) > 1000 {
-		return
-	}
-
-	*slice = (*slice)[:0]
-	fieldErrorSlicePool.Put(slice)
-}
-
-// ============================================================================
-// 辅助函数 - 内存优化的字符串操作
-// ============================================================================
-
-// concatStringsOptimized 优化的字符串拼接
-// 使用对象池中的 strings.Builder，减少内存分配
-// 参数：
-//   - parts: 待拼接的字符串部分
-//
-// 返回：
-//   - 拼接后的字符串
-func concatStringsOptimized(parts ...string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	if len(parts) == 1 {
-		return parts[0]
-	}
-
-	// 计算总长度
-	totalLen := 0
-	for _, part := range parts {
-		totalLen += len(part)
-	}
-
-	// 从对象池获取 Builder
-	sb := acquireStringBuilder()
-	defer releaseStringBuilder(sb)
-
-	sb.Grow(totalLen)
-	for _, part := range parts {
-		sb.WriteString(part)
-	}
-
-	return sb.String()
-}
-
-// formatStringOptimized 优化的字符串格式化
-// 使用对象池中的 strings.Builder，减少内存分配
-// 参数：
-//   - format: 格式字符串
-//   - args: 格式化参数
-//
-// 返回：
-//   - 格式化后的字符串
-func formatStringOptimized(parts ...string) string {
-	return concatStringsOptimized(parts...)
-}
-
-// copyStringSliceOptimized 优化的字符串切片拷贝
-// 使用预分配避免多次扩容
-// 参数：
-//   - src: 源字符串切片
-//
-// 返回：
-//   - 拷贝后的切片
-func copyStringSliceOptimized(src []string) []string {
-	if src == nil {
-		return nil
-	}
-	if len(src) == 0 {
-		return []string{}
-	}
-
-	// 预分配精确容量
-	dst := make([]string, len(src))
-	copy(dst, src)
-	return dst
 }
 
 // ============================================================================
@@ -316,22 +160,9 @@ func ResetPools() {
 		},
 	}
 
-	fieldErrorPool = sync.Pool{
-		New: func() interface{} {
-			return &FieldError{}
-		},
-	}
-
 	stringBuilderPool = sync.Pool{
 		New: func() interface{} {
 			return &strings.Builder{}
-		},
-	}
-
-	fieldErrorSlicePool = sync.Pool{
-		New: func() interface{} {
-			slice := make([]*FieldError, 0, 16)
-			return &slice
 		},
 	}
 }

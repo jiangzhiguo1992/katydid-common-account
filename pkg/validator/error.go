@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"unsafe"
 
 	"github.com/go-playground/validator/v10"
@@ -100,6 +99,7 @@ func ReleaseValidationContext(ctx *ValidationContext) {
 
 // NewFieldError 创建字段错误
 // 工厂方法模式，简化 FieldError 对象的创建过程
+// 注意：FieldError 不使用对象池，因为它会作为验证结果返回给调用者，生命周期不可控
 // 参数：
 //
 //	namespace: 字段命名空间（如 User.Profile.Email）
@@ -149,13 +149,15 @@ func (vc *ValidationContext) Error() string {
 		return vc.Message
 	}
 
-	// 内存优化：预分配足够的容量，减少动态扩容
+	// 内存优化：从对象池获取 strings.Builder
+	builder := acquireStringBuilder()
+	defer releaseStringBuilder(builder)
+
+	// 预分配容量
 	estimatedSize := len(vc.Errors) * errorMessageEstimatedLength
 	if estimatedSize > 10*1024 { // 限制最大10KB，防止过度分配
 		estimatedSize = 10 * 1024
 	}
-
-	var builder strings.Builder
 	builder.Grow(estimatedSize)
 
 	builder.WriteString("validation failed: ")
@@ -501,8 +503,10 @@ func (fe *FieldError) WithMessage(message string) *FieldError {
 //	key: 本地化键（格式：命名空间.标签）
 //	param: 验证参数（用于消息插值）
 func (fe *FieldError) ToLocalizes() (key string, param string) {
-	// 内存优化：使用 strings.Builder 构建字符串
-	var builder strings.Builder
+	// 内存优化：从对象池获取 strings.Builder
+	builder := acquireStringBuilder()
+	defer releaseStringBuilder(builder)
+
 	builder.Grow(namespaceEstimatedLength)
 
 	builder.WriteString(fe.Namespace)
