@@ -137,7 +137,7 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 		if len(key) > maxMapKeyLength {
 			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
-				"map", "map", "key_length", strconv.Itoa(maxMapKeyLength), "",
+				"map", "map", "key_len", strconv.Itoa(maxMapKeyLength), "",
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
 				len(key),
 			)
@@ -176,7 +176,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 		if len(key) > maxMapKeyLength {
 			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
-				"map", "map", "key_length", strconv.Itoa(maxMapKeyLength), "",
+				"map", "map", "key_len", strconv.Itoa(maxMapKeyLength), "",
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
 				len(key),
 			)
@@ -228,7 +228,7 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 			if err := validatorFunc(value); err != nil {
 				ctx.AddErrorByDetail(
 					key, key, "custom", "", mv.getNamespace(key),
-					fmt.Sprintf("key '%s' custom validation failed", key),
+					err.Error(),
 					value,
 				)
 			}

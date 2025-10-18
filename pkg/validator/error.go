@@ -316,11 +316,18 @@ func (fe *FieldError) ToLocalizes() (key string, param string) {
 	var builder strings.Builder
 	builder.Grow(namespaceEstimatedLength)
 
-	if fe.Namespace != "" {
-		builder.WriteString(fe.Namespace)
+	builder.WriteString(fe.Namespace)
+	if fe.Tag != "" {
 		builder.WriteString(".")
 	}
 	builder.WriteString(fe.Tag)
+
+	if fe.Namespace == "" && fe.Tag == "" {
+		builder.WriteString(fe.Message)
+	} else if fe.Tag == "custom" {
+		builder.WriteString(".")
+		builder.WriteString(fe.Message)
+	}
 
 	return builder.String(), fe.Param
 }
