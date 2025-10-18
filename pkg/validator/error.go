@@ -57,6 +57,12 @@ const (
 	errorMessageEstimatedLength = 80
 	// namespaceEstimatedLength 命名空间的预估长度
 	namespaceEstimatedLength = 50
+	// maxErrorsCapacity 错误列表的最大容量，防止恶意数据导致内存溢出
+	maxErrorsCapacity = 1000
+	// maxNamespaceLength 最大命名空间长度，防止超长命名空间攻击
+	maxNamespaceLength = 512
+	// maxMessageLength 最大错误消息长度，防止超长消息攻击
+	maxMessageLength = 2048
 )
 
 // NewValidationContext 创建验证上下文
@@ -161,6 +167,19 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 		return // 防御性编程：忽略 nil 参数
 	}
 
+	// 安全检查：防止恶意数据导致内存溢出
+	if len(vc.Errors) >= maxErrorsCapacity {
+		return // 达到最大容量，拒绝添加更多错误
+	}
+
+	// 安全检查：验证字段长度，防止超长数据攻击
+	if len(err.Namespace) > maxNamespaceLength {
+		err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
+	}
+	if len(err.Message) > maxMessageLength {
+		err.Message = err.Message[:maxMessageLength] + "..."
+	}
+
 	vc.Errors = append(vc.Errors, err)
 }
 
@@ -174,13 +193,28 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 		return
 	}
 
+	// 安全检查：防止恶意数据导致内存溢出
+	if len(vc.Errors) >= maxErrorsCapacity {
+		return
+	}
+
+	namespace := verr.Namespace()
+	if len(namespace) > maxNamespaceLength {
+		namespace = namespace[:maxNamespaceLength] + "..."
+	}
+
+	message := verr.Error()
+	if len(message) > maxMessageLength {
+		message = message[:maxMessageLength] + "..."
+	}
+
 	vc.Errors = append(vc.Errors, NewFieldError(
 		verr.StructField(),
 		verr.Field(),
 		verr.Tag(),
 		verr.Param(),
-		verr.Namespace(),
-	).WithValue(verr.Value()).WithMessage(verr.Error()))
+		namespace,
+	).WithValue(verr.Value()).WithMessage(message))
 }
 
 // AddErrorByDetail 通过详细信息添加字段错误
@@ -195,6 +229,19 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 //	message: 自定义错误消息
 //	namespace: 字段命名空间
 func (vc *ValidationContext) AddErrorByDetail(fieldName, jsonName, tag, param, namespace, message string, value any) {
+	// 安全检查：防止恶意数据导致内存溢出
+	if len(vc.Errors) >= maxErrorsCapacity {
+		return
+	}
+
+	// 安全检查：验证字符串长度
+	if len(namespace) > maxNamespaceLength {
+		namespace = namespace[:maxNamespaceLength] + "..."
+	}
+	if len(message) > maxMessageLength {
+		message = message[:maxMessageLength] + "..."
+	}
+
 	vc.Errors = append(vc.Errors, NewFieldError(
 		fieldName,
 		jsonName,
@@ -214,12 +261,42 @@ func (vc *ValidationContext) AddErrors(errors []*FieldError) {
 		return // 防御性编程：忽略空列表
 	}
 
+	// 安全检查：防止恶意数据导致内存溢出
+	if len(vc.Errors) >= maxErrorsCapacity {
+		return
+	}
+
+	// 安全检查：限制批量添加的数量
+	remainingCapacity := maxErrorsCapacity - len(vc.Errors)
+	if len(errors) > remainingCapacity {
+		errors = errors[:remainingCapacity]
+	}
+
 	// 内存优化：如果当前容量不足，一次性扩容到所需大小
 	requiredCap := len(vc.Errors) + len(errors)
+	// 安全检查：限制最大容量
+	if requiredCap > maxErrorsCapacity {
+		requiredCap = maxErrorsCapacity
+	}
+
 	if cap(vc.Errors) < requiredCap {
 		newErrors := make([]*FieldError, len(vc.Errors), requiredCap)
 		copy(newErrors, vc.Errors)
 		vc.Errors = newErrors
+	}
+
+	// 对每个错误进行长度验证
+	for _, err := range errors {
+		if err == nil {
+			continue
+		}
+		// 安全检查：验证字段长度
+		if len(err.Namespace) > maxNamespaceLength {
+			err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
+		}
+		if len(err.Message) > maxMessageLength {
+			err.Message = err.Message[:maxMessageLength] + "..."
+		}
 	}
 
 	vc.Errors = append(vc.Errors, errors...)

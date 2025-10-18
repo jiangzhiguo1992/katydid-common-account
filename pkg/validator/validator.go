@@ -44,8 +44,6 @@ const (
 const (
 	// maxNestedDepth 最大嵌套验证深度，防止无限递归导致栈溢出
 	maxNestedDepth = 100
-	// defaultTypeCacheSize 类型缓存的默认容量
-	defaultTypeCacheSize = 64
 )
 
 // ============================================================================

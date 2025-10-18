@@ -42,10 +42,10 @@ type MapValidator struct {
 
 // 常量定义：用于错误消息和性能优化
 const (
-	// defaultMapCapacity 默认 map 容量，用于预分配内存
-	defaultMapCapacity = 8
 	// maxMapKeyLength 最大键名长度，防止恶意超长键名
 	maxMapKeyLength = 256
+	// maxMapSize 最大 map 大小，防止 DoS 攻击
+	maxMapSize = 10000
 )
 
 func ValidateMaps(scene ValidateScene, kvs map[string]any, validators *MapValidators) []*FieldError {
@@ -110,6 +110,14 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 			}
 		}
 		return nil
+	}
+
+	// 安全检查：防止 DoS 攻击 - 限制 map 大小
+	if len(kvs) > maxMapSize {
+		return []*FieldError{
+			NewFieldError("map", "map", "size", strconv.Itoa(maxMapSize), "").
+				WithMessage(fmt.Sprintf("map size exceeds maximum limit %d", maxMapSize)),
+		}
 	}
 
 	// 创建验证上下文（场景为空字符串，因为 map 验证场景已在外部区分）
