@@ -5,10 +5,12 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // MapValidators 场景化的Map验证器集合
 // 设计目标：支持不同验证场景使用不同的验证规则
+// 线程安全性：只读操作，多个goroutine可以并发使用
 type MapValidators struct {
 	// Validators 场景到验证器的映射
 	Validators map[ValidateScene]*MapValidator
@@ -20,6 +22,7 @@ type MapValidators struct {
 //   - 开放封闭：通过 KeyValidators 支持扩展，无需修改核心代码
 //   - 高内聚低耦合：独立的验证逻辑，不依赖其他验证器
 //
+// 线程安全性：allowedKeysMap 的懒加载使用 sync.Once 保证线程安全
 // 性能优化：使用缓存减少重复计算，预分配内存减少动态扩容
 type MapValidator struct {
 	// ParentNameSpace 结构体命名空间，用于生成准确的错误路径
@@ -41,6 +44,9 @@ type MapValidator struct {
 	// allowedKeysMap 内部缓存的允许键 map（性能优化）
 	// 使用 map 查找的时间复杂度为 O(1)，优于切片遍历的 O(n)
 	allowedKeysMap map[string]bool
+
+	// initOnce 确保 allowedKeysMap 只初始化一次（线程安全）
+	initOnce sync.Once
 }
 
 // 常量定义：用于错误消息和性能优化
@@ -217,13 +223,13 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 	}
 
 	// 性能优化：懒加载 allowedKeysMap
-	if mv.allowedKeysMap == nil {
+	mv.initOnce.Do(func() {
 		// 内存优化：预分配精确的容量
 		mv.allowedKeysMap = make(map[string]bool, len(mv.AllowedKeys))
 		for _, key := range mv.AllowedKeys {
 			mv.allowedKeysMap[key] = true
 		}
-	}
+	})
 
 	// 检查所有键是否在白名单中
 	for key := range kvs {

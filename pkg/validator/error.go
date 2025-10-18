@@ -3,13 +3,16 @@ package validator
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/go-playground/validator/v10"
 )
 
 // ValidationContext 验证上下文，用于传递验证环境信息和收集验证错误
 // 设计目标：高内聚低耦合，集中管理验证过程中的所有错误信息
+// 线程安全性：本身不是线程安全的，应在单个goroutine中使用或外部加锁
 type ValidationContext struct {
 	// Scene 验证场景，用于区分不同的业务场景（如：创建、更新、删除等）
 	Scene ValidateScene `json:"scene"`
@@ -60,13 +63,16 @@ const (
 	maxNamespaceLength = 512
 
 	// maxTagLength 最大标签长度，防止超长标签攻击
-	maxTagLength = 128 // TODO:GG 可能没用?
+	maxTagLength = 128
 
 	// maxParamLength 最大参数长度，防止超长参数攻击
-	maxParamLength = 256 // TODO:GG 没用
+	maxParamLength = 256
 
 	// maxMessageLength 最大错误消息长度，防止超长消息攻击
 	maxMessageLength = 2048
+
+	// maxValueSize 最大值大小（字节），防止存储过大的值导致内存问题
+	maxValueSize = 4096
 )
 
 // NewValidationContext 创建验证上下文
@@ -98,15 +104,9 @@ func NewValidationContext(scene ValidateScene) *ValidationContext {
 //	已初始化的 FieldError 实例
 func NewFieldError(namespace, tag, param string) *FieldError {
 	// 防御性编程：安全检查并截断超长字段
-	if len(namespace) > maxNamespaceLength {
-		namespace = namespace[:maxNamespaceLength] + "..."
-	}
-	if len(tag) > maxTagLength {
-		tag = tag[:maxTagLength] + "..."
-	}
-	if len(param) > maxParamLength {
-		param = param[:maxParamLength] + "..."
-	}
+	namespace = truncateString(namespace, maxNamespaceLength)
+	tag = truncateString(tag, maxTagLength)
+	param = truncateString(param, maxParamLength)
 
 	return &FieldError{
 		Namespace: namespace,
@@ -115,6 +115,19 @@ func NewFieldError(namespace, tag, param string) *FieldError {
 		Value:     nil, // 默认不设置值
 		Message:   "",  // 默认不设置消息
 	}
+}
+
+// truncateString 安全截断字符串，防止超长攻击
+// 内部工具函数，提升代码复用性
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	// 安全截断，避免截断 UTF-8 字符的中间
+	if maxLen < 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // Error 实现 error 接口，使 ValidationContext 可以作为 error 类型使用
@@ -206,20 +219,50 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 	}
 
 	// 安全检查：验证字段长度，防止超长数据攻击
-	if len(err.Namespace) > maxNamespaceLength {
-		err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
-	}
-	if len(err.Tag) > maxTagLength {
-		err.Tag = err.Tag[:maxTagLength] + "..."
-	}
-	if len(err.Param) > maxParamLength {
-		err.Param = err.Param[:maxParamLength] + "..."
-	}
-	if len(err.Message) > maxMessageLength {
-		err.Message = err.Message[:maxMessageLength] + "..."
+	err.Namespace = truncateString(err.Namespace, maxNamespaceLength)
+	err.Tag = truncateString(err.Tag, maxTagLength)
+	err.Param = truncateString(err.Param, maxParamLength)
+	err.Message = truncateString(err.Message, maxMessageLength)
+
+	// 安全检查：验证值大小，防止存储过大对象
+	if err.Value != nil {
+		if estimateValueSize(err.Value) > maxValueSize {
+			err.Value = nil // 值过大，清空以防止内存问题
+		}
 	}
 
 	vc.Errors = append(vc.Errors, err)
+}
+
+// estimateValueSize 估算值的内存大小
+// 用于防止存储过大的值导致内存问题
+func estimateValueSize(v any) int {
+	if v == nil {
+		return 0
+	}
+
+	// 使用反射获取值的大小
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.String:
+		return len(rv.String())
+	case reflect.Slice, reflect.Array:
+		// 估算：每个元素 8 字节
+		return rv.Len() * 8
+	case reflect.Map:
+		// 估算：每个键值对 16 字节
+		return rv.Len() * 16
+	case reflect.Struct:
+		// 估算结构体大小
+		return int(rv.Type().Size())
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return 0
+		}
+		return int(unsafe.Sizeof(rv.Interface()))
+	default:
+		return int(unsafe.Sizeof(v))
+	}
 }
 
 // AddErrorByValidator 通过 go-playground/validator 的 FieldError 添加错误
@@ -238,31 +281,22 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 	}
 
 	// 提取并验证字段信息
-	namespace := verr.Namespace()
-	if len(namespace) > maxNamespaceLength {
-		namespace = namespace[:maxNamespaceLength] + "..."
-	}
+	namespace := truncateString(verr.Namespace(), maxNamespaceLength)
+	tag := truncateString(verr.Tag(), maxTagLength)
+	param := truncateString(verr.Param(), maxParamLength)
+	message := truncateString(verr.Error(), maxMessageLength)
 
-	tag := verr.Tag()
-	if len(tag) > maxTagLength {
-		tag = tag[:maxTagLength] + "..."
-	}
-
-	param := verr.Param()
-	if len(param) > maxParamLength {
-		param = param[:maxParamLength] + "..."
-	}
-
-	message := verr.Error()
-	if len(message) > maxMessageLength {
-		message = message[:maxMessageLength] + "..."
+	// 安全检查：值大小限制
+	value := verr.Value()
+	if estimateValueSize(value) > maxValueSize {
+		value = nil
 	}
 
 	vc.Errors = append(vc.Errors, NewFieldError(
 		namespace,
 		tag,
 		param,
-	).WithValue(verr.Value()).WithMessage(message))
+	).WithValue(value).WithMessage(message))
 }
 
 // AddErrorByDetail 通过详细信息添加字段错误
@@ -281,17 +315,14 @@ func (vc *ValidationContext) AddErrorByDetail(namespace, tag, param string, valu
 	}
 
 	// 安全检查：验证字符串长度
-	if len(namespace) > maxNamespaceLength {
-		namespace = namespace[:maxNamespaceLength] + "..."
-	}
-	if len(tag) > maxTagLength {
-		tag = tag[:maxTagLength] + "..."
-	}
-	if len(param) > maxParamLength {
-		param = param[:maxParamLength] + "..."
-	}
-	if len(message) > maxMessageLength {
-		message = message[:maxMessageLength] + "..."
+	namespace = truncateString(namespace, maxNamespaceLength)
+	tag = truncateString(tag, maxTagLength)
+	param = truncateString(param, maxParamLength)
+	message = truncateString(message, maxMessageLength)
+
+	// 安全检查：值大小限制
+	if estimateValueSize(value) > maxValueSize {
+		value = nil
 	}
 
 	vc.Errors = append(vc.Errors, NewFieldError(
@@ -341,18 +372,20 @@ func (vc *ValidationContext) AddErrors(errors []*FieldError) {
 			continue
 		}
 
+		// 安全检查：达到容量上限则停止
+		if len(vc.Errors) >= maxErrorsCapacity {
+			break
+		}
+
 		// 安全检查：验证字段长度
-		if len(err.Namespace) > maxNamespaceLength {
-			err.Namespace = err.Namespace[:maxNamespaceLength] + "..."
-		}
-		if len(err.Tag) > maxTagLength {
-			err.Tag = err.Tag[:maxTagLength] + "..."
-		}
-		if len(err.Param) > maxParamLength {
-			err.Param = err.Param[:maxParamLength] + "..."
-		}
-		if len(err.Message) > maxMessageLength {
-			err.Message = err.Message[:maxMessageLength] + "..."
+		err.Namespace = truncateString(err.Namespace, maxNamespaceLength)
+		err.Tag = truncateString(err.Tag, maxTagLength)
+		err.Param = truncateString(err.Param, maxParamLength)
+		err.Message = truncateString(err.Message, maxMessageLength)
+
+		// 安全检查：值大小限制
+		if err.Value != nil && estimateValueSize(err.Value) > maxValueSize {
+			err.Value = nil
 		}
 
 		vc.Errors = append(vc.Errors, err)
@@ -430,6 +463,11 @@ func (vc *ValidationContext) GetErrorsByTag(tag string) []*FieldError {
 //
 //	FieldError 实例，支持链式调用
 func (fe *FieldError) WithValue(value any) *FieldError {
+	// 安全检查：值大小限制
+	if estimateValueSize(value) > maxValueSize {
+		fe.Value = nil
+		return fe
+	}
 	fe.Value = value
 	return fe
 }
@@ -445,11 +483,7 @@ func (fe *FieldError) WithValue(value any) *FieldError {
 //	FieldError 实例，支持链式调用
 func (fe *FieldError) WithMessage(message string) *FieldError {
 	// 安全检查：截断超长消息
-	if len(message) > maxMessageLength {
-		message = message[:maxMessageLength] + "..."
-	}
-
-	fe.Message = message
+	fe.Message = truncateString(message, maxMessageLength)
 	return fe
 }
 
@@ -511,7 +545,7 @@ func (vc *ValidationContext) Clone() *ValidationContext {
 				Namespace: err.Namespace,
 				Tag:       err.Tag,
 				Param:     err.Param,
-				Value:     err.Value,
+				Value:     err.Value, // 注意：Value 是浅拷贝
 				Message:   err.Message,
 			}
 		}
@@ -553,11 +587,7 @@ func (vc *ValidationContext) GetFirstError() *FieldError {
 //	message: 总体错误消息
 func (vc *ValidationContext) SetMessage(message string) {
 	// 安全检查：截断超长消息
-	if len(message) > maxMessageLength {
-		message = message[:maxMessageLength] + "..."
-	}
-
-	vc.Message = message
+	vc.Message = truncateString(message, maxMessageLength)
 }
 
 // IsEmpty 检查验证上下文是否为空（既没有错误也没有消息）

@@ -36,8 +36,8 @@ type ValidateScene int64
 
 // 预定义的通用验证场景常量
 const (
-	SceneNone ValidateScene = 0  // 无场景：不执行任何场景特定的验证
-	SceneAll  ValidateScene = -1 // 所有场景(111...111)：匹配所有场景的验证规则
+	SceneNone ValidateScene = 0  // 无场景：不执行任何场景特定的验证，用于跳过场景匹配
+	SceneAll  ValidateScene = -1 // 所有场景(111...111)：匹配所有场景的验证规则，用于通用规则
 )
 
 // 验证器配置常量
@@ -47,6 +47,7 @@ const (
 	maxNestedDepth = 100
 
 	// typeCacheInitialCapacity 类型缓存初始容量（性能优化）
+	// 预留供未来使用，可用于优化 sync.Map 的初始化
 	typeCacheInitialCapacity = 32
 
 	// maxValidationErrors 单次验证允许收集的最大错误数，防止内存溢出
@@ -217,6 +218,7 @@ func Validate(obj any, scene ValidateScene) []*FieldError {
 // ClearTypeCache 清除默认验证器的类型缓存
 // 用于测试或需要重新加载类型信息时
 // 注意：此方法会影响性能，仅用于特殊场景（如：热重载、单元测试）
+// 导出供外部包使用，例如在测试中清除缓存
 func ClearTypeCache() {
 	Default().ClearTypeCache()
 }
@@ -399,7 +401,7 @@ func (v *Validator) registerStructValidator(obj any) {
 //	ctx: 验证上下文
 func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext) {
 	// 防御性编程：参数校验
-	if rules == nil || ctx == nil {
+	if rules == nil || len(rules) == 0 || ctx == nil {
 		return
 	}
 
@@ -420,7 +422,7 @@ func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[s
 		}
 	}
 
-	// 如果没有匹配的规则，直接返回
+	// 快速路径：如果没有匹配的规则，直接返回
 	if len(matchedRules) == 0 {
 		return
 	}
@@ -469,9 +471,21 @@ func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[s
 		}
 
 		// 使用内置规则验证（无需注册，直接验证）
-		if err := v.validate.Var(field.Interface(), rule); err != nil {
-			v.addFieldErrors(obj, err, ctx)
-		}
+		// 错误恢复：防止验证器内部 panic
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					ctx.AddErrorByDetail(
+						"", "validation_panic", "", nil,
+						fmt.Sprintf("field validation panicked: %v", r),
+					)
+				}
+			}()
+
+			if err := v.validate.Var(field.Interface(), rule); err != nil {
+				v.addFieldErrors(obj, err, ctx)
+			}
+		}()
 	}
 }
 
