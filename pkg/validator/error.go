@@ -75,8 +75,9 @@ const (
 	maxValueSize = 4096
 )
 
-// NewValidationContext 创建验证上下文
+// NewValidationContext 创建验证上下文（使用对象池优化）
 // 工厂方法模式，确保对象正确初始化，避免 nil 引用
+// 内存优化：从对象池获取，使用后应调用 ReleaseValidationContext 归还
 // 参数：
 //
 //	scene: 验证场景标识
@@ -85,10 +86,16 @@ const (
 //
 //	已初始化的 ValidationContext 实例
 func NewValidationContext(scene ValidateScene) *ValidationContext {
-	return &ValidationContext{
-		Scene:  scene,
-		Errors: make([]*FieldError, 0), // 预分配空切片，避免 nil 切片
-	}
+	return acquireValidationContext(scene)
+}
+
+// ReleaseValidationContext 将验证上下文归还到对象池
+// 必须与 NewValidationContext 配对使用，建议使用 defer
+// 参数：
+//
+//	ctx: 待归还的验证上下文
+func ReleaseValidationContext(ctx *ValidationContext) {
+	releaseValidationContext(ctx)
 }
 
 // NewFieldError 创建字段错误
