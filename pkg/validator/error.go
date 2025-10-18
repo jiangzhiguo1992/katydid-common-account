@@ -414,11 +414,45 @@ func (vc *ValidationContext) Clear() {
 func (vc *ValidationContext) Clone() *ValidationContext {
 	// 深拷贝错误列表
 	newErrors := make([]*FieldError, len(vc.Errors))
-	copy(newErrors, vc.Errors)
+	for i, err := range vc.Errors {
+		if err != nil {
+			// 深拷贝每个 FieldError 对象
+			newErrors[i] = &FieldError{
+				Namespace: err.Namespace,
+				Tag:       err.Tag,
+				Param:     err.Param,
+				Value:     err.Value,
+				Message:   err.Message,
+			}
+		}
+	}
 
 	return &ValidationContext{
 		Scene:   vc.Scene,
 		Message: vc.Message,
 		Errors:  newErrors,
 	}
+}
+
+// SanitizeValues 清除所有错误中的敏感值，防止数据泄露
+// 用于记录日志或返回给客户端时，避免暴露敏感信息
+// 此方法会修改当前对象，如需保留原始值请先调用 Clone()
+func (vc *ValidationContext) SanitizeValues() *ValidationContext {
+	for _, err := range vc.Errors {
+		if err != nil {
+			err.Value = nil
+		}
+	}
+	return vc
+}
+
+// GetFirstError 获取第一个错误
+// 返回：
+//
+//	第一个 FieldError，如果没有错误则返回 nil
+func (vc *ValidationContext) GetFirstError() *FieldError {
+	if len(vc.Errors) > 0 {
+		return vc.Errors[0]
+	}
+	return nil
 }

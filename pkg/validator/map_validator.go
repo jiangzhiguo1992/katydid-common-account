@@ -168,6 +168,15 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 			continue
 		}
 
+		// 安全检查：防止空键名或包含危险字符
+		if err := validateKeyName(key); err != nil {
+			ctx.AddErrorByDetail(
+				"map", "invalid_key", "", key,
+				fmt.Sprintf("invalid key name '%s': %v", key, err),
+			)
+			continue
+		}
+
 		if _, exists := kvs[key]; !exists {
 			ctx.AddErrorByDetail(
 				mv.getNamespace(key), "required", "", nil,
@@ -201,6 +210,15 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 			ctx.AddErrorByDetail(
 				"map", "key_len", strconv.Itoa(maxMapKeyLength), len(key),
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
+			)
+			continue
+		}
+
+		// 安全检查：验证键名有效性
+		if err := validateKeyName(key); err != nil {
+			ctx.AddErrorByDetail(
+				"map", "invalid_key", "", key,
+				fmt.Sprintf("invalid key name '%s': %v", key, err),
 			)
 			continue
 		}
@@ -253,6 +271,23 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 			}
 		}()
 	}
+}
+
+// validateKeyName 验证键名的有效性
+// 防止注入攻击和非法字符
+func validateKeyName(key string) error {
+	if key == "" {
+		return fmt.Errorf("key name cannot be empty")
+	}
+
+	// 检查是否包含控制字符（ASCII 0-31）
+	for _, r := range key {
+		if r < 32 {
+			return fmt.Errorf("key name contains control character (code %d)", r)
+		}
+	}
+
+	return nil
 }
 
 // getNamespace 获取完整的命名空间路径

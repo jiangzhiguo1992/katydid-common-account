@@ -91,32 +91,32 @@ type RuleValidator interface {
 //
 // 优势：
 //   - 支持场景化验证，不同场景可以有不同的验证逻辑
-//   - 使用 reportError 统一报告错误，代码更简洁
+//   - 使用 report 统一报告错误，代码更简洁
 //   - 无需手动构造 FieldError 对象
 //   - 自动注册到底层验证器，性能优异
 //   - 集成到 go-playground/validator 的验证流程
 //
 // 示例：
 //
-//	func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
+//	func (u *User) CustomValidation(scene ValidateScene, report FuncReportError) {
 //	    // 简单跨字段验证
 //	    if u.Password != u.ConfirmPassword {
-//	        reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+//	        report(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
 //	    }
 //
 //	    // 场景化验证
 //	    if scene == SceneCreate && u.Age < 18 {
-//	        reportError(u.Age, "Age", "age", "min_age", "18")
+//	        report(u.Age, "Age", "age", "min_age", "18")
 //	    }
 //	}
 type CustomValidator interface {
 	// CustomValidation 执行业务验证逻辑
 	// 参数：
 	//   - scene：当前验证场景，可根据场景执行不同的验证逻辑
-	//   - reportError：错误报告函数，用于向验证器报告错误
+	//   - report：错误报告函数，用于向验证器报告错误
 	//
-	// 注意：所有错误都通过 reportError 函数报告，无需返回值
-	CustomValidation(scene ValidateScene, reportError FuncReportError)
+	// 注意：所有错误都通过 report 函数报告，无需返回值
+	CustomValidation(scene ValidateScene, report FuncReportError)
 }
 
 // FuncReportError 错误报告函数类型
@@ -124,16 +124,15 @@ type CustomValidator interface {
 // 用途：在 CustomValidator 中使用，向验证器报告错误而无需手动构造 FieldError 对象
 //
 // 参数：
-//   - value: 字段的实际值
-//   - namespace: 命名空间
+//   - namespace: 命名空间（字段路径，如 "User.Profile.Email"）
 //   - tag: 验证标签（如："required", "custom_check"）
 //   - param: 验证参数（如："min=3" 中的 "3"）
 //
 // 示例：
 //
-//	func (u *User) CustomValidation(scene ValidateScene, reportError FuncReportError) {
+//	func (u *User) CustomValidation(scene ValidateScene, report FuncReportError) {
 //	    if u.Password != u.ConfirmPassword {
-//	        reportError(u.ConfirmPassword, "ConfirmPassword", "confirm_password", "password_mismatch", "")
+//	        report("User.Password", "ConfirmPassword", "param")
 //	    }
 //	}
 type FuncReportError func(namespace, tag, param string)
@@ -567,13 +566,13 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 		return
 	}
 
-	// 创建 reportError 函数，用于简化模型中的错误报告
-	reportError := func(namespace, tag, param string) {
+	// 创建 report 函数，用于简化模型中的错误报告
+	report := func(namespace, tag, param string) {
 		ctx.AddErrorByDetail(namespace, tag, param, nil, "")
 	}
 
-	// 调用自定义验证逻辑（使用正确的 scene 和 reportError 函数）
-	customValidator.CustomValidation(scene, reportError)
+	// 调用自定义验证逻辑（使用正确的 scene 和 report 函数）
+	customValidator.CustomValidation(scene, report)
 }
 
 // buildValidationResult 构建验证结果
