@@ -53,12 +53,29 @@ func ValidateMaps(scene ValidateScene, kvs map[string]any, validators *MapValida
 		return nil
 	}
 
-	validator, exists := validators.Validators[scene]
-	if !exists {
+	// 使用位运算匹配场景：遍历所有配置的场景，找到匹配的验证器
+	// 支持场景组合：例如 SceneCreate | SceneUpdate 可以匹配多个场景
+	var matchedValidators []*MapValidator
+	for configScene, validator := range validators.Validators {
+		if scene&configScene != 0 {
+			// 找到匹配的场景验证器
+			matchedValidators = append(matchedValidators, validator)
+		}
+	}
+
+	if matchedValidators == nil || len(matchedValidators) == 0 {
 		return nil
 	}
 
-	return ValidateMap(kvs, validator)
+	// 遍历验证
+	var allErrors []*FieldError
+	for _, mv := range matchedValidators {
+		errors := ValidateMap(kvs, mv)
+		if errors != nil && len(errors) > 0 {
+			allErrors = append(allErrors, errors...)
+		}
+	}
+	return allErrors
 }
 
 // ValidateMap 验证 map[string]any 类型的扩展字段
@@ -96,7 +113,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	}
 
 	// 创建验证上下文（场景为空字符串，因为 map 验证场景已在外部区分）
-	ctx := NewValidationContext("")
+	ctx := NewValidationContext(0)
 
 	// 1. 验证必填键（业务逻辑错误）
 	if len(v.RequiredKeys) > 0 {

@@ -37,8 +37,8 @@ type TestProduct struct {
 	Category string  `json:"category"`
 }
 
-// Rules 实现 RuleProvider 接口
-func (p *TestProduct) Rules() map[ValidateScene]map[string]string {
+// Rules 实现 RuleValidator 接口
+func (p *TestProduct) RuleValidation() map[ValidateScene]map[string]string {
 	return map[ValidateScene]map[string]string{
 		SceneCreate: {
 			"Name":     "required,min=2,max=100",
@@ -82,7 +82,7 @@ func (up *TestUserProfile) ValidateRules() map[ValidateScene]map[string]string {
 }
 
 // CrossFieldValidation 验证 Extras 中的社交媒体链接
-func (up *TestUserProfile) BusinessValidation(scene ValidateScene) []*FieldError {
+func (up *TestUserProfile) CustomValidation(scene ValidateScene) []*FieldError {
 	if up.Extras == nil || len(up.Extras) == 0 {
 		return nil
 	}
@@ -364,8 +364,8 @@ func TestComplexNestedStructure(t *testing.T) {
 		RelatedProducts []TestProduct `json:"related_products,omitempty"`
 	}
 
-	// 实现 RuleProvider 接口
-	var _ RuleProvider = (*NestedProduct)(nil)
+	// 实现 RuleValidator 接口
+	var _ RuleValidator = (*NestedProduct)(nil)
 
 	nested := &NestedProduct{
 		TestProduct: TestProduct{

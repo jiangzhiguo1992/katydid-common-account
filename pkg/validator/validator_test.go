@@ -19,16 +19,16 @@ type TestUser struct {
 	Phone    string `json:"phone"`
 }
 
-// 测试场景常量
+// 预定义的通用验证场景常量
 const (
-	SceneCreate ValidateScene = "create" // 创建场景
-	SceneUpdate ValidateScene = "update" // 更新场景
-	SceneDelete ValidateScene = "delete" // 删除场景
-	SceneQuery  ValidateScene = "query"  // 查询场景
+	SceneCreate ValidateScene = 1 << 0 // 创建场景 (1)
+	SceneUpdate ValidateScene = 1 << 1 // 更新场景 (2)
+	SceneDelete ValidateScene = 1 << 2 // 删除场景 (4)
+	SceneQuery  ValidateScene = 1 << 3 // 查询场景 (8)
 )
 
-// Rules 实现 RuleProvider 接口
-func (u *TestUser) Rules() map[ValidateScene]map[string]string {
+// Rules 实现 RuleValidator 接口
+func (u *TestUser) RuleValidation() map[ValidateScene]map[string]string {
 	return map[ValidateScene]map[string]string{
 		SceneCreate: {
 			"Username": "required,min=3,max=20,alphanum",
@@ -47,9 +47,9 @@ func (u *TestUser) Rules() map[ValidateScene]map[string]string {
 	}
 }
 
-// CrossFieldValidation 实现 BusinessValidator 接口
-func (u *TestUser) BusinessValidation(scene ValidateScene) []*FieldError {
-	if scene == SceneCreate {
+// CrossFieldValidation 实现 CustomValidator 接口
+func (u *TestUser) CustomValidation(scene ValidateScene) []*FieldError {
+	if scene&SceneCreate != 0 {
 		// 创建时，用户名不能是admin
 		if u.Username == "admin" {
 			return []*FieldError{}
@@ -497,16 +497,16 @@ type BenchmarkUser struct {
 	Age      int    `json:"age"`
 }
 
-func (u *BenchmarkUser) Rules() map[ValidateScene]map[string]string {
+func (u *BenchmarkUser) RuleValidation() map[ValidateScene]map[string]string {
 	return map[ValidateScene]map[string]string{
-		"create": {
+		SceneCreate: {
 			"Username": "required,min=3,max=20",
 			"Email":    "required,email",
 			"Password": "required,min=6",
 			"Phone":    "len=11",
 			"Age":      "gte=0,lte=150",
 		},
-		"update": {
+		SceneUpdate: {
 			"Email": "omitempty,email",
 			"Phone": "omitempty,len=11",
 			"Age":   "omitempty,gte=0,lte=150",
@@ -527,7 +527,7 @@ func BenchmarkValidate_TypeCaching(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = v.Validate(user, "create")
+		_ = v.Validate(user, SceneCreate)
 	}
 }
 
@@ -543,7 +543,7 @@ func BenchmarkValidate_MultipleInstances(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, user := range users {
-			_ = v.Validate(user, "create")
+			_ = v.Validate(user, SceneCreate)
 		}
 	}
 }
@@ -561,7 +561,7 @@ func BenchmarkValidate_ErrorFormatting(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = v.Validate(invalidUser, "create")
+		_ = v.Validate(invalidUser, SceneCreate)
 	}
 }
 
@@ -579,7 +579,7 @@ func BenchmarkValidate_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = v.Validate(user, "create")
+			_ = v.Validate(user, SceneCreate)
 		}
 	})
 }

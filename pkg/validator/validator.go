@@ -10,13 +10,35 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// ValidateScene 验证场景标识符，用于区分不同的业务验证规则集
-// 在外部定义具体的场景常量，例如：
-//   - SceneCreate: 创建场景（通常要求所有必填字段）
-//   - SceneUpdate: 更新场景（通常允许部分字段为空）
-//   - SceneDelete: 删除场景（通常只需要 ID）
+// ValidateScene 验证场景标识符，使用位运算支持场景组合验证
+// 设计目标：
+//   - 使用 int64 类型，支持位运算（按位或、按位与）
+//   - 允许场景组合：SceneCreate | SceneUpdate 表示同时适用于创建和更新场景
+//   - 支持场景匹配：使用 scene & targetScene != 0 判断是否包含目标场景
 //
-type ValidateScene string
+// 使用示例：
+//
+//	const (
+//	    SceneCreate ValidateScene = 1 << 0  // 0b0001 创建场景
+//	    SceneUpdate ValidateScene = 1 << 1  // 0b0010 更新场景
+//	    SceneDelete ValidateScene = 1 << 2  // 0b0100 删除场景
+//	    SceneQuery  ValidateScene = 1 << 3  // 0b1000 查询场景
+//	)
+//
+//	// 场景组合：创建和更新都需要的规则
+//	SceneCreateUpdate := SceneCreate | SceneUpdate
+//
+//	// 场景匹配：判断当前场景是否包含创建场景
+//	if scene & SceneCreate != 0 {
+//	    // 执行创建场景的验证
+//	}
+type ValidateScene int64
+
+// 预定义的通用验证场景常量
+const (
+	SceneNone ValidateScene = 0  // 无场景
+	SceneAll  ValidateScene = -1 // 所有场景(111...111)
+)
 
 // 验证器配置常量
 const (
@@ -224,7 +246,7 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	cache := v.getOrCacheTypeInfo(obj)
 
 	// 步骤0: 自动注册实现了 CustomValidator 接口的类型（懒加载，只注册一次）
-	v.autoRegisterIfNeeded(obj, cache)
+	v.autoRegisterIfNeeded(scene, obj, cache)
 
 	// 创建验证上下文，用于收集所有验证错误
 	ctx := NewValidationContext(scene)
@@ -318,7 +340,7 @@ func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
 //
 //	obj: 待注册的对象
 //	cache: 对象的类型缓存信息
-func (v *Validator) autoRegisterIfNeeded(obj any, cache *typeCache) {
+func (v *Validator) autoRegisterIfNeeded(scene ValidateScene, obj any, cache *typeCache) {
 	// 如果没有实现 CustomValidator 接口，直接返回
 	if !cache.isCustomValidator {
 		return
@@ -343,10 +365,11 @@ func (v *Validator) autoRegisterIfNeeded(obj any, cache *typeCache) {
 	v.validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		// 底层验证器的回调，集成到验证流程中
 		if current, ok := sl.Current().Interface().(CustomValidator); ok {
-			// 传递空场景，因为底层验证器不知道场景
 			// 实际的场景化验证在步骤3中进行
-			if errs := current.CustomValidation(""); errs != nil {
+			// TODO:GG 这里注册了，哪里验证？
+			if errs := current.CustomValidation(scene); errs != nil {
 				// 将错误报告给底层验证器
+				// TODO:GG 报的错，在哪里返回？
 				for _, err := range errs {
 					sl.ReportError(err.Value, err.FieldName, err.JsonName, err.Tag, err.Param)
 				}
@@ -368,9 +391,20 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 		return
 	}
 
-	// 获取当前场景的验证规则
-	sceneRules, exists := rules[ctx.Scene]
-	if !exists || sceneRules == nil {
+	// 遍历rules的scene，收集所有符合的的scene
+	matchedRules := make(map[string]string)
+	for scene, sceneRules := range rules {
+		// 场景匹配：使用位运算判断是否包含目标场景
+		if scene&ctx.Scene != 0 {
+			// 合并规则（后面的规则会覆盖前面的）
+			for fieldName, rule := range sceneRules {
+				matchedRules[fieldName] = rule
+			}
+		}
+	}
+
+	// 如果没有匹配的规则，直接返回
+	if len(matchedRules) == 0 {
 		return
 	}
 
@@ -394,7 +428,7 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 	}
 
 	// 验证所有字段，收集所有错误（不中断）
-	for fieldName, rule := range sceneRules {
+	for fieldName, rule := range matchedRules {
 		if rule == "" {
 			continue // 跳过空规则
 		}
@@ -481,7 +515,7 @@ func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, d
 		if fieldType.Anonymous {
 			// 对嵌入字段执行完整验证流程
 			cache := v.getOrCacheTypeInfo(fieldValue)
-			v.autoRegisterIfNeeded(fieldValue, cache)
+			v.autoRegisterIfNeeded(ctx.Scene, fieldValue, cache)
 			if cache.isRuleValidator && cache.validationRules != nil {
 				v.collectValidationErrors(fieldValue, cache.validationRules, ctx)
 			}
@@ -498,7 +532,7 @@ func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, d
 		if fieldKind == reflect.Struct {
 			// 对嵌套结构体执行完整验证流程
 			cache := v.getOrCacheTypeInfo(fieldValue)
-			v.autoRegisterIfNeeded(fieldValue, cache)
+			v.autoRegisterIfNeeded(ctx.Scene, fieldValue, cache)
 			if cache.isRuleValidator && cache.validationRules != nil {
 				v.collectValidationErrors(fieldValue, cache.validationRules, ctx)
 			}
