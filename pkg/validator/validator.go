@@ -216,13 +216,27 @@ func New() *Validator {
 }
 
 // Validate 验证模型，支持指定场景和嵌套验证
+//
+// 验证架构分为两部分：
+//
+// 【第一部分：字段规则验证】- 使用内置规则，无需缓存
+//   - 内置规则：required, min, max, email, gt, gte 等
+//   - 实现方式：RuleValidator 接口或 struct tag
+//   - 性能：内置规则已被 go-playground/validator 优化，无需额外缓存
+//
+// 【第二部分：结构规则验证】- 自定义规则，需要缓存
+//   - 跨字段验证：多字段协同验证
+//   - 实现方式：CustomValidator 接口
+//   - 性能：通过 RegisterStructValidation 缓存验证逻辑，避免重复反射
+//
 // 验证流程（按顺序执行）：
-//  1. 自动注册 CustomValidator（懒加载，需要注册到底层验证器）
-//  2. 执行结构体标签验证（RuleValidator 直接读取规则，无需注册）
-//  3. 递归验证嵌套的结构体字段（包括嵌入字段）
-//  4. 执行跨字段验证逻辑（CustomValidator 直接调用）
+//  1. 注册结构规则验证器（仅首次，用于性能优化）
+//  2. 执行字段规则验证（内置规则，直接验证）
+//  3. 递归验证嵌套的结构体字段
+//  4. 执行结构规则验证（从缓存中调用）
 //
 // 错误收集策略：收集所有错误后统一返回，而非遇到第一个错误就停止
+//
 // 参数：
 //
 //	obj: 待验证的对象（必须是结构体或结构体指针）
@@ -243,153 +257,105 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 性能优化：获取类型缓存，避免重复的接口检查
 	cache := v.getOrCacheTypeInfo(obj)
 
-	// 步骤0: 自动注册实现了 CustomValidator 接口的类型（懒加载，只注册一次）
-	v.autoRegisterIfNeeded(scene, obj, cache)
+	// ========================================================================
+	// 步骤1: 注册结构规则验证器（仅用于缓存优化）
+	// ========================================================================
+	// 注意：这一步只是注册，不执行验证
+	// 目的：让 go-playground/validator 缓存 CustomValidator 的元数据
+	// 实际验证在步骤4执行，确保使用正确的 scene
+	if cache.isCustomValidator {
+		v.registerStructValidator(obj)
+	}
 
 	// 创建验证上下文，用于收集所有验证错误
 	ctx := NewValidationContext(scene)
 
-	// 步骤1: 执行结构体标签验证（RuleValidator 直接读取规则，无需注册）
+	// ========================================================================
+	// 步骤2: 执行字段规则验证（内置规则，无需缓存）
+	// ========================================================================
+	// 两种方式：
+	// 方式1: 通过 RuleValidator 接口提供规则（场景化）
+	// 方式2: 通过 struct tag 提供规则（标准方式）
 	if cache.isRuleValidator {
-		if cache.validationRules != nil {
-			// 这个不使用使用标准的 validate tag 标签，而是使用 RuleValidator 提供的规则
-			v.collectValidationErrors(obj, cache.validationRules, ctx)
-		}
+		// 方式1: 使用 RuleValidator 提供的场景化规则
+		v.validateFieldsByRules(obj, cache.validationRules, ctx)
 	} else {
-		// 如果没有实现 RuleValidator，使用底层验证器的 Struct 验证
-		// 这支持使用标准的 validate tag 标签
-		if err := v.validate.Struct(obj); err != nil {
-			v.addFieldErrors(obj, err, ctx)
-		}
+		// 方式2: 使用 struct tag 的标准验证
+		v.validateFieldsByTags(obj, ctx)
 	}
 
-	// 步骤2: 递归验证嵌套的结构体字段（深度优先遍历）
-	v.collectNestedStructErrors(obj, ctx, 0)
+	// ========================================================================
+	// 步骤3: 递归验证嵌套的结构体字段（深度优先遍历）
+	// ========================================================================
+	v.validateNestedStructs(obj, ctx, 0)
 
-	// 步骤3: 执行跨字段验证逻辑（CustomValidator 直接调用）
+	// ========================================================================
+	// 步骤4: 执行结构规则验证（从缓存中调用，使用正确的 scene）
+	// ========================================================================
+	// 注意：这里直接调用，不通过底层验证器
+	// 原因：避免 scene 闭包捕获问题，确保每次使用正确的 scene
 	if cache.isCustomValidator {
-		crossFieldValidator := obj.(CustomValidator)
-		if errs := crossFieldValidator.CustomValidation(scene); errs != nil {
-			ctx.AddErrors(errs)
-		}
+		v.validateStructRules(obj, scene, ctx)
 	}
 
 	// 返回验证结果
-	if ctx.HasErrors() {
-		return ctx.Errors
-	} else if len(ctx.Message) != 0 {
-		// 存在总体错误消息但没有具体字段错误
-		return []*FieldError{
-			NewFieldError("", "", "", "", "").
-				WithMessage(ctx.Message),
-		}
-	}
-
-	return nil
+	return v.buildValidationResult(ctx)
 }
 
-// getOrCacheTypeInfo 获取或缓存类型信息
-// 性能优化：通过缓存避免重复的类型断言和反射操作
-// 线程安全：使用 sync.Map 的 LoadOrStore 方法避免并发问题
-// 参数：
+// registerStructValidator 注册结构验证器（仅用于缓存优化）
 //
-//	obj: 待验证的对象
+// 设计目标：
+//   - 让底层验证器缓存 CustomValidator 的类型信息
+//   - 避免重复的反射操作，提升性能
+//   - 不在注册回调中执行实际验证（避免 scene 闭包问题）
 //
-// 返回：
-//
-//	该对象类型的缓存信息
-func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
-	// 防御性编程：防止 nil 对象导致 panic
-	if obj == nil {
-		return &typeCache{}
-	}
-
-	typ := reflect.TypeOf(obj)
-
-	// 防御性编程：防止反射类型为 nil（极少见，但理论上可能）
-	if typ == nil {
-		return &typeCache{}
-	}
-
-	// 性能优化：尝试从缓存获取（热路径）
-	if cached, ok := v.typeCache.Load(typ); ok {
-		return cached.(*typeCache)
-	}
-
-	// 缓存未命中，创建新的缓存项（冷路径）
-	cache := &typeCache{}
-
-	// 接口检查：判断对象实现了哪些验证接口
-	if ruleValidator, ok := obj.(RuleValidator); ok {
-		cache.isRuleValidator = true
-		cache.validationRules = ruleValidator.RuleValidation()
-	}
-	_, cache.isCustomValidator = obj.(CustomValidator)
-
-	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
-	actual, _ := v.typeCache.LoadOrStore(typ, cache)
-	return actual.(*typeCache)
-}
-
-// autoRegisterIfNeeded 自动注册实现了 CustomValidator 接口的类型
-// 懒加载机制：只在首次验证时注册一次，避免重复注册
-// 线程安全：使用 sync.Map 记录已注册的类型
 // 参数：
 //
 //	obj: 待注册的对象
-//	cache: 对象的类型缓存信息
-func (v *Validator) autoRegisterIfNeeded(scene ValidateScene, obj any, cache *typeCache) {
-	// 如果没有实现 CustomValidator 接口，直接返回
-	if !cache.isCustomValidator {
-		return
-	}
-
+func (v *Validator) registerStructValidator(obj any) {
 	typ := reflect.TypeOf(obj)
 	if typ == nil {
 		return
 	}
 
-	// 检查是否已经自动注册过（热路径：已注册的情况）
+	// 检查是否已经注册过（避免重复注册）
 	if _, registered := v.registeredCache.Load(typ); registered {
-		return
+		return // 已注册，直接返回
 	}
 
-	// 冷路径：首次注册
+	// 标记为已注册
 	v.registeredCache.Store(typ, true)
 
-	// 注册 CustomValidator 接口到底层验证器
-	// 注意：这里注册是为了在 Struct 验证时也能执行跨字段验证
-	// 但我们主要在步骤3直接调用 CustomValidation 方法
+	// 注册到底层验证器（用于缓存优化）
+	// 注意：这里提供空回调，实际验证在步骤4执行
+	// 原因：
+	//   1. 避免 scene 被闭包捕获（类型只注册一次，但 scene 每次可能不同）
+	//   2. 确保验证逻辑在步骤4统一执行，使用正确的 scene
+	//   3. 让底层验证器缓存类型元数据，提升性能
 	v.validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		// 底层验证器的回调，集成到验证流程中
-		if current, ok := sl.Current().Interface().(CustomValidator); ok {
-			// 实际的场景化验证在步骤3中进行
-			// TODO:GG 这里注册了，哪里验证？
-			if errs := current.CustomValidation(scene); errs != nil {
-				// 将错误报告给底层验证器
-				// TODO:GG 报的错，在哪里返回？
-				for _, err := range errs {
-					sl.ReportError(err.Value, err.FieldName, err.JsonName, err.Tag, err.Param)
-				}
-			}
-		}
+		// 空回调：仅用于类型注册和缓存优化
+		// 实际的 CustomValidation 在步骤4中调用
 	}, obj)
 }
 
-// collectValidationErrors 收集验证错误（不中断验证流程）
-// 错误收集策略：收集所有错误后统一返回
+// validateFieldsByRules 通过 RuleValidator 接口验证字段（内置规则）
+//
+// 特点：
+//   - 支持场景化规则（不同场景使用不同规则）
+//   - 使用内置验证规则（required, min, max 等）
+//   - 无需缓存，直接使用 validate.Var() 验证
+//
 // 参数：
 //
 //	obj: 待验证的对象
-//	rules: 验证规则映射
+//	rules: 场景化的验证规则映射
 //	ctx: 验证上下文
-func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext) {
-	// 防御性编程：参数检查
+func (v *Validator) validateFieldsByRules(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext) {
 	if rules == nil || ctx == nil {
 		return
 	}
 
-	// 遍历rules的scene，收集所有符合的的scene
+	// 匹配当前场景的规则
 	matchedRules := make(map[string]string)
 	for scene, sceneRules := range rules {
 		// 场景匹配：使用位运算判断是否包含目标场景
@@ -425,7 +391,7 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 		return
 	}
 
-	// 验证所有字段，收集所有错误（不中断）
+	// 验证所有字段（使用内置规则）
 	for fieldName, rule := range matchedRules {
 		if rule == "" {
 			continue // 跳过空规则
@@ -434,7 +400,7 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 		// 获取字段值
 		field := val.FieldByName(fieldName)
 		if !field.IsValid() {
-			// 字段名可能是 JSON 名称，尝试通过 JSON tag 查找
+			// 尝试通过 JSON tag 查找
 			typ := val.Type()
 			field = v.findFieldByJSONTag(val, typ, fieldName)
 		}
@@ -444,23 +410,44 @@ func (v *Validator) collectValidationErrors(obj any, rules map[ValidateScene]map
 			continue
 		}
 
-		// 验证字段（使用底层验证器的 Var 方法）
-		// 只验证一个变量，不涉及结构体，不需要提前注册
+		// 使用内置规则验证（无需注册，直接验证）
 		if err := v.validate.Var(field.Interface(), rule); err != nil {
 			v.addFieldErrors(obj, err, ctx)
 		}
 	}
 }
 
-// collectNestedStructErrors 递归收集嵌套结构体的验证错误
-// 深度优先遍历：递归验证所有嵌套的结构体字段
-// 防止无限递归：使用深度计数器限制递归深度
+// validateFieldsByTags 通过 struct tag 验证字段（标准方式）
+//
+// 特点：
+//   - 使用标准的 validate tag（如：`validate:"required,min=3"`）
+//   - 使用内置验证规则
+//   - 无需缓存，go-playground/validator 已优化
+//
+// 参数：
+//
+//	obj: 待验证的对象
+//	ctx: 验证上下文
+func (v *Validator) validateFieldsByTags(obj any, ctx *ValidationContext) {
+	// 使用底层验证器的标准 Struct 验证
+	if err := v.validate.Struct(obj); err != nil {
+		v.addFieldErrors(obj, err, ctx)
+	}
+}
+
+// validateNestedStructs 递归验证嵌套结构体
+//
+// 特点：
+//   - 深度优先遍历
+//   - 支持嵌入字段（匿名字段）
+//   - 防止无限递归（最大深度限制）
+//
 // 参数：
 //
 //	obj: 待验证的对象
 //	ctx: 验证上下文
 //	depth: 当前递归深度
-func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, depth int) {
+func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth int) {
 	// 防止栈溢出：限制最大递归深度
 	if depth > maxNestedDepth {
 		ctx.AddErrorByDetail(
@@ -509,34 +496,170 @@ func (v *Validator) collectNestedStructErrors(obj any, ctx *ValidationContext, d
 
 		fieldValue := field.Interface()
 
-		// 处理嵌入字段（匿名字段）：直接递归
-		if fieldType.Anonymous {
-			// 对嵌入字段执行完整验证流程
-			cache := v.getOrCacheTypeInfo(fieldValue)
-			v.autoRegisterIfNeeded(ctx.Scene, fieldValue, cache)
-			if cache.isRuleValidator && cache.validationRules != nil {
-				v.collectValidationErrors(fieldValue, cache.validationRules, ctx)
-			}
-			v.collectNestedStructErrors(fieldValue, ctx, depth+1)
-			continue
-		}
-
-		// 递归处理嵌套结构体
+		// 处理嵌套结构体
 		fieldKind := field.Kind()
 		if fieldKind == reflect.Ptr && !field.IsNil() {
 			fieldKind = field.Elem().Kind()
 		}
 
-		if fieldKind == reflect.Struct {
+		if fieldKind == reflect.Struct || fieldType.Anonymous {
 			// 对嵌套结构体执行完整验证流程
 			cache := v.getOrCacheTypeInfo(fieldValue)
-			v.autoRegisterIfNeeded(ctx.Scene, fieldValue, cache)
-			if cache.isRuleValidator && cache.validationRules != nil {
-				v.collectValidationErrors(fieldValue, cache.validationRules, ctx)
+
+			// 注册结构验证器（如果需要）
+			if cache.isCustomValidator {
+				v.registerStructValidator(fieldValue)
 			}
-			v.collectNestedStructErrors(fieldValue, ctx, depth+1)
+
+			// 字段规则验证
+			if cache.isRuleValidator {
+				v.validateFieldsByRules(fieldValue, cache.validationRules, ctx)
+			} else {
+				v.validateFieldsByTags(fieldValue, ctx)
+			}
+
+			// 递归验证嵌套结构
+			v.validateNestedStructs(fieldValue, ctx, depth+1)
+
+			// 结构规则验证
+			if cache.isCustomValidator {
+				v.validateStructRules(fieldValue, ctx.Scene, ctx)
+			}
 		}
 	}
+}
+
+// validateStructRules 执行结构规则验证（多字段协同验证）
+//
+// 特点：
+//   - 执行 CustomValidator 接口的验证逻辑
+//   - 支持场景化验证（每次使用正确的 scene）
+//   - 不依赖底层验证器的回调（避免 scene 问题）
+//
+// 参数：
+//
+//	obj: 待验证的对象
+//	scene: 当前验证场景
+//	ctx: 验证上下文
+func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *ValidationContext) {
+	// 类型断言：确保对象实现了 CustomValidator 接口
+	customValidator, ok := obj.(CustomValidator)
+	if !ok {
+		return
+	}
+
+	// 调用自定义验证逻辑（使用正确的 scene）
+	if errs := customValidator.CustomValidation(scene); errs != nil {
+		ctx.AddErrors(errs)
+	}
+}
+
+// buildValidationResult 构建验证结果
+//
+// 参数：
+//
+//	ctx: 验证上下文
+//
+// 返回：
+//
+//	验证错误列表
+func (v *Validator) buildValidationResult(ctx *ValidationContext) []*FieldError {
+	if ctx.HasErrors() {
+		return ctx.Errors
+	}
+
+	if len(ctx.Message) != 0 {
+		return []*FieldError{
+			NewFieldError("", "", "", "", "").
+				WithMessage(ctx.Message),
+		}
+	}
+
+	return nil
+}
+
+// ClearTypeCache 清除类型缓存
+// 用于测试或需要重新加载类型信息时
+// 注意：此方法会清空所有缓存的类型信息，影响性能，仅用于特殊场景
+// 线程安全：创建新的 sync.Map 实例
+func (v *Validator) ClearTypeCache() {
+	v.typeCache = &sync.Map{}
+	v.registeredCache = &sync.Map{}
+}
+
+// GetUnderlyingValidator 获取底层的 go-playground/validator 实例
+// 用于需要直接访问底层验证器的高级场景
+// 警告：此方法暴露了第三方库的实现细节，破坏了封装性，仅用于高级场景
+// 返回：
+//
+//	底层验证器实例
+func (v *Validator) GetUnderlyingValidator() *validator.Validate {
+	return v.validate
+}
+
+// TypeCacheStats 获取类型缓存统计信息
+// 用于监控和调试，了解缓存使用情况
+// 返回：
+//
+//	缓存的类型数量
+func (v *Validator) TypeCacheStats() (typeCacheCount, autoRegisteredCount int) {
+
+	// 统计 typeCache 中的条目数
+	v.typeCache.Range(func(key, value interface{}) bool {
+		typeCacheCount++
+		return true
+	})
+
+	// 统计 registeredCache 中的条目数
+	v.registeredCache.Range(func(key, value interface{}) bool {
+		autoRegisteredCount++
+		return true
+	})
+
+	return typeCacheCount, autoRegisteredCount
+}
+
+// getOrCacheTypeInfo 获取或缓存类型信息
+// 性能优化：通过缓存避免重复的类型断言和反射操作
+// 线程安全：使用 sync.Map 的 LoadOrStore 方法避免并发问题
+// 参数：
+//
+//	obj: 待验证的对象
+//
+// 返回：
+//
+//	该对象类型的缓存信息
+func (v *Validator) getOrCacheTypeInfo(obj any) *typeCache {
+	// 防御性编程：防止 nil 对象导致 panic
+	if obj == nil {
+		return &typeCache{}
+	}
+
+	typ := reflect.TypeOf(obj)
+
+	// 防御性编程：防止反射类型为 nil（极少见，但理论上可能）
+	if typ == nil {
+		return &typeCache{}
+	}
+
+	// 性能优化：尝试从缓存获取（热路径）
+	if cached, ok := v.typeCache.Load(typ); ok {
+		return cached.(*typeCache)
+	}
+
+	// 缓存未命中，创建新的缓存项（冷路径）
+	cache := &typeCache{}
+
+	// 接口检查：判断对象实现了哪些验证接口
+	if ruleValidator, ok := obj.(RuleValidator); ok {
+		cache.isRuleValidator = true
+		cache.validationRules = ruleValidator.RuleValidation()
+	}
+	_, cache.isCustomValidator = obj.(CustomValidator)
+
+	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
+	actual, _ := v.typeCache.LoadOrStore(typ, cache)
+	return actual.(*typeCache)
 }
 
 // addFieldErrors 添加字段验证错误到上下文
@@ -585,45 +708,4 @@ func (v *Validator) findFieldByJSONTag(val reflect.Value, typ reflect.Type, json
 		}
 	}
 	return reflect.Value{} // 未找到，返回零值
-}
-
-// ClearTypeCache 清除类型缓存
-// 用于测试或需要重新加载类型信息时
-// 注意：此方法会清空所有缓存的类型信息，影响性能，仅用于特殊场景
-// 线程安全：创建新的 sync.Map 实例
-func (v *Validator) ClearTypeCache() {
-	v.typeCache = &sync.Map{}
-	v.registeredCache = &sync.Map{}
-}
-
-// GetUnderlyingValidator 获取底层的 go-playground/validator 实例
-// 用于需要直接访问底层验证器的高级场景
-// 警告：此方法暴露了第三方库的实现细节，破坏了封装性，仅用于高级场景
-// 返回：
-//
-//	底层验证器实例
-func (v *Validator) GetUnderlyingValidator() *validator.Validate {
-	return v.validate
-}
-
-// TypeCacheStats 获取类型缓存统计信息
-// 用于监控和调试，了解缓存使用情况
-// 返回：
-//
-//	缓存的类型数量
-func (v *Validator) TypeCacheStats() (typeCacheCount, autoRegisteredCount int) {
-
-	// 统计 typeCache 中的条目数
-	v.typeCache.Range(func(key, value interface{}) bool {
-		typeCacheCount++
-		return true
-	})
-
-	// 统计 registeredCache 中的条目数
-	v.registeredCache.Range(func(key, value interface{}) bool {
-		autoRegisteredCount++
-		return true
-	})
-
-	return typeCacheCount, autoRegisteredCount
 }
