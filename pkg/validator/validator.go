@@ -125,8 +125,7 @@ type CustomValidator interface {
 //
 // 参数：
 //   - value: 字段的实际值
-//   - fieldName: 结构体字段名（如："Username"）
-//   - jsonName: JSON 字段名（如："username"，用于 API 响应）
+//   - namespace: 命名空间
 //   - tag: 验证标签（如："required", "custom_check"）
 //   - param: 验证参数（如："min=3" 中的 "3"）
 //
@@ -269,7 +268,7 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	// 防御性编程：防止 nil 对象
 	if obj == nil {
 		return []*FieldError{
-			NewFieldError("", "", "required", "", "struct").
+			NewFieldError("struct", "", "required").
 				WithMessage("validation target cannot be nil"),
 		}
 	}
@@ -471,7 +470,7 @@ func (v *Validator) validateNestedStructs(obj any, ctx *ValidationContext, depth
 	// 防止栈溢出：限制最大递归深度
 	if depth > maxNestedDepth {
 		ctx.AddErrorByDetail(
-			"", "", "nest_depth", "", obj, "Struct",
+			"Struct", "nest_depth", "", obj,
 			fmt.Sprintf("nested validation depth exceeds maximum limit %d", maxNestedDepth),
 		)
 		return
@@ -570,7 +569,7 @@ func (v *Validator) validateStructRules(obj any, scene ValidateScene, ctx *Valid
 
 	// 创建 reportError 函数，用于简化模型中的错误报告
 	reportError := func(namespace, tag, param string) {
-		ctx.AddErrorByDetail("", "", tag, param, nil, namespace, "")
+		ctx.AddErrorByDetail(namespace, tag, param, nil, "")
 	}
 
 	// 调用自定义验证逻辑（使用正确的 scene 和 reportError 函数）
@@ -593,8 +592,7 @@ func (v *Validator) buildValidationResult(ctx *ValidationContext) []*FieldError 
 
 	if len(ctx.Message) != 0 {
 		return []*FieldError{
-			NewFieldError("", "", "", "", "").
-				WithMessage(ctx.Message),
+			NewFieldError("", "", "").WithMessage(ctx.Message),
 		}
 	}
 
@@ -698,7 +696,7 @@ func (v *Validator) addFieldErrors(_ any, err error, ctx *ValidationContext) {
 	ok := errors.As(err, &validationErrors)
 	if !ok {
 		// 不是标准的验证错误，作为普通错误处理
-		ctx.AddErrorByDetail("", "", "", "", "", "", err.Error())
+		ctx.AddErrorByDetail("", "", "", "", err.Error())
 		return
 	}
 

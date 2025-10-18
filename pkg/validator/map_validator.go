@@ -105,7 +105,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		if len(v.RequiredKeys) > 0 {
 			return []*FieldError{
 				// 这里的namespace不填，统一错误信息模板
-				NewFieldError("", "", "required", "", "map").
+				NewFieldError("map", "required", "").
 					WithMessage("map field cannot be nil when required keys are specified"),
 			}
 		}
@@ -115,7 +115,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 	// 安全检查：防止 DoS 攻击 - 限制 map 大小
 	if len(kvs) > maxMapSize {
 		return []*FieldError{
-			NewFieldError("", "", "size", strconv.Itoa(maxMapSize), "map").
+			NewFieldError("map", "size", strconv.Itoa(maxMapSize)).
 				WithMessage(fmt.Sprintf("map size exceeds maximum limit %d", maxMapSize)),
 		}
 	}
@@ -143,7 +143,7 @@ func ValidateMap(kvs map[string]any, v *MapValidator) []*FieldError {
 		return ctx.Errors
 	} else if len(ctx.Message) != 0 {
 		// 这里的namespace不填，统一错误信息模板
-		return []*FieldError{NewFieldError("", "", ctx.Message, "", "")}
+		return []*FieldError{NewFieldError("", "", "").WithMessage(ctx.Message)}
 	}
 
 	return nil
@@ -162,7 +162,7 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 		if len(key) > maxMapKeyLength {
 			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
-				"", "", "key_len", strconv.Itoa(maxMapKeyLength), len(key), "map",
+				"map", "key_len", strconv.Itoa(maxMapKeyLength), len(key),
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
 			)
 			continue
@@ -170,7 +170,7 @@ func (mv *MapValidator) collectRequiredKeyErrors(kvs map[string]any, ctx *Valida
 
 		if _, exists := kvs[key]; !exists {
 			ctx.AddErrorByDetail(
-				key, key, "required", "", nil, mv.getNamespace(key),
+				mv.getNamespace(key), "required", "", nil,
 				fmt.Sprintf("required key '%s' is missing", key),
 			)
 		}
@@ -199,7 +199,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 		if len(key) > maxMapKeyLength {
 			// 这里的namespace不填，统一错误信息模板
 			ctx.AddErrorByDetail(
-				"", "", "key_len", strconv.Itoa(maxMapKeyLength), len(key), "map",
+				"map", "key_len", strconv.Itoa(maxMapKeyLength), len(key),
 				fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength),
 			)
 			continue
@@ -207,7 +207,7 @@ func (mv *MapValidator) collectAllowedKeyErrors(kvs map[string]any, ctx *Validat
 
 		if !mv.allowedKeysMap[key] {
 			ctx.AddErrorByDetail(
-				key, key, "allowed", "", key, mv.getNamespace(key),
+				mv.getNamespace(key), "allowed", "", key,
 				fmt.Sprintf("key '%s' is not in the allowed list", key),
 			)
 		}
@@ -239,7 +239,7 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 				if r := recover(); r != nil {
 					// 这里的namespace不填，统一错误信息模板
 					ctx.AddErrorByDetail(
-						"", "", "validator_panic", "", value, "map",
+						"map", "validator_panic", "", value,
 						fmt.Sprintf("validator function panicked: %v", r),
 					)
 				}
@@ -247,7 +247,7 @@ func (mv *MapValidator) collectCustomKeyErrors(kvs map[string]any, ctx *Validati
 
 			if err := validatorFunc(value); err != nil {
 				ctx.AddErrorByDetail(
-					key, key, "custom", "", value, mv.getNamespace(key),
+					mv.getNamespace(key), "custom", "", value,
 					err.Error(),
 				)
 			}

@@ -22,24 +22,16 @@ type ValidationContext struct {
 // FieldError 单个字段的验证错误信息
 // 设计原则：单一职责 - 只负责描述字段验证错误的详细信息
 type FieldError struct {
-	// FieldName 结构体字段名（对应 sl.ReportError 的 fieldName 参数）
-	// 例如：User 结构体中的 "Username"
-	FieldName string `json:"field_name"`
-
-	// JsonName JSON 字段名（对应 sl.ReportError 的 jsonName 参数）
-	// 例如：JSON 中的 "username"，通常用于前端显示
-	JsonName string `json:"json_name"`
+	// Namespace 字段的完整命名空间路径（如 User.Profile.Email）
+	// 用于嵌套结构体的错误定位，支持复杂对象的精确错误追踪
+	Namespace string `json:"namespace"`
 
 	// Tag 验证标签，描述验证规则类型（如 required, email, min, max 等）
 	Tag string `json:"tag"`
 
 	// Param 验证参数，提供验证规则的具体配置值
 	// 例如：min=3 中的 "3"，len=11 中的 "11"
-	Param string `json:"param,omitempty"`
-
-	// Namespace 字段的完整命名空间路径（如 User.Profile.Email）
-	// 用于嵌套结构体的错误定位，支持复杂对象的精确错误追踪
-	Namespace string `json:"namespace,omitempty"`
+	Param string `json:"param"`
 
 	// Value 字段的实际值（用于 sl.ReportError 的 value 参数）
 	// 用于调试和详细错误信息，可能包含敏感信息，谨慎使用
@@ -85,23 +77,21 @@ func NewValidationContext(scene ValidateScene) *ValidationContext {
 // 工厂方法模式，简化 FieldError 对象的创建过程
 // 参数：
 //
-//	value: 字段的实际值
-//	fieldName: 结构体字段名
-//	jsonName: JSON 字段名（用于 API 响应）
+//	namespace: 字段命名空间（如 User.Profile.Email）
 //	tag: 验证标签（required, email, min 等）
 //	param: 验证参数（如 min=3 中的 "3"）
-//	namespace: 字段命名空间（如 User.Profile.Email）
+//	value: 字段的实际值
 //
 // 返回：
 //
 //	已初始化的 FieldError 实例
-func NewFieldError(fieldName, jsonName, tag, param, namespace string) *FieldError {
+func NewFieldError(namespace, tag, param string) *FieldError {
 	return &FieldError{
-		FieldName: fieldName,
-		JsonName:  jsonName,
+		Namespace: namespace,
 		Tag:       tag,
 		Param:     param,
-		Namespace: namespace,
+		Value:     nil, // 不是必需
+		Message:   "",  // 不是必需
 	}
 }
 
@@ -142,11 +132,11 @@ func (fe *FieldError) String() string {
 	}
 
 	// 生成默认错误消息（用于调试）
-	if fe.JsonName != "" && fe.Tag != "" {
+	if fe.Namespace != "" && fe.Tag != "" {
 		if fe.Param != "" {
-			return fmt.Sprintf("field '%s' validation failed on tag '%s' with param '%s'", fe.JsonName, fe.Tag, fe.Param)
+			return fmt.Sprintf("field '%s' validation failed on tag '%s' with param '%s'", fe.Namespace, fe.Tag, fe.Param)
 		}
-		return fmt.Sprintf("field '%s' validation failed on tag '%s'", fe.JsonName, fe.Tag)
+		return fmt.Sprintf("field '%s' validation failed on tag '%s'", fe.Namespace, fe.Tag)
 	}
 
 	return "field validation failed"
@@ -209,11 +199,9 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 	}
 
 	vc.Errors = append(vc.Errors, NewFieldError(
-		verr.StructField(),
-		verr.Field(),
+		namespace,
 		verr.Tag(),
 		verr.Param(),
-		namespace,
 	).WithValue(verr.Value()).WithMessage(message))
 }
 
@@ -221,14 +209,12 @@ func (vc *ValidationContext) AddErrorByValidator(verr validator.FieldError) {
 // 提供最大的灵活性，允许手动构建错误信息
 // 参数：
 //
-//	value: 字段值
-//	field: 结构体字段名
-//	jsonName: JSON 字段名
+//	namespace: 字段命名空间
 //	tag: 验证标签
 //	param: 验证参数
+//	value: 字段值
 //	message: 自定义错误消息
-//	namespace: 字段命名空间
-func (vc *ValidationContext) AddErrorByDetail(fieldName, jsonName, tag, param string, value any, namespace, message string) {
+func (vc *ValidationContext) AddErrorByDetail(namespace, tag, param string, value any, message string) {
 	// 安全检查：防止恶意数据导致内存溢出
 	if len(vc.Errors) >= maxErrorsCapacity {
 		return
@@ -243,11 +229,9 @@ func (vc *ValidationContext) AddErrorByDetail(fieldName, jsonName, tag, param st
 	}
 
 	vc.Errors = append(vc.Errors, NewFieldError(
-		fieldName,
-		jsonName,
+		namespace,
 		tag,
 		param,
-		namespace,
 	).WithValue(value).WithMessage(message))
 }
 
