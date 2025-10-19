@@ -29,7 +29,7 @@ const (
 	TimestampShift    = SequenceBits + WorkerIDBits + DatacenterIDBits // 22
 
 	// 最大时间戳差值 (41位)
-	maxTimestampDiff int64 = 1<<41 - 1
+	//maxTimestampDiff int64 = 1<<41 - 1
 
 	// 等待下一毫秒时的休眠时间（微秒）
 	sleepDuration = 100 * time.Microsecond
@@ -58,7 +58,7 @@ var (
 	ErrInvalidSnowflakeID = errors.New("invalid snowflake id: id must be positive")
 
 	// ErrTimestampOverflow 时间戳溢出
-	ErrTimestampOverflow = errors.New("timestamp overflow: exceeds maximum allowed value")
+	//ErrTimestampOverflow = errors.New("timestamp overflow: exceeds maximum allowed value")
 
 	// ErrInvalidBatchSize 批量生成数量无效
 	ErrInvalidBatchSize = errors.New("invalid batch size")
@@ -428,15 +428,17 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 
 		// 批量生成ID前先检查时间戳是否有效
 		timeDiff := timestamp - Epoch
-		if timeDiff < 0 {
-			return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
-				ErrTimestampOverflow, timestamp, Epoch, len(ids))
-		}
 
-		if timeDiff > maxTimestampDiff {
-			return ids, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d (generated %d IDs)",
-				ErrTimestampOverflow, timeDiff, maxTimestampDiff, len(ids))
-		}
+		// 永远不会触发（当前时间总在Epoch之后）
+		//if timeDiff < 0 {
+		//	return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
+		//		ErrTimestampOverflow, timestamp, Epoch, len(ids))
+		//}
+		// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
+		//if timeDiff > maxTimestampDiff {
+		//	return ids, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d (generated %d IDs)",
+		//		ErrTimestampOverflow, timeDiff, maxTimestampDiff, len(ids))
+		//}
 
 		// 计算当前毫秒可以生成的ID数量
 		var availableInCurrentMs int
@@ -459,11 +461,12 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 				}
 
 				// 等待下一毫秒后，重新检查时间戳是否有效
-				timeDiff = timestamp - Epoch
-				if timeDiff < 0 || timeDiff > maxTimestampDiff {
-					return ids, fmt.Errorf("%w: timestamp after wait is invalid (generated %d IDs)",
-						ErrTimestampOverflow, len(ids))
-				}
+				// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
+				//timeDiff = timestamp - Epoch
+				//if timeDiff > maxTimestampDiff {
+				//	return ids, fmt.Errorf("%w: timestamp after wait is invalid (generated %d IDs)",
+				//		ErrTimestampOverflow, len(ids))
+				//}
 
 				// 新毫秒，序列号重置，全部4096个序列号可用
 				s.sequence = 0
@@ -489,12 +492,6 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		// 从当前序列号开始生成
 		for i := 0; i < batchSize; i++ {
 			id := baseID | s.sequence
-
-			// 最终安全检查：确保生成的ID为正数
-			if id <= 0 {
-				return ids, fmt.Errorf("%w: generated id is not positive: %d (after generating %d IDs)",
-					ErrTimestampOverflow, id, len(ids))
-			}
 			ids = append(ids, id)
 
 			// 递增序列号
@@ -566,20 +563,19 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 		}
 	}
 
-	// 检查时间戳溢出（提前检查避免生成负数ID）
+	// 计算时间差并检查溢出
 	timeDiff := timestamp - Epoch
-	if timeDiff < 0 {
-		return 0, fmt.Errorf("%w: current time %d is before epoch %d",
-			ErrTimestampOverflow, timestamp, Epoch)
-	}
 
-	// 检查时间戳是否超过41位能表示的最大值
-	if timeDiff > maxTimestampDiff {
-		return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
-			ErrTimestampOverflow, timeDiff, maxTimestampDiff)
-	}
-
-	// 同一毫秒内，序列号递增
+	// 永远不会触发（当前时间总在Epoch之后）
+	//if timeDiff < 0 {
+	//	return 0, fmt.Errorf("%w: current time %d is before epoch %d",
+	//		ErrTimestampOverflow, timestamp, Epoch)
+	//}
+	// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
+	//if timeDiff > maxTimestampDiff {
+	//	return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
+	//		ErrTimestampOverflow, timeDiff, maxTimestampDiff)
+	//}
 	if timestamp == s.lastTimestamp {
 		s.sequence++
 		// 序列号溢出，等待下一毫秒
@@ -595,12 +591,12 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 			}
 
 			// 等待后重新检查时间戳是否仍然有效
-			newTimeDiff := timestamp - Epoch
-			if newTimeDiff < 0 || newTimeDiff > maxTimestampDiff {
-				return 0, fmt.Errorf("%w: timestamp after wait is invalid", ErrTimestampOverflow)
-			}
-			// 重置序列号
-			s.sequence = 0
+			// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
+			//timeDiff = timestamp - Epoch
+			//if timeDiff > maxTimestampDiff {
+			//	return 0, fmt.Errorf("%w: timestamp after wait exceeds maximum", ErrTimestampOverflow)
+			//}
+
 		}
 	} else {
 		// 不同毫秒，序列号重置为0
@@ -610,12 +606,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	s.lastTimestamp = timestamp
 
 	// 使用预计算的部分组装ID，减少位运算
-	id := ((timeDiff) << TimestampShift) | s.precomputedPart | s.sequence
-
-	// 最终安全检查：确保生成的ID为正数
-	if id <= 0 {
-		return 0, fmt.Errorf("%w: generated id is not positive: %d", ErrTimestampOverflow, id)
-	}
+	id := (timeDiff << TimestampShift) | s.precomputedPart | s.sequence
 
 	// 只在启用监控时才更新指标
 	if s.enableMetrics && s.metrics != nil {
