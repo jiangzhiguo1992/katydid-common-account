@@ -232,9 +232,8 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 
 	// 默认时钟回拨策略
 	clockBackwardStrategy := config.ClockBackwardStrategy
-	if clockBackwardStrategy == 0 {
-		clockBackwardStrategy = StrategyError
-	}
+	// 修复：如果未设置策略，默认使用 StrategyError（更安全）
+	// 注意：0 值就是 StrategyError，所以这个检查是正确的
 
 	// 默认时钟回拨容忍时间
 	clockBackwardTolerance := config.ClockBackwardTolerance

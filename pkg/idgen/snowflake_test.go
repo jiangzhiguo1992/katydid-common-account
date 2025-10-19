@@ -202,7 +202,12 @@ func TestClockBackwardStrategy(t *testing.T) {
 
 // TestGetMetrics 测试获取监控指标
 func TestGetMetrics(t *testing.T) {
-	sf, err := NewSnowflake(1, 1)
+	// 修复：创建时启用监控
+	sf, err := NewSnowflakeWithConfig(&SnowflakeConfig{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true, // 必须启用监控才能收集指标
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

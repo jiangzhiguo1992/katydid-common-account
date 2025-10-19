@@ -15,6 +15,12 @@ var (
 
 	// ErrInvalidGeneratorType 无效的生成器类型
 	ErrInvalidGeneratorType = errors.New("invalid generator type: generator type cannot be empty")
+
+	// ErrInvalidGeneratorKey 无效的生成器key
+	ErrInvalidGeneratorKey = errors.New("invalid generator key: key cannot be empty")
+
+	// ErrRegistryFull 注册表已满
+	ErrRegistryFull = errors.New("registry full: maximum number of generators reached")
 )
 
 // GeneratorType 生成器类型定义
@@ -27,6 +33,9 @@ const (
 	// 预留其他生成器类型
 	// UUIDGeneratorType     GeneratorType = "uuid"
 	// ObjectIDGeneratorType GeneratorType = "objectid"
+
+	// 默认最大生成器数量，防止内存泄漏
+	defaultMaxGenerators = 1000
 )
 
 // GeneratorFactory ID生成器工厂接口（抽象工厂模式）
@@ -39,9 +48,10 @@ type GeneratorFactory interface {
 // GeneratorRegistry 生成器注册表（单例模式）
 // 用于管理不同类型的ID生成器工厂
 type GeneratorRegistry struct {
-	mu         sync.RWMutex
-	factories  map[GeneratorType]GeneratorFactory
-	generators map[string]IDGenerator // 缓存已创建的生成器实例
+	mu            sync.RWMutex
+	factories     map[GeneratorType]GeneratorFactory
+	generators    map[string]IDGenerator // 缓存已创建的生成器实例
+	maxGenerators int                    // 最大生成器数量限制
 }
 
 var (
@@ -59,8 +69,9 @@ var (
 func GetRegistry() *GeneratorRegistry {
 	registryOnce.Do(func() {
 		registryInstance = &GeneratorRegistry{
-			factories:  make(map[GeneratorType]GeneratorFactory),
-			generators: make(map[string]IDGenerator),
+			factories:     make(map[GeneratorType]GeneratorFactory),
+			generators:    make(map[string]IDGenerator),
+			maxGenerators: defaultMaxGenerators,
 		}
 		// 默认注册Snowflake工厂
 		// 忽略错误，因为这是初始化时的内部注册，必然成功
@@ -113,11 +124,21 @@ func (r *GeneratorRegistry) RegisterFactory(generatorType GeneratorType, factory
 //	IDGenerator: 生成器实例
 //	error: 创建失败时返回错误
 func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorType, config interface{}) (IDGenerator, error) {
+	// 验证key不为空
+	if key == "" {
+		return nil, ErrInvalidGeneratorKey
+	}
+
 	// 检查缓存
 	r.mu.RLock()
 	if gen, exists := r.generators[key]; exists {
 		r.mu.RUnlock()
 		return gen, nil
+	}
+	// 检查是否超过最大数量限制
+	if len(r.generators) >= r.maxGenerators {
+		r.mu.RUnlock()
+		return nil, fmt.Errorf("%w: current=%d, max=%d", ErrRegistryFull, len(r.generators), r.maxGenerators)
 	}
 	r.mu.RUnlock()
 
@@ -143,6 +164,11 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 		r.mu.Unlock()
 		return gen, nil
 	}
+	// 再次检查数量限制（双重检查）
+	if len(r.generators) >= r.maxGenerators {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("%w: current=%d, max=%d", ErrRegistryFull, len(r.generators), r.maxGenerators)
+	}
 	r.generators[key] = generator
 	r.mu.Unlock()
 
@@ -160,6 +186,10 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 //	IDGenerator: 生成器实例
 //	bool: 是否找到
 func (r *GeneratorRegistry) GetGenerator(key string) (IDGenerator, bool) {
+	if key == "" {
+		return nil, false
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -173,10 +203,56 @@ func (r *GeneratorRegistry) GetGenerator(key string) (IDGenerator, bool) {
 //
 //	key: 生成器唯一标识
 func (r *GeneratorRegistry) RemoveGenerator(key string) {
+	if key == "" {
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	delete(r.generators, key)
+}
+
+// ClearGenerators 清空所有缓存的生成器
+// 注意：此方法会清空所有生成器，谨慎使用
+func (r *GeneratorRegistry) ClearGenerators() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.generators = make(map[string]IDGenerator)
+}
+
+// GetGeneratorCount 获取当前缓存的生成器数量
+//
+// 返回:
+//
+//	int: 生成器数量
+func (r *GeneratorRegistry) GetGeneratorCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.generators)
+}
+
+// SetMaxGenerators 设置最大生成器数量限制
+//
+// 参数:
+//
+//	max: 最大数量（必须大于0）
+//
+// 返回:
+//
+//	error: 设置失败时返回错误
+func (r *GeneratorRegistry) SetMaxGenerators(max int) error {
+	if max <= 0 {
+		return errors.New("max generators must be positive")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.maxGenerators = max
+	return nil
 }
 
 // ListGeneratorTypes 列出所有已注册的生成器类型
@@ -193,6 +269,22 @@ func (r *GeneratorRegistry) ListGeneratorTypes() []GeneratorType {
 		types = append(types, t)
 	}
 	return types
+}
+
+// ListGeneratorKeys 列出所有已缓存的生成器key
+//
+// 返回:
+//
+//	[]string: 生成器key列表
+func (r *GeneratorRegistry) ListGeneratorKeys() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	keys := make([]string, 0, len(r.generators))
+	for k := range r.generators {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // SnowflakeFactory Snowflake生成器工厂

@@ -449,7 +449,10 @@ func TestIDSetDifference(t *testing.T) {
 // TestBatchIDGenerator 测试批量生成器
 func TestBatchIDGenerator(t *testing.T) {
 	sf, _ := NewSnowflake(1, 1)
-	batch := NewBatchIDGenerator(sf)
+	batch, err := NewBatchIDGenerator(sf)
+	if err != nil {
+		t.Fatalf("创建批量生成器失败: %v", err)
+	}
 
 	t.Run("生成指定数量的ID", func(t *testing.T) {
 		count := 100
@@ -547,7 +550,10 @@ func BenchmarkParseID(b *testing.B) {
 // BenchmarkBatchGenerate 基准测试：批量生成
 func BenchmarkBatchGenerate(b *testing.B) {
 	sf, _ := NewSnowflake(1, 1)
-	batch := NewBatchIDGenerator(sf)
+	batch, err := NewBatchIDGenerator(sf)
+	if err != nil {
+		b.Fatalf("创建批量生成器失败: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

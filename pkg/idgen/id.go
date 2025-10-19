@@ -451,11 +451,18 @@ func (b *BatchIDGenerator) Generate(count int) ([]int64, error) {
 		return nil, fmt.Errorf("count must be positive, got %d", count)
 	}
 
+	// 限制单次批量生成的最大数量，防止内存溢出
+	const maxBatchCount = 100_000
+	if count > maxBatchCount {
+		return nil, fmt.Errorf("count too large (max %d), got %d", maxBatchCount, count)
+	}
+
 	ids := make([]int64, 0, count)
 	for i := 0; i < count; i++ {
 		id, err := b.generator.NextID()
 		if err != nil {
-			return ids, fmt.Errorf("failed to generate ID at index %d: %w", i, err)
+			// 返回已生成的ID和错误，让调用者决定如何处理
+			return ids, fmt.Errorf("failed to generate ID at index %d/%d: %w", i, count, err)
 		}
 		ids = append(ids, id)
 	}
@@ -474,6 +481,10 @@ func (b *BatchIDGenerator) Generate(count int) ([]int64, error) {
 //	[]int64: 生成的ID列表
 //	error: 生成失败时返回错误
 func GenerateIDs(count int) ([]int64, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be positive, got %d", count)
+	}
+
 	gen, err := GetDefaultGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default generator: %w", err)
