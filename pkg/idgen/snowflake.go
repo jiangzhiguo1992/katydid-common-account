@@ -427,10 +427,10 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		var availableInCurrentMs int
 		if timestamp == s.lastTimestamp {
 			// 同一毫秒内，计算剩余可用序列号数量
-			// 当前序列号是 s.sequence，还可以使用到 MaxSequence
-			// 修复：应该是 MaxSequence - s.sequence + 1（包含 s.sequence 本身）
+			// 当前序列号是 s.sequence，还可以生成到 MaxSequence
+			// 从 s.sequence 到 MaxSequence，共 MaxSequence - s.sequence + 1 个
 			availableInCurrentMs = int(MaxSequence - s.sequence + 1)
-			// 如果序列号已经用完，需要等待下一毫秒
+			// 如果序列号已经用完（s.sequence > MaxSequence），需要等待下一毫秒
 			if availableInCurrentMs <= 0 {
 				if s.enableMetrics {
 					s.metrics.SequenceOverflow.Add(1)
@@ -448,6 +448,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		} else {
 			// 新的毫秒，重置序列号
 			s.sequence = 0
+			s.lastTimestamp = timestamp
 			availableInCurrentMs = MaxSequence + 1
 		}
 
