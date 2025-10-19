@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	// Epoch 起始时间戳 (2026-01-01 00:00:00 UTC)
-	//Epoch int64 = 1767196800000 // 毫秒时间戳
-	Epoch int64 = 1672502400000 // 毫秒时间戳 (前期测试用2024)
+	// Epoch 起始时间戳 (2024-01-01 00:00:00 UTC)
+	//Epoch int64 = 1767196800000 // 毫秒时间戳 (2026-01-01，预留未来使用)
+	Epoch int64 = 1672502400000 // 毫秒时间戳 (2024-01-01，当前使用)
 
 	// 位数分配
 	WorkerIDBits     = 5  // 工作机器ID位数
@@ -34,8 +34,14 @@ const (
 	// 时钟回拨最大容忍时间（毫秒）
 	maxClockBackwardTolerance = 5
 
+	// 时钟回拨最大容忍上限（毫秒）- 防止配置过大
+	maxClockBackwardToleranceLimit = 1000
+
 	// 批量生成最大数量
 	maxBatchSize = 4096
+
+	// 等待策略最大重试次数
+	maxWaitRetries = 10
 )
 
 var (
@@ -209,6 +215,8 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 	clockBackwardTolerance := config.ClockBackwardTolerance
 	if clockBackwardTolerance <= 0 {
 		clockBackwardTolerance = maxClockBackwardTolerance
+	} else if clockBackwardTolerance > maxClockBackwardToleranceLimit {
+		clockBackwardTolerance = maxClockBackwardToleranceLimit
 	}
 
 	return &Snowflake{
@@ -441,13 +449,24 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 
 		case StrategyWait:
 			if offset <= s.clockBackwardTolerance {
-				time.Sleep(time.Duration(offset) * time.Millisecond)
-				timestamp = s.timeFunc()
+				// 使用重试机制等待时钟追赶
+				retries := 0
+				for retries < maxWaitRetries {
+					time.Sleep(time.Duration(offset) * time.Millisecond)
+					timestamp = s.timeFunc()
+					if timestamp >= s.lastTimestamp {
+						break
+					}
+					retries++
+				}
+				// 等待后仍然回拨，返回错误
 				if timestamp < s.lastTimestamp {
-					return 0, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
+					return 0, fmt.Errorf("%w: backward %dms after %d retries",
+						ErrClockMovedBackwards, offset, retries)
 				}
 			} else {
-				return 0, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
+				return 0, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
+					ErrClockMovedBackwards, offset, s.clockBackwardTolerance)
 			}
 
 		case StrategyUseLastTimestamp:
@@ -455,13 +474,14 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 		}
 	}
 
-	// 检查时间戳溢出
+	// 检查时间戳溢出（提前检查避免生成负数ID）
 	timeDiff := timestamp - Epoch
 	if timeDiff < 0 {
 		return 0, fmt.Errorf("%w: current time %d is before epoch %d",
 			ErrTimestampOverflow, timestamp, Epoch)
 	}
 
+	// 检查时间戳是否超过41位能表示的最大值
 	maxTimestamp := int64(1<<41 - 1)
 	if timeDiff > maxTimestamp {
 		return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
@@ -478,6 +498,12 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 			timestamp = s.waitNextMillis(s.lastTimestamp)
 			s.metrics.WaitCount.Add(1)
 			s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
+
+			// 等待后重新检查时间戳是否仍然有效
+			newTimeDiff := timestamp - Epoch
+			if newTimeDiff < 0 || newTimeDiff > maxTimestamp {
+				return 0, fmt.Errorf("%w: timestamp after wait is invalid", ErrTimestampOverflow)
+			}
 		}
 	} else {
 		// 不同毫秒，序列号重置为0
@@ -486,11 +512,16 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 
 	s.lastTimestamp = timestamp
 
-	// 组装ID
-	id := ((timestamp - Epoch) << TimestampShift) |
+	// 组装ID（再次验证各部分不会导致溢出）
+	id := ((timeDiff) << TimestampShift) |
 		(s.datacenterID << DatacenterIDShift) |
 		(s.workerID << WorkerIDShift) |
 		s.sequence
+
+	// 最终安全检查：确保生成的ID为正数
+	if id <= 0 {
+		return 0, fmt.Errorf("%w: generated id is not positive: %d", ErrTimestampOverflow, id)
+	}
 
 	s.metrics.IDCount.Add(1)
 
@@ -529,15 +560,16 @@ func (s *Snowflake) GetMetrics() map[string]uint64 {
 //
 // 返回:
 //
-//	Metrics: 性能指标快照
-func (s *Snowflake) GetMetricsSnapshot() Metrics {
-	return Metrics{
-		IDCount:          atomic.Uint64{},
-		SequenceOverflow: atomic.Uint64{},
-		ClockBackward:    atomic.Uint64{},
-		WaitCount:        atomic.Uint64{},
-		TotalWaitTimeNs:  atomic.Uint64{},
-	}
+//	*Metrics: 性能指标快照（指针类型，避免复制锁）
+func (s *Snowflake) GetMetricsSnapshot() *Metrics {
+	// 创建快照并复制当前值
+	snapshot := &Metrics{}
+	snapshot.IDCount.Store(s.metrics.IDCount.Load())
+	snapshot.SequenceOverflow.Store(s.metrics.SequenceOverflow.Load())
+	snapshot.ClockBackward.Store(s.metrics.ClockBackward.Load())
+	snapshot.WaitCount.Store(s.metrics.WaitCount.Load())
+	snapshot.TotalWaitTimeNs.Store(s.metrics.TotalWaitTimeNs.Load())
+	return snapshot
 }
 
 // ResetMetrics 重置性能监控指标
