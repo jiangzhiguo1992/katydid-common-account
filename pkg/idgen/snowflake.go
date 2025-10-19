@@ -428,7 +428,8 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		if timestamp == s.lastTimestamp {
 			// 同一毫秒内，计算剩余可用序列号数量
 			// 当前序列号是 s.sequence，还可以使用到 MaxSequence
-			availableInCurrentMs = int(MaxSequence - s.sequence)
+			// 修复：应该是 MaxSequence - s.sequence + 1（包含 s.sequence 本身）
+			availableInCurrentMs = int(MaxSequence - s.sequence + 1)
 			// 如果序列号已经用完，需要等待下一毫秒
 			if availableInCurrentMs <= 0 {
 				if s.enableMetrics {
@@ -649,7 +650,7 @@ func (s *Snowflake) GetMetrics() map[string]uint64 {
 //
 //	*Metrics: 性能指标快照（指针类型，避免复制锁）
 func (s *Snowflake) GetMetricsSnapshot() *Metrics {
-	if !s.enableMetrics {
+	if !s.enableMetrics || s.metrics == nil {
 		return &Metrics{}
 	}
 
@@ -666,6 +667,10 @@ func (s *Snowflake) GetMetricsSnapshot() *Metrics {
 // ResetMetrics 重置性能监控指标
 // 注意: 此方法不是线程安全的，仅用于测试场景
 func (s *Snowflake) ResetMetrics() {
+	// 修复：添加 nil 检查，防止 panic
+	if !s.enableMetrics || s.metrics == nil {
+		return
+	}
 	s.metrics.IDCount.Store(0)
 	s.metrics.SequenceOverflow.Store(0)
 	s.metrics.ClockBackward.Store(0)
