@@ -28,6 +28,9 @@ const (
 	DatacenterIDShift = SequenceBits + WorkerIDBits                    // 17
 	TimestampShift    = SequenceBits + WorkerIDBits + DatacenterIDBits // 22
 
+	// 最大时间戳差值 (41位)
+	maxTimestampDiff int64 = 1<<41 - 1
+
 	// 等待下一毫秒时的休眠时间（微秒）
 	sleepDuration = 100 * time.Microsecond
 
@@ -186,7 +189,7 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 
 	// 默认时钟回拨策略
 	clockBackwardStrategy := config.ClockBackwardStrategy
-	// 修复：如果未设置策略，默认使用 StrategyError（更安全）
+	// 如果未设置策略，默认使用 StrategyError（更安全）
 	// 注意：0 值就是 StrategyError，所以这个检查是正确的
 
 	// 默认时钟回拨容忍时间
@@ -389,17 +392,17 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		// 时钟回拨检测
 		if timestamp < s.lastTimestamp {
 			offset := s.lastTimestamp - timestamp
-			if s.enableMetrics {
+			if s.enableMetrics && s.metrics != nil {
 				s.metrics.ClockBackward.Add(1)
 			}
 
 			switch s.clockBackwardStrategy {
 			case StrategyError:
 				// 返回已生成的ID和错误
-				return ids, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
+				return ids, fmt.Errorf("%w: backward %dms (generated %d IDs)", ErrClockMovedBackwards, offset, len(ids))
 			case StrategyWait:
 				if offset <= s.clockBackwardTolerance {
-					// 修复：使用重试机制，类似 nextIDUnsafe
+					// 使用重试机制，类似 nextIDUnsafe
 					retries := 0
 					for retries < maxWaitRetries {
 						time.Sleep(time.Duration(offset+1) * time.Millisecond)
@@ -423,33 +426,55 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 			}
 		}
 
+		// 批量生成ID前先检查时间戳是否有效
+		timeDiff := timestamp - Epoch
+		if timeDiff < 0 {
+			return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
+				ErrTimestampOverflow, timestamp, Epoch, len(ids))
+		}
+
+		if timeDiff > maxTimestampDiff {
+			return ids, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d (generated %d IDs)",
+				ErrTimestampOverflow, timeDiff, maxTimestampDiff, len(ids))
+		}
+
 		// 计算当前毫秒可以生成的ID数量
 		var availableInCurrentMs int
 		if timestamp == s.lastTimestamp {
 			// 同一毫秒内，计算剩余可用序列号数量
-			// 当前序列号是 s.sequence，还可以生成到 MaxSequence
-			// 从 s.sequence 到 MaxSequence，共 MaxSequence - s.sequence + 1 个
-			availableInCurrentMs = int(MaxSequence - s.sequence + 1)
-			// 如果序列号已经用完（s.sequence > MaxSequence），需要等待下一毫秒
+			// s.sequence 是上次使用的序列号（0-4095）
+			// 剩余可用：MaxSequence - s.sequence（例如：s.sequence=10，则剩余4095-10=4085个）
+			availableInCurrentMs = int(MaxSequence - s.sequence)
+
+			// 如果序列号已经用完（s.sequence == MaxSequence），需要等待下一毫秒
 			if availableInCurrentMs <= 0 {
-				if s.enableMetrics {
+				if s.enableMetrics && s.metrics != nil {
 					s.metrics.SequenceOverflow.Add(1)
 					s.metrics.WaitCount.Add(1)
 				}
 				startTime := time.Now()
 				timestamp = s.waitNextMillis(s.lastTimestamp)
-				if s.enableMetrics {
+				if s.enableMetrics && s.metrics != nil {
 					s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
 				}
+
+				// 等待下一毫秒后，重新检查时间戳是否有效
+				timeDiff = timestamp - Epoch
+				if timeDiff < 0 || timeDiff > maxTimestampDiff {
+					return ids, fmt.Errorf("%w: timestamp after wait is invalid (generated %d IDs)",
+						ErrTimestampOverflow, len(ids))
+				}
+
+				// 新毫秒，序列号重置，全部4096个序列号可用
 				s.sequence = 0
 				s.lastTimestamp = timestamp
-				availableInCurrentMs = MaxSequence + 1
+				availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 			}
 		} else {
-			// 新的毫秒，重置序列号
+			// 新的毫秒，序列号重置，全部4096个序列号可用
 			s.sequence = 0
 			s.lastTimestamp = timestamp
-			availableInCurrentMs = MaxSequence + 1
+			availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 		}
 
 		// 本轮生成数量
@@ -458,41 +483,30 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 			batchSize = availableInCurrentMs
 		}
 
-		// 批量生成ID前检查时间戳
-		timeDiff := timestamp - Epoch
-		if timeDiff < 0 {
-			// 返回已生成的ID和错误
-			return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
-				ErrTimestampOverflow, timestamp, Epoch, len(ids))
-		}
-
-		maxTimestamp := int64(1<<41 - 1)
-		if timeDiff > maxTimestamp {
-			// 返回已生成的ID和错误
-			return ids, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d (generated %d IDs)",
-				ErrTimestampOverflow, timeDiff, maxTimestamp, len(ids))
-		}
-
-		// 使用预计算的部分
+		// 使用预计算的部分（在循环外计算以提高性能）
 		baseID := (timeDiff << TimestampShift) | s.precomputedPart
 
+		// 从当前序列号开始生成
 		for i := 0; i < batchSize; i++ {
 			id := baseID | s.sequence
+
+			// 最终安全检查：确保生成的ID为正数
 			if id <= 0 {
-				// 返回已生成的ID和错误
 				return ids, fmt.Errorf("%w: generated id is not positive: %d (after generating %d IDs)",
 					ErrTimestampOverflow, id, len(ids))
 			}
 			ids = append(ids, id)
+
+			// 递增序列号
 			s.sequence++
 		}
 
-		// 确保更新 lastTimestamp，防止生成重复ID
-		s.lastTimestamp = timestamp
+		// s.sequence 现在指向下一个待使用的序列号，需要减1得到最后使用的序列号
+		s.sequence--
 		remainingIDs -= batchSize
 	}
 
-	if s.enableMetrics {
+	if s.enableMetrics && s.metrics != nil {
 		s.metrics.IDCount.Add(uint64(n))
 	}
 
@@ -513,7 +527,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	// 时钟回拨检测
 	if timestamp < s.lastTimestamp {
 		offset := s.lastTimestamp - timestamp
-		if s.enableMetrics {
+		if s.enableMetrics && s.metrics != nil {
 			s.metrics.ClockBackward.Add(1)
 		}
 
@@ -527,7 +541,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 				// 使用重试机制等待时钟追赶
 				retries := 0
 				for retries < maxWaitRetries {
-					// 修复：使用 offset+1 确保时钟真正前进
+					// 使用 offset+1 确保时钟真正前进
 					time.Sleep(time.Duration(offset+1) * time.Millisecond)
 					timestamp = time.Now().UnixNano() / 1e6
 					if timestamp >= s.lastTimestamp {
@@ -560,32 +574,33 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	}
 
 	// 检查时间戳是否超过41位能表示的最大值
-	maxTimestamp := int64(1<<41 - 1)
-	if timeDiff > maxTimestamp {
+	if timeDiff > maxTimestampDiff {
 		return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
-			ErrTimestampOverflow, timeDiff, maxTimestamp)
+			ErrTimestampOverflow, timeDiff, maxTimestampDiff)
 	}
 
 	// 同一毫秒内，序列号递增
 	if timestamp == s.lastTimestamp {
-		s.sequence = (s.sequence + 1) & MaxSequence
+		s.sequence++
 		// 序列号溢出，等待下一毫秒
-		if s.sequence == 0 {
-			if s.enableMetrics {
+		if s.sequence > MaxSequence {
+			if s.enableMetrics && s.metrics != nil {
 				s.metrics.SequenceOverflow.Add(1)
 			}
 			startTime := time.Now()
 			timestamp = s.waitNextMillis(s.lastTimestamp)
-			if s.enableMetrics {
+			if s.enableMetrics && s.metrics != nil {
 				s.metrics.WaitCount.Add(1)
 				s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
 			}
 
 			// 等待后重新检查时间戳是否仍然有效
 			newTimeDiff := timestamp - Epoch
-			if newTimeDiff < 0 || newTimeDiff > maxTimestamp {
+			if newTimeDiff < 0 || newTimeDiff > maxTimestampDiff {
 				return 0, fmt.Errorf("%w: timestamp after wait is invalid", ErrTimestampOverflow)
 			}
+			// 重置序列号
+			s.sequence = 0
 		}
 	} else {
 		// 不同毫秒，序列号重置为0
@@ -603,7 +618,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	}
 
 	// 只在启用监控时才更新指标
-	if s.enableMetrics {
+	if s.enableMetrics && s.metrics != nil {
 		s.metrics.IDCount.Add(1)
 	}
 
@@ -668,7 +683,7 @@ func (s *Snowflake) GetMetricsSnapshot() *Metrics {
 // ResetMetrics 重置性能监控指标
 // 注意: 此方法不是线程安全的，仅用于测试场景
 func (s *Snowflake) ResetMetrics() {
-	// 修复：添加 nil 检查，防止 panic
+	// 添加 nil 检查，防止 panic
 	if !s.enableMetrics || s.metrics == nil {
 		return
 	}
