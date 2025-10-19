@@ -28,7 +28,7 @@ const (
 	DatacenterIDShift = SequenceBits + WorkerIDBits                    // 17
 	TimestampShift    = SequenceBits + WorkerIDBits + DatacenterIDBits // 22
 
-	// 性能优化：等待下一毫秒时的休眠时间（微秒）
+	// 等待下一毫秒时的休眠时间（微秒）
 	sleepDuration = 100 * time.Microsecond
 
 	// 时钟回拨最大容忍时间（毫秒）
@@ -60,7 +60,7 @@ var (
 	// ErrInvalidBatchSize 批量生成数量无效
 	ErrInvalidBatchSize = errors.New("invalid batch size")
 
-	// IDInfo对象池（优化3：减少内存分配）
+	// IDInfo对象池（减少内存分配）
 	idInfoPool = sync.Pool{
 		New: func() interface{} {
 			return &IDInfo{}
@@ -118,7 +118,7 @@ type IDInfo struct {
 	Sequence     int64     `json:"sequence"`      // 序列号
 }
 
-// Release 释放IDInfo对象回对象池（优化3：对象池）
+// Release 释放IDInfo对象回对象池
 func (info *IDInfo) Release() {
 	// 清空数据避免内存泄漏
 	info.ID = 0
@@ -139,17 +139,14 @@ type Snowflake struct {
 	// 上次生成ID的时间戳
 	lastTimestamp int64
 
-	// 工作机器ID（0-31）
-	workerID int64
-
 	// 数据中心ID（0-31）
 	datacenterID int64
 
+	// 工作机器ID（0-31）
+	workerID int64
+
 	// 当前毫秒内的序列号（0-4095）
 	sequence int64
-
-	// 时间提供者函数（依赖倒置原则 - 便于测试）
-	timeFunc func() int64
 
 	// 时钟回拨处理策略
 	clockBackwardStrategy ClockBackwardStrategy
@@ -157,25 +154,24 @@ type Snowflake struct {
 	// 时钟回拨容忍时间（毫秒）
 	clockBackwardTolerance int64
 
-	// 性能监控指标
-	metrics Metrics
-
-	// 监控开关（优化5：可选的监控开关）
+	// 监控开关
 	enableMetrics bool
 
-	// 预计算的ID部分（优化2：预先计算）
+	// 性能监控指标
+	metrics *Metrics
+
+	// 预计算的ID部分
 	// datacenterID和workerID部分可以预先计算，减少每次生成时的位运算
 	precomputedPart int64
 }
 
-// SnowflakeConfig Snowflake配置选项（易用性优化）
+// SnowflakeConfig Snowflake配置选项
 type SnowflakeConfig struct {
 	DatacenterID           int64                 // 数据中心ID
 	WorkerID               int64                 // 工作机器ID
-	TimeFunc               func() int64          // 自定义时间函数（可选，用于测试）
 	ClockBackwardStrategy  ClockBackwardStrategy // 时钟回拨处理策略（可选，默认StrategyError）
 	ClockBackwardTolerance int64                 // 时钟回拨容忍时间（毫秒，可选，默认5ms）
-	EnableMetrics          bool                  // 是否启用监控（优化5：可选的监控开关）
+	EnableMetrics          bool                  // 是否启用监控
 }
 
 // NewSnowflake 创建一个新的Snowflake ID生成器
@@ -216,20 +212,12 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 		return nil, errors.New("config cannot be nil")
 	}
 
-	if config.WorkerID < 0 || config.WorkerID > MaxWorkerID {
-		return nil, fmt.Errorf("%w: got %d", ErrInvalidWorkerID, config.WorkerID)
-	}
-
 	if config.DatacenterID < 0 || config.DatacenterID > MaxDatacenterID {
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidDatacenterID, config.DatacenterID)
 	}
 
-	// 默认时间函数
-	timeFunc := config.TimeFunc
-	if timeFunc == nil {
-		timeFunc = func() int64 {
-			return time.Now().UnixNano() / 1e6
-		}
+	if config.WorkerID < 0 || config.WorkerID > MaxWorkerID {
+		return nil, fmt.Errorf("%w: got %d", ErrInvalidWorkerID, config.WorkerID)
 	}
 
 	// 默认时钟回拨策略
@@ -243,18 +231,24 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 		clockBackwardTolerance = maxClockBackwardTolerance
 	}
 
-	// 优化2：预先计算datacenterID和workerID部分
+	// metrics 初始化
+	var metrics *Metrics
+	if config.EnableMetrics {
+		metrics = &Metrics{}
+	}
+
+	// 预先计算datacenterID和workerID部分
 	precomputedPart := (config.DatacenterID << DatacenterIDShift) | (config.WorkerID << WorkerIDShift)
 
 	return &Snowflake{
-		workerID:               config.WorkerID,
 		datacenterID:           config.DatacenterID,
+		workerID:               config.WorkerID,
 		lastTimestamp:          -1,
 		sequence:               0,
-		timeFunc:               timeFunc,
 		clockBackwardStrategy:  clockBackwardStrategy,
 		clockBackwardTolerance: clockBackwardTolerance,
 		enableMetrics:          config.EnableMetrics,
+		metrics:                metrics,
 		precomputedPart:        precomputedPart,
 	}, nil
 }
@@ -289,7 +283,7 @@ func (s *Snowflake) NextID() (int64, error) {
 //
 //	int64: 新的时间戳（保证大于lastTimestamp）
 func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
-	// 优化4：内联时间函数调用
+	// 内联时间函数调用
 	timestamp := time.Now().UnixNano() / 1e6
 	for timestamp <= lastTimestamp {
 		// 短暂休眠，避免CPU空转（只阻塞当前goroutine）
@@ -315,7 +309,7 @@ func (s *Snowflake) Parse(id int64) (*IDInfo, error) {
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidSnowflakeID, id)
 	}
 
-	// 优化3：从对象池获取IDInfo对象
+	// 从对象池获取IDInfo对象
 	info := idInfoPool.Get().(*IDInfo)
 
 	timestamp := (id >> TimestampShift) + Epoch
@@ -448,12 +442,12 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 
 	ids := make([]int64, 0, n)
 
-	// 优化2：批量生成优化 - 预先计算可能需要的毫秒数
+	// 批量生成优化 - 预先计算可能需要的毫秒数
 	// 如果需要的ID数量超过单毫秒最大序列号，提前知道需要跨越多个毫秒
 	remainingIDs := n
 
 	for remainingIDs > 0 {
-		// 优化4：内联时间获取
+		// 内联时间获取
 		timestamp := time.Now().UnixNano() / 1e6
 
 		// 时钟回拨检测
@@ -469,14 +463,24 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 				return ids, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
 			case StrategyWait:
 				if offset <= s.clockBackwardTolerance {
-					time.Sleep(time.Duration(offset) * time.Millisecond)
-					timestamp = time.Now().UnixNano() / 1e6
+					// 修复：使用重试机制，类似 nextIDUnsafe
+					retries := 0
+					for retries < maxWaitRetries {
+						time.Sleep(time.Duration(offset+1) * time.Millisecond)
+						timestamp = time.Now().UnixNano() / 1e6
+						if timestamp >= s.lastTimestamp {
+							break
+						}
+						offset = s.lastTimestamp - timestamp
+						retries++
+					}
 					if timestamp < s.lastTimestamp {
-						return ids, fmt.Errorf("%w: backward %dms after wait", ErrClockMovedBackwards, offset)
+						return ids, fmt.Errorf("%w: backward %dms after %d retries (generated %d IDs)",
+							ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries, len(ids))
 					}
 				} else {
-					return ids, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
-						ErrClockMovedBackwards, offset, s.clockBackwardTolerance)
+					return ids, fmt.Errorf("%w: backward %dms exceeds tolerance %dms (generated %d IDs)",
+						ErrClockMovedBackwards, offset, s.clockBackwardTolerance, len(ids))
 				}
 			case StrategyUseLastTimestamp:
 				timestamp = s.lastTimestamp
@@ -487,6 +491,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		var availableInCurrentMs int
 		if timestamp == s.lastTimestamp {
 			// 同一毫秒内，计算剩余可用序列号数量
+			// 当前序列号是 s.sequence，还可以使用到 MaxSequence
 			availableInCurrentMs = int(MaxSequence - s.sequence)
 			// 如果序列号已经用完，需要等待下一毫秒
 			if availableInCurrentMs <= 0 {
@@ -515,21 +520,30 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 			batchSize = availableInCurrentMs
 		}
 
-		// 批量生成ID
+		// 批量生成ID前检查时间戳
 		timeDiff := timestamp - Epoch
-		if timeDiff < 0 || timeDiff > int64(1<<41-1) {
+		if timeDiff < 0 {
 			// 返回已生成的ID和错误
-			return ids, fmt.Errorf("%w: timestamp difference %d invalid", ErrTimestampOverflow, timeDiff)
+			return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
+				ErrTimestampOverflow, timestamp, Epoch, len(ids))
 		}
 
-		// 优化2：使用预计算的部分
+		maxTimestamp := int64(1<<41 - 1)
+		if timeDiff > maxTimestamp {
+			// 返回已生成的ID和错误
+			return ids, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d (generated %d IDs)",
+				ErrTimestampOverflow, timeDiff, maxTimestamp, len(ids))
+		}
+
+		// 使用预计算的部分
 		baseID := (timeDiff << TimestampShift) | s.precomputedPart
 
 		for i := 0; i < batchSize; i++ {
 			id := baseID | s.sequence
 			if id <= 0 {
 				// 返回已生成的ID和错误
-				return ids, fmt.Errorf("%w: generated id is not positive: %d", ErrTimestampOverflow, id)
+				return ids, fmt.Errorf("%w: generated id is not positive: %d (after generating %d IDs)",
+					ErrTimestampOverflow, id, len(ids))
 			}
 			ids = append(ids, id)
 			s.sequence++
@@ -555,7 +569,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 //	int64: 生成的唯一ID
 //	error: 生成失败时返回错误
 func (s *Snowflake) nextIDUnsafe() (int64, error) {
-	// 优化4：内联时间函数，减少函数调用开销
+	// 内联时间函数，减少函数调用开销
 	timestamp := time.Now().UnixNano() / 1e6
 
 	// 时钟回拨检测
@@ -575,17 +589,20 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 				// 使用重试机制等待时钟追赶
 				retries := 0
 				for retries < maxWaitRetries {
-					time.Sleep(time.Duration(offset) * time.Millisecond)
+					// 修复：使用 offset+1 确保时钟真正前进
+					time.Sleep(time.Duration(offset+1) * time.Millisecond)
 					timestamp = time.Now().UnixNano() / 1e6
 					if timestamp >= s.lastTimestamp {
 						break
 					}
+					// 重新计算偏移量
+					offset = s.lastTimestamp - timestamp
 					retries++
 				}
 				// 等待后仍然回拨，返回错误
 				if timestamp < s.lastTimestamp {
 					return 0, fmt.Errorf("%w: backward %dms after %d retries",
-						ErrClockMovedBackwards, offset, retries)
+						ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries)
 				}
 			} else {
 				return 0, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
@@ -639,7 +656,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 
 	s.lastTimestamp = timestamp
 
-	// 优化2：使用预计算的部分组装ID，减少位运算
+	// 使用预计算的部分组装ID，减少位运算
 	id := ((timeDiff) << TimestampShift) | s.precomputedPart | s.sequence
 
 	// 最终安全检查：确保生成的ID为正数
@@ -647,7 +664,7 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 		return 0, fmt.Errorf("%w: generated id is not positive: %d", ErrTimestampOverflow, id)
 	}
 
-	// 优化5：只在启用监控时才更新指标
+	// 只在启用监控时才更新指标
 	if s.enableMetrics {
 		s.metrics.IDCount.Add(1)
 	}
