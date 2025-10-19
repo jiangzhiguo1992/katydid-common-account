@@ -185,6 +185,11 @@ func ParseID(s string) (ID, error) {
 		return 0, fmt.Errorf("failed to parse ID: %w", err)
 	}
 
+	// 添加负数检查，确保ID为非负数
+	if val < 0 {
+		return 0, fmt.Errorf("invalid ID: must be non-negative, got %d", val)
+	}
+
 	return ID(val), nil
 }
 
@@ -413,83 +418,4 @@ func (s IDSet) Difference(other IDSet) IDSet {
 		}
 	}
 	return result
-}
-
-// BatchIDGenerator 批量ID生成器
-// 提供批量生成ID的便捷方法，减少锁竞争
-type BatchIDGenerator struct {
-	generator IDGenerator
-}
-
-// NewBatchIDGenerator 创建批量ID生成器
-//
-// 参数:
-//
-//	generator: 底层ID生成器
-//
-// 返回:
-//
-//	*BatchIDGenerator: 批量生成器实例
-func NewBatchIDGenerator(generator IDGenerator) *BatchIDGenerator {
-	return &BatchIDGenerator{
-		generator: generator,
-	}
-}
-
-// Generate 批量生成ID
-//
-// 参数:
-//
-//	count: 要生成的ID数量
-//
-// 返回:
-//
-//	[]int64: 生成的ID列表
-//	error: 生成失败时返回错误
-func (b *BatchIDGenerator) Generate(count int) ([]int64, error) {
-	if count <= 0 {
-		return nil, fmt.Errorf("count must be positive, got %d", count)
-	}
-
-	// 限制单次批量生成的最大数量，防止内存溢出
-	const maxBatchCount = 100_000
-	if count > maxBatchCount {
-		return nil, fmt.Errorf("count too large (max %d), got %d", maxBatchCount, count)
-	}
-
-	ids := make([]int64, 0, count)
-	for i := 0; i < count; i++ {
-		id, err := b.generator.NextID()
-		if err != nil {
-			// 返回已生成的ID和错误，让调用者决定如何处理
-			return ids, fmt.Errorf("failed to generate ID at index %d/%d: %w", i, count, err)
-		}
-		ids = append(ids, id)
-	}
-
-	return ids, nil
-}
-
-// GenerateIDs 批量生成ID的便捷函数
-//
-// 参数:
-//
-//	count: 要生成的ID数量
-//
-// 返回:
-//
-//	[]int64: 生成的ID列表
-//	error: 生成失败时返回错误
-func GenerateIDs(count int) ([]int64, error) {
-	if count <= 0 {
-		return nil, fmt.Errorf("count must be positive, got %d", count)
-	}
-
-	gen, err := GetDefaultGenerator()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get default generator: %w", err)
-	}
-
-	batch := NewBatchIDGenerator(gen)
-	return batch.Generate(count)
 }

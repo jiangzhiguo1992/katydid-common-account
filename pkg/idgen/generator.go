@@ -129,20 +129,31 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 		return nil, ErrInvalidGeneratorKey
 	}
 
-	// 检查缓存
+	// 验证generatorType不为空
+	if generatorType == "" {
+		return nil, ErrInvalidGeneratorType
+	}
+
+	// 添加config空值检查
+	if config == nil {
+		return nil, errors.New("config cannot be nil")
+	}
+
+	// 第一次检查缓存（快速路径，使用读锁）
 	r.mu.RLock()
 	if gen, exists := r.generators[key]; exists {
 		r.mu.RUnlock()
 		return gen, nil
 	}
 	// 检查是否超过最大数量限制
-	if len(r.generators) >= r.maxGenerators {
-		r.mu.RUnlock()
-		return nil, fmt.Errorf("%w: current=%d, max=%d", ErrRegistryFull, len(r.generators), r.maxGenerators)
-	}
+	exceedsLimit := len(r.generators) >= r.maxGenerators
 	r.mu.RUnlock()
 
-	// 获取工厂
+	if exceedsLimit {
+		return nil, fmt.Errorf("%w: current=%d, max=%d", ErrRegistryFull, len(r.generators), r.maxGenerators)
+	}
+
+	// 获取工厂（使用读锁）
 	r.mu.RLock()
 	factory, exists := r.factories[generatorType]
 	r.mu.RUnlock()
@@ -151,27 +162,32 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 		return nil, fmt.Errorf("%w: type=%s", ErrGeneratorNotFound, generatorType)
 	}
 
-	// 创建生成器
+	// 创建生成器（在锁外执行，避免长时间持有锁）
 	generator, err := factory.Create(generatorType, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create generator: %w", err)
 	}
 
-	// 缓存生成器
+	// 验证创建的生成器不为nil
+	if generator == nil {
+		return nil, errors.New("factory created nil generator")
+	}
+
+	// 缓存生成器（双重检查锁定）
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	// 双重检查，避免并发创建
 	if gen, exists := r.generators[key]; exists {
-		r.mu.Unlock()
 		return gen, nil
 	}
+
 	// 再次检查数量限制（双重检查）
 	if len(r.generators) >= r.maxGenerators {
-		r.mu.Unlock()
 		return nil, fmt.Errorf("%w: current=%d, max=%d", ErrRegistryFull, len(r.generators), r.maxGenerators)
 	}
-	r.generators[key] = generator
-	r.mu.Unlock()
 
+	r.generators[key] = generator
 	return generator, nil
 }
 
@@ -392,4 +408,22 @@ func GenerateID() (int64, error) {
 		return 0, fmt.Errorf("failed to get default generator: %w", err)
 	}
 	return gen.NextID()
+}
+
+func GenerateIDs(count int) ([]int64, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be positive, got %d", count)
+	}
+
+	// 限制单次批量生成的最大数量，防止内存溢出
+	const maxBatchCount = 100_000
+	if count > maxBatchCount {
+		return nil, fmt.Errorf("count too large (max %d), got %d", maxBatchCount, count)
+	}
+
+	gen, err := GetDefaultGenerator()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default generator: %w", err)
+	}
+	return gen.NextIDBatch(count)
 }

@@ -125,7 +125,12 @@ func TestCreateGenerator(t *testing.T) {
 	})
 
 	t.Run("不存在的生成器类型_失败", func(t *testing.T) {
-		_, err := registry.CreateGenerator("test-unknown", "unknown-type", nil)
+		// 🔧 修复：提供有效的配置，以便测试能检查到生成器类型不存在的错误
+		config := &SnowflakeConfig{
+			DatacenterID: 1,
+			WorkerID:     1,
+		}
+		_, err := registry.CreateGenerator("test-unknown", "unknown-type", config)
 		if err == nil {
 			t.Error("期望得到错误")
 		}

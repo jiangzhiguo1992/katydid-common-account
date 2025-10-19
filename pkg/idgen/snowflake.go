@@ -97,6 +97,8 @@ type IDGenerator interface {
 	// NextID 生成下一个唯一ID
 	// 返回生成的ID和可能的错误
 	NextID() (int64, error)
+	// NextIDBatch 批量生成ID
+	NextIDBatch(n int) ([]int64, error)
 }
 
 // IDParser 定义ID解析器接口（接口隔离原则）
@@ -463,6 +465,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 
 			switch s.clockBackwardStrategy {
 			case StrategyError:
+				// 返回已生成的ID和错误
 				return ids, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
 			case StrategyWait:
 				if offset <= s.clockBackwardTolerance {
@@ -515,6 +518,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		// 批量生成ID
 		timeDiff := timestamp - Epoch
 		if timeDiff < 0 || timeDiff > int64(1<<41-1) {
+			// 返回已生成的ID和错误
 			return ids, fmt.Errorf("%w: timestamp difference %d invalid", ErrTimestampOverflow, timeDiff)
 		}
 
@@ -524,12 +528,14 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		for i := 0; i < batchSize; i++ {
 			id := baseID | s.sequence
 			if id <= 0 {
+				// 返回已生成的ID和错误
 				return ids, fmt.Errorf("%w: generated id is not positive: %d", ErrTimestampOverflow, id)
 			}
 			ids = append(ids, id)
 			s.sequence++
 		}
 
+		// 确保更新 lastTimestamp，防止生成重复ID
 		s.lastTimestamp = timestamp
 		remainingIDs -= batchSize
 	}
