@@ -18,10 +18,10 @@ const (
 	DatacenterIDBits = 5  // 数据中心ID位数
 	SequenceBits     = 12 // 序列号位数
 
-	// 最大值计算
-	MaxWorkerID     = -1 ^ (-1 << WorkerIDBits)     // 31 (2^5 - 1)
-	MaxDatacenterID = -1 ^ (-1 << DatacenterIDBits) // 31 (2^5 - 1)
-	MaxSequence     = -1 ^ (-1 << SequenceBits)     // 4095 (2^12 - 1)
+	// 最大值计算(切记不是个数)
+	MaxWorkerID     = -1 ^ (-1 << WorkerIDBits)     // 31 (2^5 - 1) [0, 31]
+	MaxDatacenterID = -1 ^ (-1 << DatacenterIDBits) // 31 (2^5 - 1) [0, 31]
+	MaxSequence     = -1 ^ (-1 << SequenceBits)     // 4095 (2^12 - 1) [0, 4095]
 
 	// 位移量
 	WorkerIDShift     = SequenceBits                                   // 12
@@ -211,7 +211,7 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 		datacenterID:           config.DatacenterID,
 		workerID:               config.WorkerID,
 		lastTimestamp:          -1,
-		sequence:               0,
+		sequence:               -1, // 初始化为-1，首次生成时会递增为0
 		clockBackwardStrategy:  clockBackwardStrategy,
 		clockBackwardTolerance: clockBackwardTolerance,
 		enableMetrics:          config.EnableMetrics,
@@ -426,9 +426,6 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 			}
 		}
 
-		// 批量生成ID前先检查时间戳是否有效
-		timeDiff := timestamp - Epoch
-
 		// 永远不会触发（当前时间总在Epoch之后）
 		//if timeDiff < 0 {
 		//	return ids, fmt.Errorf("%w: timestamp %d is before epoch %d (generated %d IDs)",
@@ -444,8 +441,8 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		var availableInCurrentMs int
 		if timestamp == s.lastTimestamp {
 			// 同一毫秒内，计算剩余可用序列号数量
-			// s.sequence 是上次使用的序列号（0-4095）
-			// 剩余可用：MaxSequence - s.sequence（例如：s.sequence=10，则剩余4095-10=4085个）
+			// s.sequence 是当前已使用过的序列号（0-4095）
+			// 可用数量：MaxSequence - s.sequence（例如：s.sequence=9，则剩余4095-9=4086个）
 			availableInCurrentMs = int(MaxSequence - s.sequence)
 
 			// 如果序列号已经用完（s.sequence == MaxSequence），需要等待下一毫秒
@@ -468,14 +465,14 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 				//		ErrTimestampOverflow, len(ids))
 				//}
 
-				// 新毫秒，序列号重置，全部4096个序列号可用
-				s.sequence = 0
+				// 新毫秒，序列号重置为-1，下面循环会从0开始
+				s.sequence = -1
 				s.lastTimestamp = timestamp
 				availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 			}
 		} else {
-			// 新的毫秒，序列号重置，全部4096个序列号可用
-			s.sequence = 0
+			// 新的毫秒，序列号重置为-1，下面循环会从0开始
+			s.sequence = -1
 			s.lastTimestamp = timestamp
 			availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 		}
@@ -486,20 +483,21 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 			batchSize = availableInCurrentMs
 		}
 
+		// timeDiff必须在所有timestamp更新完成后计算
+		// 这样可以确保序列号溢出等待下一毫秒后，使用的是新的timestamp
+		timeDiff := timestamp - Epoch
+
 		// 使用预计算的部分（在循环外计算以提高性能）
 		baseID := (timeDiff << TimestampShift) | s.precomputedPart
 
-		// 从当前序列号开始生成
+		// 生成ID：先递增序列号，再使用
 		for i := 0; i < batchSize; i++ {
+			s.sequence++
 			id := baseID | s.sequence
 			ids = append(ids, id)
-
-			// 递增序列号
-			s.sequence++
 		}
 
-		// s.sequence 现在指向下一个待使用的序列号，需要减1得到最后使用的序列号
-		s.sequence--
+		// 剩下的remainingIDs会进入下一个循环
 		remainingIDs -= batchSize
 	}
 
@@ -563,9 +561,6 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 		}
 	}
 
-	// 计算时间差并检查溢出
-	timeDiff := timestamp - Epoch
-
 	// 永远不会触发（当前时间总在Epoch之后）
 	//if timeDiff < 0 {
 	//	return 0, fmt.Errorf("%w: current time %d is before epoch %d",
@@ -576,34 +571,37 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	//	return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
 	//		ErrTimestampOverflow, timeDiff, maxTimestampDiff)
 	//}
+
+	// 同一毫秒内，序列号递增；不同毫秒，序列号重置
 	if timestamp == s.lastTimestamp {
-		s.sequence++
-		// 序列号溢出，等待下一毫秒
-		if s.sequence > MaxSequence {
+		// 先检查是否会溢出，再递增
+		if s.sequence >= MaxSequence {
+			// 序列号已达上限，需要等待下一毫秒
 			if s.enableMetrics && s.metrics != nil {
 				s.metrics.SequenceOverflow.Add(1)
+				s.metrics.WaitCount.Add(1)
 			}
 			startTime := time.Now()
 			timestamp = s.waitNextMillis(s.lastTimestamp)
 			if s.enableMetrics && s.metrics != nil {
-				s.metrics.WaitCount.Add(1)
 				s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
 			}
 
-			// 等待后重新检查时间戳是否仍然有效
-			// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
-			//timeDiff = timestamp - Epoch
-			//if timeDiff > maxTimestampDiff {
-			//	return 0, fmt.Errorf("%w: timestamp after wait exceeds maximum", ErrTimestampOverflow)
-			//}
-
+			// 重置序列号为-1，后面会递增为0
+			s.sequence = -1
+			s.lastTimestamp = timestamp
 		}
+		// 序列号递增（溢出后也会执行到这里）
+		s.sequence++
 	} else {
 		// 不同毫秒，序列号重置为0
 		s.sequence = 0
+		s.lastTimestamp = timestamp
 	}
 
-	s.lastTimestamp = timestamp
+	// timeDiff必须在所有timestamp更新完成后计算
+	// 这样可以确保序列号溢出等待下一毫秒后，使用的是新的timestamp
+	timeDiff := timestamp - Epoch
 
 	// 使用预计算的部分组装ID，减少位运算
 	id := (timeDiff << TimestampShift) | s.precomputedPart | s.sequence
