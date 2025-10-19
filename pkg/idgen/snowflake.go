@@ -59,13 +59,6 @@ var (
 
 	// ErrInvalidBatchSize 批量生成数量无效
 	ErrInvalidBatchSize = errors.New("invalid batch size")
-
-	// IDInfo对象池（减少内存分配）
-	idInfoPool = sync.Pool{
-		New: func() interface{} {
-			return &IDInfo{}
-		},
-	}
 )
 
 // ClockBackwardStrategy 时钟回拨处理策略
@@ -99,35 +92,6 @@ type IDGenerator interface {
 	NextID() (int64, error)
 	// NextIDBatch 批量生成ID
 	NextIDBatch(n int) ([]int64, error)
-}
-
-// IDParser 定义ID解析器接口（接口隔离原则）
-// 将解析功能与生成功能分离，提高灵活性
-type IDParser interface {
-	// Parse 解析ID，提取其中的各个组成部分
-	Parse(id int64) (*IDInfo, error)
-}
-
-// IDInfo ID解析后的信息结构体
-type IDInfo struct {
-	ID           int64     `json:"id"`            // 原始ID
-	Timestamp    int64     `json:"timestamp"`     // 时间戳（毫秒）
-	Time         time.Time `json:"time"`          // 时间对象
-	DatacenterID int64     `json:"datacenter_id"` // 数据中心ID
-	WorkerID     int64     `json:"worker_id"`     // 工作机器ID
-	Sequence     int64     `json:"sequence"`      // 序列号
-}
-
-// Release 释放IDInfo对象回对象池
-func (info *IDInfo) Release() {
-	// 清空数据避免内存泄漏
-	info.ID = 0
-	info.Timestamp = 0
-	info.Time = time.Time{}
-	info.DatacenterID = 0
-	info.WorkerID = 0
-	info.Sequence = 0
-	idInfoPool.Put(info)
 }
 
 // Snowflake Snowflake算法的ID生成器实现
@@ -293,43 +257,15 @@ func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
 	return timestamp
 }
 
-// Parse 解析Snowflake ID，提取其中的各个组成部分
-// 实现IDParser接口
-//
-// 参数:
-//
-//	id: 要解析的Snowflake ID
-//
-// 返回:
-//
-//	*IDInfo: ID信息结构体
-//	error: 解析失败时返回错误
-func (s *Snowflake) Parse(id int64) (*IDInfo, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("%w: got %d", ErrInvalidSnowflakeID, id)
-	}
-
-	// 从对象池获取IDInfo对象
-	info := idInfoPool.Get().(*IDInfo)
-
-	timestamp := (id >> TimestampShift) + Epoch
-
-	info.ID = id
-	info.Timestamp = timestamp
-	info.Time = time.UnixMilli(timestamp)
-	info.DatacenterID = (id >> DatacenterIDShift) & MaxDatacenterID
-	info.WorkerID = (id >> WorkerIDShift) & MaxWorkerID
-	info.Sequence = id & MaxSequence
-
-	return info, nil
-}
-
 // GetIDCount 获取已生成的ID总数（用于监控）
 //
 // 返回:
 //
-//	uint64: 已生成的ID数量
+//	uint64: 已生成的ID数量，如果未启用监控则返回0
 func (s *Snowflake) GetIDCount() uint64 {
+	if !s.enableMetrics || s.metrics == nil {
+		return 0
+	}
 	return s.metrics.IDCount.Load()
 }
 

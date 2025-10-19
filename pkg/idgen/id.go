@@ -5,11 +5,22 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ID 封装的ID类型，提供便捷的转换和序列化方法
 // 遵循单一职责原则：只负责ID的表示和转换
 type ID int64
+
+// IDInfo ID解析后的信息结构体
+type IDInfo struct {
+	ID           int64     `json:"id"`            // 原始ID
+	Timestamp    int64     `json:"timestamp"`     // 时间戳（毫秒）
+	Time         time.Time `json:"time"`          // 时间对象
+	DatacenterID int64     `json:"datacenter_id"` // 数据中心ID
+	WorkerID     int64     `json:"worker_id"`     // 工作机器ID
+	Sequence     int64     `json:"sequence"`      // 序列号
+}
 
 // NewID 创建新的ID实例
 //
@@ -248,7 +259,7 @@ func (ids IDSlice) Contains(id ID) bool {
 //	IDSlice: 去重后的ID切片
 func (ids IDSlice) Deduplicate() IDSlice {
 	if len(ids) == 0 {
-		return ids
+		return IDSlice{} // 返回新的空切片而不是原切片引用
 	}
 
 	seen := make(map[ID]bool, len(ids))
@@ -269,12 +280,19 @@ func (ids IDSlice) Deduplicate() IDSlice {
 //
 // 参数:
 //
-//	predicate: 过滤条件函数
+//	predicate: 过滤条件函数（不能为nil）
 //
 // 返回:
 //
 //	IDSlice: 过滤后的ID切片
 func (ids IDSlice) Filter(predicate func(ID) bool) IDSlice {
+	if predicate == nil {
+		// 如果predicate为nil，返回原切片的副本
+		result := make(IDSlice, len(ids))
+		copy(result, ids)
+		return result
+	}
+
 	result := make(IDSlice, 0, len(ids))
 	for _, id := range ids {
 		if predicate(id) {

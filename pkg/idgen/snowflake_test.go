@@ -282,34 +282,6 @@ func TestConcurrency(t *testing.T) {
 	}
 }
 
-// TestParse 测试ID解析
-func TestParse(t *testing.T) {
-	sf, err := NewSnowflake(10, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	id, err := sf.NextID()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	info, err := sf.Parse(id)
-	if err != nil {
-		t.Fatalf("解析ID失败: %v", err)
-	}
-
-	if info.ID != id {
-		t.Errorf("ID = %d, 期望 %d", info.ID, id)
-	}
-	if info.DatacenterID != 10 {
-		t.Errorf("DatacenterID = %d, 期望 10", info.DatacenterID)
-	}
-	if info.WorkerID != 20 {
-		t.Errorf("WorkerID = %d, 期望 20", info.WorkerID)
-	}
-}
-
 // TestValidateSnowflakeID 测试ID验证
 func TestValidateSnowflakeID(t *testing.T) {
 	sf, err := NewSnowflake(1, 1)
@@ -386,27 +358,6 @@ func BenchmarkNextIDBatch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := sf.NextIDBatch(100)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// BenchmarkParse 基准测试：解析ID
-func BenchmarkParse(b *testing.B) {
-	sf, err := NewSnowflake(1, 1)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	id, err := sf.NextID()
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := sf.Parse(id)
 		if err != nil {
 			b.Fatal(err)
 		}
