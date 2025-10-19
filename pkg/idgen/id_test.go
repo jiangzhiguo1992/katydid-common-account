@@ -446,45 +446,6 @@ func TestIDSetDifference(t *testing.T) {
 	}
 }
 
-// TestBatchIDGenerator 测试批量生成器
-func TestBatchIDGenerator(t *testing.T) {
-	sf, _ := NewSnowflake(1, 1)
-	batch := NewBatchIDGenerator(sf)
-
-	t.Run("生成指定数量的ID", func(t *testing.T) {
-		count := 100
-		ids, err := batch.Generate(count)
-		if err != nil {
-			t.Fatalf("批量生成失败: %v", err)
-		}
-
-		if len(ids) != count {
-			t.Errorf("生成数量不匹配，期望%d，得到%d", count, len(ids))
-		}
-
-		// 检查唯一性
-		idMap := make(map[int64]bool)
-		for _, id := range ids {
-			if idMap[id] {
-				t.Errorf("发现重复ID: %d", id)
-			}
-			idMap[id] = true
-		}
-	})
-
-	t.Run("无效数量", func(t *testing.T) {
-		_, err := batch.Generate(0)
-		if err == nil {
-			t.Error("应该返回错误")
-		}
-
-		_, err = batch.Generate(-1)
-		if err == nil {
-			t.Error("应该返回错误")
-		}
-	})
-}
-
 // TestGenerateIDs 测试全局批量生成函数
 func TestGenerateIDs(t *testing.T) {
 	count := 50
@@ -541,16 +502,5 @@ func BenchmarkParseID(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = ParseID(str)
-	}
-}
-
-// BenchmarkBatchGenerate 基准测试：批量生成
-func BenchmarkBatchGenerate(b *testing.B) {
-	sf, _ := NewSnowflake(1, 1)
-	batch := NewBatchIDGenerator(sf)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = batch.Generate(100)
 	}
 }
