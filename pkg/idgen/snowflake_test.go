@@ -136,7 +136,7 @@ func TestNextIDBatch(t *testing.T) {
 		{"批量生成1000个", 1000, false},
 		{"无效数量_负数", -1, true},
 		{"无效数量_零", 0, true},
-		{"无效数量_超过最大值", 5000, true},
+		{"无效数量_超过最大值", 150000, true}, // 修改为超过 maxBatchSize (100000) 的值
 	}
 
 	for _, tt := range tests {

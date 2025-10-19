@@ -37,8 +37,8 @@ const (
 	// 时钟回拨最大容忍时间（毫秒）
 	maxClockBackwardTolerance = 5
 
-	// 批量生成最大数量
-	maxBatchSize = 4096
+	// 批量生成最大数量（支持跨毫秒生成）
+	maxBatchSize = 100_000
 
 	// 等待策略最大重试次数
 	maxWaitRetries = 10

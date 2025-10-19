@@ -382,12 +382,21 @@ func (s IDSet) ToSlice() IDSlice {
 //
 // 参数:
 //
-//	other: 另一个ID集合
+//	other: 另一个ID集合（如果为nil，返回当前集合的副本）
 //
 // 返回:
 //
 //	IDSet: 并集结果
 func (s IDSet) Union(other IDSet) IDSet {
+	// nil 检查：如果 other 为 nil，返回当前集合的副本
+	if other == nil {
+		result := make(IDSet, len(s))
+		for id := range s {
+			result[id] = struct{}{}
+		}
+		return result
+	}
+
 	result := make(IDSet, len(s)+len(other))
 	for id := range s {
 		result[id] = struct{}{}
@@ -403,15 +412,26 @@ func (s IDSet) Union(other IDSet) IDSet {
 //
 // 参数:
 //
-//	other: 另一个ID集合
+//	other: 另一个ID集合（如果为nil，返回空集合）
 //
 // 返回:
 //
 //	IDSet: 交集结果
 func (s IDSet) Intersect(other IDSet) IDSet {
+	// nil 检查：如果 other 为 nil，交集为空
+	if other == nil {
+		return make(IDSet)
+	}
+
+	// 优化：选择较小的集合进行遍历
+	smaller, larger := s, other
+	if len(other) < len(s) {
+		smaller, larger = other, s
+	}
+
 	result := make(IDSet)
-	for id := range s {
-		if other.Contains(id) {
+	for id := range smaller {
+		if larger.Contains(id) {
 			result[id] = struct{}{}
 		}
 	}
@@ -423,12 +443,21 @@ func (s IDSet) Intersect(other IDSet) IDSet {
 //
 // 参数:
 //
-//	other: 另一个ID集合
+//	other: 另一个ID集合（如果为nil，返回当前集合的副本）
 //
 // 返回:
 //
 //	IDSet: 差集结果
 func (s IDSet) Difference(other IDSet) IDSet {
+	// nil 检查：如果 other 为 nil，返回当前集合的副本
+	if other == nil {
+		result := make(IDSet, len(s))
+		for id := range s {
+			result[id] = struct{}{}
+		}
+		return result
+	}
+
 	result := make(IDSet)
 	for id := range s {
 		if !other.Contains(id) {
@@ -436,4 +465,54 @@ func (s IDSet) Difference(other IDSet) IDSet {
 		}
 	}
 	return result
+}
+
+// IsEmpty 检查集合是否为空
+//
+// 返回:
+//
+//	bool: 如果集合为空返回true
+func (s IDSet) IsEmpty() bool {
+	return len(s) == 0
+}
+
+// Clear 清空集合中的所有元素
+func (s IDSet) Clear() {
+	for id := range s {
+		delete(s, id)
+	}
+}
+
+// Clone 克隆集合，返回一个新的独立副本
+//
+// 返回:
+//
+//	IDSet: 集合的副本
+func (s IDSet) Clone() IDSet {
+	result := make(IDSet, len(s))
+	for id := range s {
+		result[id] = struct{}{}
+	}
+	return result
+}
+
+// Equal 检查两个集合是否相等
+//
+// 参数:
+//
+//	other: 另一个ID集合
+//
+// 返回:
+//
+//	bool: 如果两个集合包含相同的元素返回true
+func (s IDSet) Equal(other IDSet) bool {
+	if len(s) != len(other) {
+		return false
+	}
+	for id := range s {
+		if !other.Contains(id) {
+			return false
+		}
+	}
+	return true
 }

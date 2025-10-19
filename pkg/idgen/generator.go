@@ -384,11 +384,27 @@ var defaultSnowflakeOnce sync.Once
 //	IDGenerator: 默认生成器实例
 //	error: 创建失败时返回错误
 func GetDefaultGenerator() (IDGenerator, error) {
-	var err error
+	var initErr error
 	defaultSnowflakeOnce.Do(func() {
+		var err error
 		defaultSnowflake, err = NewSnowflake(0, 0)
+		if err != nil {
+			// 将错误保存到外部变量，避免闭包陷阱
+			initErr = err
+		}
 	})
-	return defaultSnowflake, err
+
+	// 如果初始化失败，返回错误
+	if initErr != nil {
+		return nil, initErr
+	}
+
+	// 如果生成器为 nil（理论上不应该发生，但增加防御性检查）
+	if defaultSnowflake == nil {
+		return nil, errors.New("default generator initialization failed")
+	}
+
+	return defaultSnowflake, nil
 }
 
 // GenerateID 使用默认生成器生成ID的便捷函数
@@ -410,17 +426,22 @@ func GenerateID() (int64, error) {
 	return gen.NextID()
 }
 
+// GenerateIDs 使用默认生成器批量生成ID的便捷函数
+// 适合需要一次性生成多个ID的场景
+//
+// 参数:
+//
+//	count: 要生成的ID数量，必须在 [1, 100000] 范围内
+//
+// 返回:
+//
+//	[]int64: 生成的ID列表
+//	error: 生成失败时返回错误
+//
+// 示例:
+//
+//	ids, err := GenerateIDs(100)
 func GenerateIDs(count int) ([]int64, error) {
-	if count <= 0 {
-		return nil, fmt.Errorf("count must be positive, got %d", count)
-	}
-
-	// 限制单次批量生成的最大数量，防止内存溢出
-	const maxBatchCount = 100_000
-	if count > maxBatchCount {
-		return nil, fmt.Errorf("count too large (max %d), got %d", maxBatchCount, count)
-	}
-
 	gen, err := GetDefaultGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default generator: %w", err)
