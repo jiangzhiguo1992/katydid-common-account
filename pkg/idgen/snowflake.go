@@ -81,6 +81,14 @@ const (
 	StrategyUseLastTimestamp
 )
 
+// IDGenerator 定义ID生成器接口
+type IDGenerator interface {
+	// NextID 生成下一个唯一ID
+	NextID() (int64, error)
+	// NextIDBatch 批量生成ID
+	NextIDBatch(n int) ([]int64, error)
+}
+
 // Snowflake Snowflake算法的ID生成器实现
 type Snowflake struct {
 	lastTimestamp int64 // 上次生成ID的时间戳
@@ -106,14 +114,6 @@ type SnowflakeConfig struct {
 	ClockBackwardStrategy  ClockBackwardStrategy // 时钟回拨处理策略（可选，默认StrategyError）
 	ClockBackwardTolerance int64                 // 时钟回拨容忍时间（毫秒，可选，默认5ms）
 	EnableMetrics          bool                  // 是否启用监控
-}
-
-// IDGenerator 定义ID生成器接口
-type IDGenerator interface {
-	// NextID 生成下一个唯一ID
-	NextID() (int64, error)
-	// NextIDBatch 批量生成ID
-	NextIDBatch(n int) ([]int64, error)
 }
 
 // Metrics 性能监控指标

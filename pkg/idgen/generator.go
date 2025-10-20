@@ -32,40 +32,31 @@ const (
 
 	// 预留其他生成器类型
 	// UUIDGeneratorType     GeneratorType = "uuid"
-	// ObjectIDGeneratorType GeneratorType = "objectid"
+	// ObjectIDGeneratorType GeneratorType = "objectId"
 
 	// 默认最大生成器数量，防止内存泄漏
 	defaultMaxGenerators = 1000
 )
 
-// GeneratorFactory ID生成器工厂接口（抽象工厂模式）
-// 遵循开放封闭原则，支持扩展新的生成器类型
+// GeneratorFactory ID生成器工厂接口
 type GeneratorFactory interface {
-	// Create 创建指定类型的ID生成器
-	Create(generatorType GeneratorType, config interface{}) (IDGenerator, error)
+	Create(config any) (IDGenerator, error)
 }
 
-// GeneratorRegistry 生成器注册表（单例模式）
-// 用于管理不同类型的ID生成器工厂
+// GeneratorRegistry 生成器注册表（用于管理不同类型的ID生成器工厂）
 type GeneratorRegistry struct {
+	factories     map[GeneratorType]GeneratorFactory // 已注册的生成器工厂
+	generators    map[string]IDGenerator             // 缓存已创建的生成器实例
+	maxGenerators int                                // 最大生成器数量限制
 	mu            sync.RWMutex
-	factories     map[GeneratorType]GeneratorFactory
-	generators    map[string]IDGenerator // 缓存已创建的生成器实例
-	maxGenerators int                    // 最大生成器数量限制
 }
 
 var (
-	// 全局单例实例
-	registryInstance *GeneratorRegistry
-	registryOnce     sync.Once
+	registryInstance *GeneratorRegistry // 生成器注册表单例
+	registryOnce     sync.Once          // 单例初始化控制
 )
 
-// GetRegistry 获取生成器注册表的单例实例
-// 线程安全，使用sync.Once确保只初始化一次
-//
-// 返回:
-//
-//	*GeneratorRegistry: 注册表单例实例
+// GetRegistry 获取生成器注册表的单例实例（线程安全）
 func GetRegistry() *GeneratorRegistry {
 	registryOnce.Do(func() {
 		registryInstance = &GeneratorRegistry{
@@ -80,16 +71,17 @@ func GetRegistry() *GeneratorRegistry {
 	return registryInstance
 }
 
+// NewGenerator 便捷函数：创建ID生成器（简化生成器的创建过程）
+func NewGenerator(key string, generatorType GeneratorType, config any) (IDGenerator, error) {
+	return GetRegistry().CreateGenerator(key, generatorType, config)
+}
+
+// GetGeneratorFromRegistry 从注册表获取已缓存的生成器
+func GetGeneratorFromRegistry(key string) (IDGenerator, bool) {
+	return GetRegistry().GetGenerator(key)
+}
+
 // RegisterFactory 注册生成器工厂
-//
-// 参数:
-//
-//	generatorType: 生成器类型
-//	factory: 生成器工厂实例
-//
-// 返回:
-//
-//	error: 注册失败时返回错误
 func (r *GeneratorRegistry) RegisterFactory(generatorType GeneratorType, factory GeneratorFactory) error {
 	if generatorType == "" {
 		return ErrInvalidGeneratorType
@@ -110,20 +102,8 @@ func (r *GeneratorRegistry) RegisterFactory(generatorType GeneratorType, factory
 	return nil
 }
 
-// CreateGenerator 创建ID生成器（工厂方法）
-// 如果已存在相同key的生成器，直接返回缓存的实例
-//
-// 参数:
-//
-//	key: 生成器唯一标识（用于缓存）
-//	generatorType: 生成器类型
-//	config: 生成器配置
-//
-// 返回:
-//
-//	IDGenerator: 生成器实例
-//	error: 创建失败时返回错误
-func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorType, config interface{}) (IDGenerator, error) {
+// CreateGenerator 创建ID生成器（如果已存在相同key的生成器，直接返回缓存的实例）
+func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorType, config any) (IDGenerator, error) {
 	// 验证key不为空
 	if key == "" {
 		return nil, ErrInvalidGeneratorKey
@@ -163,7 +143,7 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 	}
 
 	// 创建生成器（在锁外执行，避免长时间持有锁）
-	generator, err := factory.Create(generatorType, config)
+	generator, err := factory.Create(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create generator: %w", err)
 	}
@@ -306,23 +286,8 @@ func (r *GeneratorRegistry) ListGeneratorKeys() []string {
 // SnowflakeFactory Snowflake生成器工厂
 type SnowflakeFactory struct{}
 
-// Create 创建Snowflake生成器
-// 实现GeneratorFactory接口
-//
-// 参数:
-//
-//	generatorType: 生成器类型（必须为SnowflakeGeneratorType）
-//	config: 配置对象（*SnowflakeConfig类型）
-//
-// 返回:
-//
-//	IDGenerator: Snowflake生成器实例
-//	error: 创建失败时返回错误
-func (f *SnowflakeFactory) Create(generatorType GeneratorType, config interface{}) (IDGenerator, error) {
-	if generatorType != SnowflakeGeneratorType {
-		return nil, fmt.Errorf("unsupported generator type: %s", generatorType)
-	}
-
+// Create 创建Snowflake生成器（实现GeneratorFactory接口）
+func (f *SnowflakeFactory) Create(config any) (IDGenerator, error) {
 	// 类型断言
 	sfConfig, ok := config.(*SnowflakeConfig)
 	if !ok {
@@ -332,57 +297,14 @@ func (f *SnowflakeFactory) Create(generatorType GeneratorType, config interface{
 	return NewSnowflakeWithConfig(sfConfig)
 }
 
-// NewGenerator 便捷函数：创建ID生成器
-// 这是一个全局函数，简化生成器的创建过程
-//
-// 参数:
-//
-//	key: 生成器唯一标识
-//	generatorType: 生成器类型
-//	config: 生成器配置
-//
-// 返回:
-//
-//	IDGenerator: 生成器实例
-//	error: 创建失败时返回错误
-//
-// 示例:
-//
-//	gen, err := NewGenerator("server-1", SnowflakeGeneratorType, &SnowflakeConfig{
-//	    DatacenterID: 1,
-//	    WorkerID: 1,
-//	})
-func NewGenerator(key string, generatorType GeneratorType, config interface{}) (IDGenerator, error) {
-	return GetRegistry().CreateGenerator(key, generatorType, config)
-}
-
-// GetGeneratorFromRegistry 从注册表获取已缓存的生成器
-// 这是一个全局函数
-//
-// 参数:
-//
-//	key: 生成器唯一标识
-//
-// 返回:
-//
-//	IDGenerator: 生成器实例
-//	bool: 是否找到
-func GetGeneratorFromRegistry(key string) (IDGenerator, bool) {
-	return GetRegistry().GetGenerator(key)
-}
-
 // DefaultSnowflakeGenerator 默认的Snowflake生成器
 // 使用datacenterID=0, workerID=0
-var defaultSnowflake IDGenerator
-var defaultSnowflakeOnce sync.Once
+var (
+	defaultSnowflake     IDGenerator
+	defaultSnowflakeOnce sync.Once
+)
 
-// GetDefaultGenerator 获取默认的Snowflake生成器（单例）
-// 适用于简单场景，不需要手动配置
-//
-// 返回:
-//
-//	IDGenerator: 默认生成器实例
-//	error: 创建失败时返回错误
+// GetDefaultGenerator 获取默认的Snowflake生成器（适用于简单场景，不需要手动配置）
 func GetDefaultGenerator() (IDGenerator, error) {
 	var initErr error
 	defaultSnowflakeOnce.Do(func() {
@@ -407,17 +329,7 @@ func GetDefaultGenerator() (IDGenerator, error) {
 	return defaultSnowflake, nil
 }
 
-// GenerateID 使用默认生成器生成ID的便捷函数
-// 这是最简单的使用方式，适合快速原型开发
-//
-// 返回:
-//
-//	int64: 生成的ID
-//	error: 生成失败时返回错误
-//
-// 示例:
-//
-//	id, err := GenerateID()
+// GenerateID 使用默认生成器生成ID的便捷函数（这是最简单的使用方式，适合快速原型开发）
 func GenerateID() (int64, error) {
 	gen, err := GetDefaultGenerator()
 	if err != nil {
@@ -426,21 +338,7 @@ func GenerateID() (int64, error) {
 	return gen.NextID()
 }
 
-// GenerateIDs 使用默认生成器批量生成ID的便捷函数
-// 适合需要一次性生成多个ID的场景
-//
-// 参数:
-//
-//	count: 要生成的ID数量，必须在 [1, 100000] 范围内
-//
-// 返回:
-//
-//	[]int64: 生成的ID列表
-//	error: 生成失败时返回错误
-//
-// 示例:
-//
-//	ids, err := GenerateIDs(100)
+// GenerateIDs 使用默认生成器批量生成ID的便捷函数（适合需要一次性生成多个ID的场景）
 func GenerateIDs(count int) ([]int64, error) {
 	gen, err := GetDefaultGenerator()
 	if err != nil {
