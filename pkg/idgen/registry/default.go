@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"fmt"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"

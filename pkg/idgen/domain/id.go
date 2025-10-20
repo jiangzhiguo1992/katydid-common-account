@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"katydid-common-account/pkg/idgen/core"
-	"katydid-common-account/pkg/idgen/snowflake"
+	"katydid-common-account/pkg/idgen/registry"
 )
 
 const (
@@ -16,6 +16,8 @@ const (
 	maxSafeInteger = 9007199254740991
 	// 解析ID字符串的最大长度（防止DoS攻击）
 	maxParseIDStringLength = 100
+	// 默认使用的生成器类型（用于解析和验证）
+	defaultGeneratorType = core.GeneratorTypeSnowflake
 )
 
 // ID ID类型定义（强类型，类型安全）
@@ -139,41 +141,92 @@ func (id ID) IsSafeForJavaScript() bool {
 	return int64(id) >= 0 && int64(id) <= maxSafeInteger
 }
 
-// Validate 验证ID的有效性（包含Snowflake格式验证）
+// Validate 验证ID的有效性（依赖倒置：通过注册表获取验证器）
 func (id ID) Validate() error {
-	return snowflake.ValidateSnowflakeID(int64(id))
+	return id.ValidateWithType(defaultGeneratorType)
 }
 
-// Parse 解析ID信息（仅适用于Snowflake ID）
+// ValidateWithType 使用指定生成器类型验证ID
+func (id ID) ValidateWithType(generatorType core.GeneratorType) error {
+	validator, err := registry.GetValidatorRegistry().Get(generatorType)
+	if err != nil {
+		return fmt.Errorf("failed to get validator: %w", err)
+	}
+	return validator.Validate(int64(id))
+}
+
+// Parse 解析ID信息（依赖倒置：通过注册表获取解析器）
 func (id ID) Parse() (*core.IDInfo, error) {
+	return id.ParseWithType(defaultGeneratorType)
+}
+
+// ParseWithType 使用指定生成器类型解析ID
+func (id ID) ParseWithType(generatorType core.GeneratorType) (*core.IDInfo, error) {
 	if !id.IsValid() {
 		return nil, fmt.Errorf("%w: got %d", core.ErrInvalidSnowflakeID, id)
 	}
 
-	parser := snowflake.NewParser()
+	parser, err := registry.GetParserRegistry().Get(generatorType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get parser: %w", err)
+	}
+
 	return parser.Parse(int64(id))
 }
 
-// ExtractTime 提取时间戳
+// ExtractTime 提取时间戳（依赖倒置：通过注册表获取解析器）
 func (id ID) ExtractTime() time.Time {
-	parser := snowflake.NewParser()
-	return parser.ExtractTimestamp(int64(id))
+	return id.ExtractTimeWithType(defaultGeneratorType)
 }
 
-// ExtractDatacenterID 提取数据中心ID
+// ExtractTimeWithType 使用指定生成器类型提取时间戳
+func (id ID) ExtractTimeWithType(generatorType core.GeneratorType) time.Time {
+	parser, err := registry.GetParserRegistry().Get(generatorType)
+	if err != nil {
+		return time.Time{} // 返回零值时间
+	}
+	timestamp := parser.ExtractTimestamp(int64(id))
+	return time.UnixMilli(timestamp)
+}
+
+// ExtractDatacenterID 提取数据中心ID（依赖倒置）
 func (id ID) ExtractDatacenterID() int64 {
-	parser := snowflake.NewParser()
+	return id.ExtractDatacenterIDWithType(defaultGeneratorType)
+}
+
+// ExtractDatacenterIDWithType 使用指定生成器类型提取数据中心ID
+func (id ID) ExtractDatacenterIDWithType(generatorType core.GeneratorType) int64 {
+	parser, err := registry.GetParserRegistry().Get(generatorType)
+	if err != nil {
+		return 0
+	}
 	return parser.ExtractDatacenterID(int64(id))
 }
 
-// ExtractWorkerID 提取工作机器ID
+// ExtractWorkerID 提取工作机器ID（依赖倒置）
 func (id ID) ExtractWorkerID() int64 {
-	parser := snowflake.NewParser()
+	return id.ExtractWorkerIDWithType(defaultGeneratorType)
+}
+
+// ExtractWorkerIDWithType 使用指定生成器类型提取工作机器ID
+func (id ID) ExtractWorkerIDWithType(generatorType core.GeneratorType) int64 {
+	parser, err := registry.GetParserRegistry().Get(generatorType)
+	if err != nil {
+		return 0
+	}
 	return parser.ExtractWorkerID(int64(id))
 }
 
-// ExtractSequence 提取序列号
+// ExtractSequence 提取序列号（依赖倒置）
 func (id ID) ExtractSequence() int64 {
-	parser := snowflake.NewParser()
+	return id.ExtractSequenceWithType(defaultGeneratorType)
+}
+
+// ExtractSequenceWithType 使用指定生成器类型提取序列号
+func (id ID) ExtractSequenceWithType(generatorType core.GeneratorType) int64 {
+	parser, err := registry.GetParserRegistry().Get(generatorType)
+	if err != nil {
+		return 0
+	}
 	return parser.ExtractSequence(int64(id))
 }

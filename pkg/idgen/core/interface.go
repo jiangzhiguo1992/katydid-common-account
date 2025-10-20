@@ -74,3 +74,25 @@ type IDInfo struct {
 	WorkerID     int64 // 工作机器ID
 	Sequence     int64 // 序列号
 }
+
+// IDParser ID解析器接口（依赖倒置：domain包依赖此接口而非具体实现）
+type IDParser interface {
+	// Parse 解析ID，提取元信息
+	Parse(id int64) (*IDInfo, error)
+	// ExtractTimestamp 提取时间戳（Unix毫秒）
+	ExtractTimestamp(id int64) int64
+	// ExtractDatacenterID 提取数据中心ID
+	ExtractDatacenterID(id int64) int64
+	// ExtractWorkerID 提取工作机器ID
+	ExtractWorkerID(id int64) int64
+	// ExtractSequence 提取序列号
+	ExtractSequence(id int64) int64
+}
+
+// IDValidator ID验证器接口（依赖倒置）
+type IDValidator interface {
+	// Validate 验证ID的有效性
+	Validate(id int64) error
+	// ValidateBatch 批量验证ID
+	ValidateBatch(ids []int64) error
+}

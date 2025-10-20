@@ -35,14 +35,18 @@ type FactoryRegistry struct {
 // globalFactoryRegistry 全局工厂注册表实例
 var globalFactoryRegistry *FactoryRegistry
 
-// init 初始化全局工厂注册表，注册默认工厂
+// init 初始化全局工厂注册表，注册默认工厂、解析器和验证器
 func init() {
 	globalFactoryRegistry = &FactoryRegistry{
 		factories: make(map[core.GeneratorType]core.GeneratorFactory),
 	}
 
 	// 注册Snowflake工厂
-	globalFactoryRegistry.Register(core.GeneratorTypeSnowflake, NewSnowflakeFactory())
+	_ = globalFactoryRegistry.Register(core.GeneratorTypeSnowflake, NewSnowflakeFactory())
+
+	// 注册Snowflake解析器和验证器（依赖倒置：通过接口注册）
+	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
+	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
 }
 
 // GetFactoryRegistry 获取全局工厂注册表

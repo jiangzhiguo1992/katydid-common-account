@@ -8,6 +8,7 @@ import (
 )
 
 // Validator Snowflake ID验证器（单一职责：只负责ID验证）
+// 实现core.IDValidator接口（里氏替换原则）
 type Validator struct{}
 
 // NewValidator 创建新的验证器实例
@@ -16,6 +17,7 @@ func NewValidator() *Validator {
 }
 
 // Validate 验证Snowflake ID的有效性
+// 实现core.IDValidator接口
 func (v *Validator) Validate(id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("%w: id must be positive", core.ErrInvalidSnowflakeID)
@@ -41,6 +43,7 @@ func (v *Validator) Validate(id int64) error {
 }
 
 // ValidateBatch 批量验证ID
+// 实现core.IDValidator接口
 func (v *Validator) ValidateBatch(ids []int64) error {
 	for i, id := range ids {
 		if err := v.Validate(id); err != nil {
