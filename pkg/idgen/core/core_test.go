@@ -161,29 +161,158 @@ func TestErrorsIs(t *testing.T) {
 	}
 }
 
-// BenchmarkGeneratorTypeString 基准测试：生成器类型转字符串
-func BenchmarkGeneratorTypeString(b *testing.B) {
-	genType := GeneratorTypeSnowflake
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = genType.String()
+// ========== 高并发百万级测试（多维度性能分析） ==========
+
+// TestGeneratorType_Concurrent 测试GeneratorType并发安全性
+func TestGeneratorType_Concurrent(t *testing.T) {
+	types := []GeneratorType{
+		GeneratorTypeSnowflake,
+		GeneratorTypeUUID,
+		GeneratorTypeCustom,
+		GeneratorType("invalid"),
+	}
+
+	const goroutines = 1000
+	const iterations = 1000
+
+	errors := make(chan error, goroutines*iterations)
+	done := make(chan struct{})
+
+	// 并发测试类型验证
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				for _, t := range types {
+					_ = t.String()
+					_ = t.IsValid()
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	// 等待所有协程完成
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+	close(errors)
+
+	// 检查错误
+	for err := range errors {
+		if err != nil {
+			t.Errorf("并发测试失败: %v", err)
+		}
 	}
 }
 
-// BenchmarkGeneratorTypeIsValid 基准测试：生成器类型验证
-func BenchmarkGeneratorTypeIsValid(b *testing.B) {
-	genType := GeneratorTypeSnowflake
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = genType.IsValid()
+// TestClockBackwardStrategy_Concurrent 测试ClockBackwardStrategy并发安全性
+func TestClockBackwardStrategy_Concurrent(t *testing.T) {
+	strategies := []ClockBackwardStrategy{
+		StrategyError,
+		StrategyWait,
+		StrategyUseLastTimestamp,
+	}
+
+	const goroutines = 1000
+	const iterations = 1000
+
+	done := make(chan struct{})
+
+	// 并发测试策略
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				for _, s := range strategies {
+					_ = s.String()
+					_ = s.IsValid()
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	// 等待完成
+	for i := 0; i < goroutines; i++ {
+		<-done
 	}
 }
 
-// BenchmarkClockBackwardStrategyString 基准测试：策略转字符串
-func BenchmarkClockBackwardStrategyString(b *testing.B) {
-	strategy := StrategyError
+// TestErrors_Concurrent 测试错误常量并发访问
+func TestErrors_Concurrent(t *testing.T) {
+	errorList := []error{
+		ErrInvalidWorkerID,
+		ErrInvalidDatacenterID,
+		ErrClockMovedBackwards,
+		ErrInvalidSnowflakeID,
+		ErrInvalidBatchSize,
+		ErrNilConfig,
+		ErrGeneratorNotFound,
+		ErrGeneratorAlreadyExists,
+		ErrInvalidGeneratorType,
+		ErrInvalidKey,
+		ErrFactoryNotFound,
+		ErrMaxGeneratorsReached,
+		ErrParserNotFound,
+		ErrValidatorNotFound,
+		ErrInvalidKeyFormat,
+	}
+
+	const goroutines = 1000
+	const iterations = 10000
+
+	done := make(chan struct{})
+
+	// 并发读取错误常量
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				for _, err := range errorList {
+					_ = err.Error()
+					_ = errors.Is(err, err)
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	// 等待完成
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+}
+
+// BenchmarkGeneratorType_String 基准测试：GeneratorType.String()
+func BenchmarkGeneratorType_String(b *testing.B) {
+	gt := GeneratorTypeSnowflake
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = strategy.String()
+		_ = gt.String()
+	}
+}
+
+// BenchmarkGeneratorType_IsValid 基准测试：GeneratorType.IsValid()
+func BenchmarkGeneratorType_IsValid(b *testing.B) {
+	gt := GeneratorTypeSnowflake
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = gt.IsValid()
+	}
+}
+
+// BenchmarkClockBackwardStrategy_String 基准测试：Strategy.String()
+func BenchmarkClockBackwardStrategy_String(b *testing.B) {
+	s := StrategyWait
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.String()
+	}
+}
+
+// BenchmarkClockBackwardStrategy_IsValid 基准测试：Strategy.IsValid()
+func BenchmarkClockBackwardStrategy_IsValid(b *testing.B) {
+	s := StrategyWait
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.IsValid()
 	}
 }

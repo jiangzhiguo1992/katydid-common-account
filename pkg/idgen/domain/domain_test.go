@@ -2,6 +2,9 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -392,9 +395,335 @@ func TestIDSet(t *testing.T) {
 	})
 }
 
-// BenchmarkIDString 基准测试：ID转字符串
-func BenchmarkIDString(b *testing.B) {
-	id := NewID(9223372036854775807)
+// ========== 高并发百万级测试（多维度性能分析） ==========
+
+// TestID_ParseConcurrent 测试并发解析ID
+func TestID_ParseConcurrent(t *testing.T) {
+	testStrings := []string{
+		"123456789",
+		"0x1a2b3c",
+		"0b1010101",
+		"9007199254740991", // maxSafeInteger
+	}
+
+	const goroutines = 1000
+	const iterations = 1000
+
+	var errorCount int64
+	done := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				for _, s := range testStrings {
+					_, err := ParseID(s)
+					if err != nil {
+						atomic.AddInt64(&errorCount, 1)
+					}
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	if errorCount > 0 {
+		t.Logf("并发解析错误数: %d", errorCount)
+	}
+}
+
+// TestID_MethodsConcurrent 测试ID方法的并发安全性
+func TestID_MethodsConcurrent(t *testing.T) {
+	id := NewID(123456789)
+
+	const goroutines = 1000
+	const iterations = 10000
+
+	done := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				_ = id.Int64()
+				_ = id.String()
+				_ = id.Hex()
+				_ = id.Binary()
+				_ = id.IsZero()
+				_ = id.IsValid()
+				_ = id.IsSafeForJS()
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+}
+
+// TestIDSlice_ConcurrentOperations 测试IDSlice并发操作
+func TestIDSlice_ConcurrentOperations(t *testing.T) {
+	// 创建测试数据
+	ids := make([]ID, 10000)
+	for i := range ids {
+		ids[i] = NewID(int64(i))
+	}
+	slice := NewIDSlice(ids...)
+
+	const goroutines = 100
+	const iterations = 1000
+
+	done := make(chan struct{})
+
+	// 并发读取操作（只读，线程安全）
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				_ = slice.Len()
+				_ = slice.IsEmpty()
+				_ = slice.Int64Slice()
+				_ = slice.StringSlice()
+				_, _ = slice.First()
+				_, _ = slice.Last()
+				_ = slice.Contains(NewID(100))
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+}
+
+// TestIDSet_ConcurrentOperations 测试IDSet并发操作
+func TestIDSet_ConcurrentOperations(t *testing.T) {
+	set := NewIDSet()
+
+	const goroutines = 100
+	const idsPerGoroutine = 10000
+	const totalIDs = goroutines * idsPerGoroutine
+
+	var wg sync.WaitGroup
+	var addErrors int64
+	var duplicates int64
+
+	// 并发添加
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(start int) {
+			defer wg.Done()
+			for j := 0; j < idsPerGoroutine; j++ {
+				id := NewID(int64(start*idsPerGoroutine + j))
+				if !set.Add(id) {
+					atomic.AddInt64(&duplicates, 1)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// 验证
+	t.Logf("添加错误数: %d", addErrors)
+	t.Logf("重复数: %d", duplicates)
+	t.Logf("集合大小: %d (期望: %d)", set.Len(), totalIDs)
+
+	if duplicates > 0 {
+		t.Errorf("发现 %d 个重复添加", duplicates)
+	}
+
+	if set.Len() != totalIDs {
+		t.Errorf("集合大小 %d 不等于期望 %d", set.Len(), totalIDs)
+	}
+}
+
+// TestIDSet_ConcurrentReadWrite 测试IDSet并发读写
+func TestIDSet_ConcurrentReadWrite(t *testing.T) {
+	set := NewIDSet()
+
+	// 预填充一些数据
+	for i := 0; i < 5000; i++ {
+		set.Add(NewID(int64(i)))
+	}
+
+	const goroutines = 50
+	const operations = 1000
+
+	var wg sync.WaitGroup
+
+	// 并发读写
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
+				// 读操作
+				_ = set.Contains(NewID(int64(j)))
+				_ = set.Len()
+
+				// 写操作
+				if j%2 == 0 {
+					set.Add(NewID(int64(10000 + idx*operations + j)))
+				} else {
+					set.Remove(NewID(int64(j)))
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	t.Logf("最终集合大小: %d", set.Len())
+}
+
+// TestID_MillionParsing 测试百万次ID解析
+func TestID_MillionParsing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级测试")
+	}
+
+	testCases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"十进制", "123456789", false},
+		{"十六进制", "0x1a2b3c4d", false},
+		{"二进制", "0b101010", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			const iterations = 1_000_000
+
+			var successCount int64
+			var errorCount int64
+
+			for i := 0; i < iterations; i++ {
+				_, err := ParseID(tc.input)
+				if err != nil {
+					atomic.AddInt64(&errorCount, 1)
+				} else {
+					atomic.AddInt64(&successCount, 1)
+				}
+			}
+
+			t.Logf("成功: %d, 错误: %d", successCount, errorCount)
+
+			if tc.wantErr {
+				if errorCount != iterations {
+					t.Errorf("期望所有解析都失败")
+				}
+			} else {
+				if successCount != iterations {
+					t.Errorf("期望所有解析都成功")
+				}
+			}
+		})
+	}
+}
+
+// TestIDSlice_MillionOperations 测试IDSlice百万次操作
+func TestIDSlice_MillionOperations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级测试")
+	}
+
+	// 创建测试切片
+	const sliceSize = 100000
+	ids := make([]ID, sliceSize)
+	for i := range ids {
+		ids[i] = NewID(int64(i))
+	}
+	slice := NewIDSlice(ids...)
+
+	t.Run("Contains_百万次", func(t *testing.T) {
+		const iterations = 1_000_000
+
+		for i := 0; i < iterations; i++ {
+			_ = slice.Contains(NewID(int64(i % sliceSize)))
+		}
+
+		t.Logf("完成 %d 次Contains操作", iterations)
+	})
+
+	t.Run("Conversion_百万次", func(t *testing.T) {
+		const iterations = 10000
+
+		for i := 0; i < iterations; i++ {
+			_ = slice.Int64Slice()
+			_ = slice.StringSlice()
+		}
+
+		t.Logf("完成 %d 次转换操作", iterations*2)
+	})
+}
+
+// TestIDSet_MillionOperations 测试IDSet百万次操作
+func TestIDSet_MillionOperations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级测试")
+	}
+
+	set := NewIDSet()
+
+	t.Run("Add_百万次", func(t *testing.T) {
+		const iterations = 1_000_000
+
+		for i := 0; i < iterations; i++ {
+			set.Add(NewID(int64(i)))
+		}
+
+		if set.Len() != iterations {
+			t.Errorf("集合大小 %d 不等于期望 %d", set.Len(), iterations)
+		}
+
+		t.Logf("成功添加 %d 个元素", set.Len())
+	})
+
+	t.Run("Contains_百万次", func(t *testing.T) {
+		const iterations = 1_000_000
+
+		foundCount := 0
+		for i := 0; i < iterations; i++ {
+			if set.Contains(NewID(int64(i))) {
+				foundCount++
+			}
+		}
+
+		if foundCount != iterations {
+			t.Errorf("找到 %d 个元素，期望 %d", foundCount, iterations)
+		}
+
+		t.Logf("成功查找 %d 次", foundCount)
+	})
+}
+
+// BenchmarkID_ParseDecimal 基准测试：解析十进制
+func BenchmarkID_ParseDecimal(b *testing.B) {
+	s := "123456789"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ParseID(s)
+	}
+}
+
+// BenchmarkID_ParseHex 基准测试：解析十六进制
+func BenchmarkID_ParseHex(b *testing.B) {
+	s := "0x1a2b3c4d"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ParseID(s)
+	}
+}
+
+// BenchmarkID_String 基准测试：转换为字符串
+func BenchmarkID_String(b *testing.B) {
+	id := NewID(123456789)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = id.String()
