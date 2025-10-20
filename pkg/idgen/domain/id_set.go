@@ -1,10 +1,16 @@
 package domain
 
+import "fmt"
+
 // IDSet ID集合类型，提供集合操作（使用map实现，查找性能O(1)）
 type IDSet map[ID]struct{}
 
 // NewIDSet 创建新的ID集合
 func NewIDSet(ids ...ID) IDSet {
+	if ids == nil {
+		return make(IDSet)
+	}
+
 	if len(ids) > maxSliceLength {
 		ids = ids[:maxSliceLength]
 	}
@@ -150,6 +156,13 @@ func (s IDSet) Clone() IDSet {
 
 // Equal 检查两个集合是否相等
 func (s IDSet) Equal(other IDSet) bool {
+	if s == nil && other == nil {
+		return true
+	}
+	if s == nil || other == nil {
+		return false
+	}
+
 	if len(s) != len(other) {
 		return false
 	}
@@ -165,7 +178,7 @@ func (s IDSet) Equal(other IDSet) bool {
 func (s IDSet) ValidateAll() error {
 	for id := range s {
 		if err := id.Validate(); err != nil {
-			return err
+			return fmt.Errorf("invalid ID %d: %w", id, err)
 		}
 	}
 	return nil

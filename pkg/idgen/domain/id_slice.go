@@ -12,6 +12,9 @@ type IDSlice []ID
 
 // NewIDSlice 创建新的ID切片
 func NewIDSlice(ids ...ID) IDSlice {
+	if ids == nil {
+		return IDSlice{}
+	}
 	if len(ids) > maxSliceLength {
 		ids = ids[:maxSliceLength]
 	}

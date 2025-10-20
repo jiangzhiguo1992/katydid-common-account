@@ -20,7 +20,7 @@ func NewValidator() *Validator {
 // 实现core.IDValidator接口
 func (v *Validator) Validate(id int64) error {
 	if id <= 0 {
-		return fmt.Errorf("%w: id must be positive", core.ErrInvalidSnowflakeID)
+		return fmt.Errorf("%w: id must be positive, got %d", core.ErrInvalidSnowflakeID, id)
 	}
 
 	// 提取时间戳
@@ -45,6 +45,14 @@ func (v *Validator) Validate(id int64) error {
 // ValidateBatch 批量验证ID
 // 实现core.IDValidator接口
 func (v *Validator) ValidateBatch(ids []int64) error {
+	if ids == nil {
+		return fmt.Errorf("ids slice cannot be nil")
+	}
+
+	if len(ids) == 0 {
+		return nil // 空切片视为有效
+	}
+
 	for i, id := range ids {
 		if err := v.Validate(id); err != nil {
 			return fmt.Errorf("invalid ID at index %d: %w", i, err)

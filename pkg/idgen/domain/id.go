@@ -30,6 +30,11 @@ func NewID(val int64) ID {
 
 // ParseID 从字符串解析ID（支持十进制、十六进制、二进制）
 func ParseID(s string) (ID, error) {
+	// 防止空字符串
+	if s == "" {
+		return 0, fmt.Errorf("ID string cannot be empty")
+	}
+
 	// 防止超长字符串导致的资源消耗
 	if len(s) > maxParseIDStringLength {
 		return 0, fmt.Errorf("ID string too long: max %d characters, got %d",
@@ -43,9 +48,15 @@ func ParseID(s string) (ID, error) {
 	switch {
 	case strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X"):
 		// 十六进制
+		if len(s) <= 2 {
+			return 0, fmt.Errorf("invalid hexadecimal format: missing digits after 0x")
+		}
 		val, err = strconv.ParseInt(s[2:], 16, 64)
 	case strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B"):
 		// 二进制
+		if len(s) <= 2 {
+			return 0, fmt.Errorf("invalid binary format: missing digits after 0b")
+		}
 		val, err = strconv.ParseInt(s[2:], 2, 64)
 	default:
 		// 十进制
@@ -97,18 +108,21 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	}
 
 	if len(data) > maxParseIDStringLength {
-		return fmt.Errorf("JSON data too large")
+		return fmt.Errorf("JSON data too large: max %d bytes, got %d", maxParseIDStringLength, len(data))
 	}
 
 	// 尝试从字符串解析
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
+		if str == "" {
+			return fmt.Errorf("ID string cannot be empty")
+		}
 		val, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid ID string format: %w", err)
 		}
 		if val < 0 {
-			return fmt.Errorf("invalid ID: must be non-negative")
+			return fmt.Errorf("invalid ID: must be non-negative, got %d", val)
 		}
 		*id = ID(val)
 		return nil
@@ -117,10 +131,10 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	// 尝试从数字解析
 	var num int64
 	if err := json.Unmarshal(data, &num); err != nil {
-		return fmt.Errorf("invalid ID format: %w", err)
+		return fmt.Errorf("invalid ID format: expected string or number, got %s", string(data))
 	}
 	if num < 0 {
-		return fmt.Errorf("invalid ID: must be non-negative")
+		return fmt.Errorf("invalid ID: must be non-negative, got %d", num)
 	}
 	*id = ID(num)
 	return nil
@@ -148,6 +162,10 @@ func (id ID) Validate() error {
 
 // ValidateWithType 使用指定生成器类型验证ID
 func (id ID) ValidateWithType(generatorType core.GeneratorType) error {
+	if !generatorType.IsValid() {
+		return fmt.Errorf("%w: %s", core.ErrInvalidGeneratorType, generatorType)
+	}
+
 	validator, err := registry.GetValidatorRegistry().Get(generatorType)
 	if err != nil {
 		return fmt.Errorf("failed to get validator: %w", err)
@@ -164,6 +182,10 @@ func (id ID) Parse() (*core.IDInfo, error) {
 func (id ID) ParseWithType(generatorType core.GeneratorType) (*core.IDInfo, error) {
 	if !id.IsValid() {
 		return nil, fmt.Errorf("%w: got %d", core.ErrInvalidSnowflakeID, id)
+	}
+
+	if !generatorType.IsValid() {
+		return nil, fmt.Errorf("%w: %s", core.ErrInvalidGeneratorType, generatorType)
 	}
 
 	parser, err := registry.GetParserRegistry().Get(generatorType)
@@ -184,6 +206,10 @@ func (id ID) ExtractTime() time.Time {
 func (id ID) ExtractTimeWithType(generatorType core.GeneratorType) time.Time {
 	if !id.IsValid() {
 		return time.Time{} // ID无效，返回零值
+	}
+
+	if !generatorType.IsValid() {
+		return time.Time{} // 类型无效，返回零值
 	}
 
 	parser, err := registry.GetParserRegistry().Get(generatorType)
@@ -212,6 +238,10 @@ func (id ID) ExtractDatacenterIDWithType(generatorType core.GeneratorType) int64
 		return -1 // ID无效
 	}
 
+	if !generatorType.IsValid() {
+		return -1 // 类型无效
+	}
+
 	parser, err := registry.GetParserRegistry().Get(generatorType)
 	if err != nil {
 		return -1 // 解析器获取失败
@@ -229,6 +259,10 @@ func (id ID) ExtractWorkerID() int64 {
 func (id ID) ExtractWorkerIDWithType(generatorType core.GeneratorType) int64 {
 	if !id.IsValid() {
 		return -1 // ID无效
+	}
+
+	if !generatorType.IsValid() {
+		return -1 // 类型无效
 	}
 
 	parser, err := registry.GetParserRegistry().Get(generatorType)
