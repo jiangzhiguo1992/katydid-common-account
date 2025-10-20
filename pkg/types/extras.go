@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 )
 
 // Extras 扩展字段类型，用于存储动态的键值对数据
@@ -1322,4 +1324,319 @@ func convertToFloat64(v any) (float64, bool) {
 		return float64(convertToUint64(val)), true
 	}
 	return 0, false
+}
+
+// GetIntFromString 支持字符串到整数的转换
+// 示例: "123" → 123
+func (e Extras) GetIntFromString(key string) (int, bool) {
+	v, ok := e.Get(key)
+	if !ok {
+		return 0, false
+	}
+
+	// 优先尝试原生类型
+	if i, ok := convertToInt(v); ok {
+		return i, true
+	}
+
+	// 回退到字符串解析
+	if str, ok := v.(string); ok {
+		if i, err := strconv.Atoi(str); err == nil {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+// GetInt64FromString 支持字符串到int64的转换
+func (e Extras) GetInt64FromString(key string) (int64, bool) {
+	v, ok := e.Get(key)
+	if !ok {
+		return 0, false
+	}
+
+	if i, ok := convertToInt64(v); ok {
+		return i, true
+	}
+
+	if str, ok := v.(string); ok {
+		if i, err := strconv.ParseInt(str, 10, 64); err == nil {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+// GetFloat64FromString 支持字符串到float64的转换
+func (e Extras) GetFloat64FromString(key string) (float64, bool) {
+	v, ok := e.Get(key)
+	if !ok {
+		return 0, false
+	}
+
+	if f, ok := convertToFloat64(v); ok {
+		return f, true
+	}
+
+	if str, ok := v.(string); ok {
+		if f, err := strconv.ParseFloat(str, 64); err == nil {
+			return f, true
+		}
+	}
+
+	return 0, false
+}
+
+// GetBoolFromString 支持字符串和数值到布尔的转换
+// "true", "1", 1 → true
+// "false", "0", 0 → false
+func (e Extras) GetBoolFromString(key string) (bool, bool) {
+	v, ok := e.Get(key)
+	if !ok {
+		return false, false
+	}
+
+	// 原生bool类型
+	if b, ok := v.(bool); ok {
+		return b, true
+	}
+
+	// 字符串转换
+	if str, ok := v.(string); ok {
+		switch str {
+		case "true", "True", "TRUE", "1", "yes", "Yes", "YES":
+			return true, true
+		case "false", "False", "FALSE", "0", "no", "No", "NO", "":
+			return false, true
+		}
+	}
+
+	// 数值转换
+	if i, ok := convertToInt(v); ok {
+		return i != 0, true
+	}
+
+	return false, false
+}
+
+// GetStringOr 获取字符串，失败时返回默认值
+func (e Extras) GetStringOr(key, defaultValue string) string {
+	if v, ok := e.GetString(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetIntOr 获取整数，失败时返回默认值
+func (e Extras) GetIntOr(key string, defaultValue int) int {
+	if v, ok := e.GetInt(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetInt64Or 获取int64，失败时返回默认值
+func (e Extras) GetInt64Or(key string, defaultValue int64) int64 {
+	if v, ok := e.GetInt64(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetFloat64Or 获取float64，失败时返回默认值
+func (e Extras) GetFloat64Or(key string, defaultValue float64) float64 {
+	if v, ok := e.GetFloat64(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetBoolOr 获取布尔值，失败时返回默认值
+func (e Extras) GetBoolOr(key string, defaultValue bool) bool {
+	if v, ok := e.GetBool(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetExtrasOr 获取嵌套Extras，失败时返回默认值
+func (e Extras) GetExtrasOr(key string, defaultValue Extras) Extras {
+	if v, ok := e.GetExtras(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
+// GetPath 支持点分隔路径查询
+// 示例: "user.address.city" → "Beijing"
+func (e Extras) GetPath(path string) (any, bool) {
+	if path == "" {
+		return nil, false
+	}
+
+	keys := strings.Split(path, ".")
+	current := any(e)
+
+	for _, key := range keys {
+		// 尝试转换为map[string]any
+		var m map[string]any
+		switch v := current.(type) {
+		case Extras:
+			m = map[string]any(v)
+		case map[string]any:
+			m = v
+		default:
+			return nil, false
+		}
+
+		val, exists := m[key]
+		if !exists {
+			return nil, false
+		}
+		current = val
+	}
+
+	return current, true
+}
+
+// GetStringPath 获取字符串类型的路径值
+func (e Extras) GetStringPath(path string) (string, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return "", false
+	}
+	str, ok := v.(string)
+	return str, ok
+}
+
+// GetIntPath 获取整数类型的路径值
+func (e Extras) GetIntPath(path string) (int, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToInt(v)
+}
+
+// GetInt64Path 获取int64类型的路径值
+func (e Extras) GetInt64Path(path string) (int64, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToInt64(v)
+}
+
+// GetFloat64Path 获取float64类型的路径值
+func (e Extras) GetFloat64Path(path string) (float64, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToFloat64(v)
+}
+
+// GetBoolPath 获取布尔类型的路径值
+func (e Extras) GetBoolPath(path string) (bool, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return false, false
+	}
+	b, ok := v.(bool)
+	return b, ok
+}
+
+// GetExtrasPath 获取嵌套Extras类型的路径值
+func (e Extras) GetExtrasPath(path string) (Extras, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case Extras:
+		return val, true
+	case map[string]any:
+		return Extras(val), true
+	}
+	return nil, false
+}
+
+// SetPath 支持路径设置（自动创建中间节点）
+func (e Extras) SetPath(path string, value any) error {
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+
+	keys := strings.Split(path, ".")
+	if len(keys) == 1 {
+		e.Set(path, value)
+		return nil
+	}
+
+	current := e
+	for i := 0; i < len(keys)-1; i++ {
+		key := keys[i]
+
+		// 获取或创建中间节点
+		if existing, ok := current.GetExtras(key); ok {
+			current = existing
+		} else {
+			newMap := NewExtras()
+			current.Set(key, newMap)
+			current = newMap
+		}
+	}
+
+	// 设置最终值
+	current.Set(keys[len(keys)-1], value)
+	return nil
+}
+
+// Range 遍历所有键值对（零分配）
+// 返回false可提前终止遍历
+func (e Extras) Range(fn func(key string, value any) bool) {
+	for k, v := range e {
+		if !fn(k, v) {
+			break
+		}
+	}
+}
+
+// RangeKeys 仅遍历键（零分配）
+func (e Extras) RangeKeys(fn func(key string) bool) {
+	for k := range e {
+		if !fn(k) {
+			break
+		}
+	}
+}
+
+// Filter 筛选符合条件的键值对
+func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
+	result := NewExtras()
+	for k, v := range e {
+		if predicate(k, v) {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// Map 转换所有值
+func (e Extras) Map(transform func(key string, value any) any) Extras {
+	result := NewExtrasWithCapacity(len(e))
+	for k, v := range e {
+		result[k] = transform(k, v)
+	}
+	return result
+}
+
+// ForEach 对每个键值对执行操作
+func (e Extras) ForEach(fn func(key string, value any)) {
+	for k, v := range e {
+		fn(k, v)
+	}
 }
