@@ -9,7 +9,6 @@ import (
 )
 
 // ID 封装的ID类型，提供便捷的转换和序列化方法
-// 遵循单一职责原则：只负责ID的表示和转换
 type ID int64
 
 // IDInfo ID解析后的信息结构体
@@ -23,153 +22,11 @@ type IDInfo struct {
 }
 
 // NewID 创建新的ID实例
-//
-// 参数:
-//
-//	value: ID值
-//
-// 返回:
-//
-//	ID: ID实例
 func NewID(value int64) ID {
 	return ID(value)
 }
 
-// Int64 转换为int64类型
-//
-// 返回:
-//
-//	int64: ID的int64表示
-func (id ID) Int64() int64 {
-	return int64(id)
-}
-
-// String 转换为字符串
-// 实现fmt.Stringer接口
-//
-// 返回:
-//
-//	string: ID的字符串表示
-func (id ID) String() string {
-	return strconv.FormatInt(int64(id), 10)
-}
-
-// Hex 转换为十六进制字符串
-//
-// 返回:
-//
-//	string: ID的十六进制表示（带0x前缀）
-func (id ID) Hex() string {
-	return fmt.Sprintf("0x%x", int64(id))
-}
-
-// Binary 转换为二进制字符串
-//
-// 返回:
-//
-//	string: ID的二进制表示（带0b前缀）
-func (id ID) Binary() string {
-	return fmt.Sprintf("0b%b", int64(id))
-}
-
-// MarshalJSON 实现JSON序列化
-// 将ID序列化为字符串，避免JavaScript中大整数精度丢失问题
-//
-// 返回:
-//
-//	[]byte: JSON序列化结果
-//	error: 序列化错误
-func (id ID) MarshalJSON() ([]byte, error) {
-	// 使用字符串避免JavaScript的Number精度问题
-	return json.Marshal(id.String())
-}
-
-// UnmarshalJSON 实现JSON反序列化
-// 支持从字符串或数字反序列化
-//
-// 参数:
-//
-//	data: JSON数据
-//
-// 返回:
-//
-//	error: 反序列化错误
-func (id *ID) UnmarshalJSON(data []byte) error {
-	// 尝试从字符串解析
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		val, err := strconv.ParseInt(str, 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse ID from string: %w", err)
-		}
-		*id = ID(val)
-		return nil
-	}
-
-	// 尝试从数字解析
-	var num int64
-	if err := json.Unmarshal(data, &num); err != nil {
-		return fmt.Errorf("failed to parse ID from number: %w", err)
-	}
-	*id = ID(num)
-	return nil
-}
-
-// IsZero 检查ID是否为零值
-//
-// 返回:
-//
-//	bool: 如果ID为0则返回true
-func (id ID) IsZero() bool {
-	return id == 0
-}
-
-// IsValid 检查ID是否有效（大于0）
-//
-// 返回:
-//
-//	bool: 如果ID大于0则返回true
-func (id ID) IsValid() bool {
-	return id > 0
-}
-
-// Parse 解析ID信息（仅适用于Snowflake ID）
-//
-// 返回:
-//
-//	*IDInfo: ID信息结构体
-//	error: 解析失败时返回错误
-func (id ID) Parse() (*IDInfo, error) {
-	if !id.IsValid() {
-		return nil, fmt.Errorf("%w: got %d", ErrInvalidSnowflakeID, id)
-	}
-
-	timestamp := (int64(id) >> TimestampShift) + Epoch
-	datacenterID := (int64(id) >> DatacenterIDShift) & MaxDatacenterID
-	workerID := (int64(id) >> WorkerIDShift) & MaxWorkerID
-	sequence := int64(id) & MaxSequence
-
-	return &IDInfo{
-		ID:           int64(id),
-		Timestamp:    timestamp,
-		Time:         GetTimestamp(int64(id)),
-		DatacenterID: datacenterID,
-		WorkerID:     workerID,
-		Sequence:     sequence,
-	}, nil
-}
-
-// ParseID 从字符串解析ID
-// 支持十进制、十六进制（0x前缀）和二进制（0b前缀）格式
-//
-// 参数:
-//
-//	s: ID字符串
-//
-// 返回:
-//
-//	ID: 解析后的ID
-//	error: 解析失败时返回错误
+// ParseID 从字符串解析ID（支持十进制、十六进制（0x前缀）和二进制（0b前缀）格式）
 func ParseID(s string) (ID, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -204,14 +61,89 @@ func ParseID(s string) (ID, error) {
 	return ID(val), nil
 }
 
+// Int64 转换为int64类型
+func (id ID) Int64() int64 {
+	return int64(id)
+}
+
+// String 转换为字符串（实现fmt.Stringer接口）
+func (id ID) String() string {
+	return strconv.FormatInt(int64(id), 10)
+}
+
+// Hex 转换为十六进制字符串（带0x前缀）
+func (id ID) Hex() string {
+	return fmt.Sprintf("0x%x", int64(id))
+}
+
+// Binary 转换为二进制字符串（带0b前缀）
+func (id ID) Binary() string {
+	return fmt.Sprintf("0b%b", int64(id))
+}
+
+// MarshalJSON 实现JSON序列化（将ID序列化为字符串，避免JavaScript中大整数精度丢失问题）
+func (id ID) MarshalJSON() ([]byte, error) {
+	// 使用字符串避免JavaScript的Number精度问题
+	return json.Marshal(id.String())
+}
+
+// UnmarshalJSON 实现JSON反序列化（支持从字符串或数字反序列化）
+func (id *ID) UnmarshalJSON(data []byte) error {
+	// 尝试从字符串解析
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		val, err := strconv.ParseInt(str, 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse ID from string: %w", err)
+		}
+		*id = ID(val)
+		return nil
+	}
+
+	// 尝试从数字解析
+	var num int64
+	if err := json.Unmarshal(data, &num); err != nil {
+		return fmt.Errorf("failed to parse ID from number: %w", err)
+	}
+	*id = ID(num)
+	return nil
+}
+
+// IsZero 检查ID是否为零值
+func (id ID) IsZero() bool {
+	return id == 0
+}
+
+// IsValid 检查ID是否有效（大于0）
+func (id ID) IsValid() bool {
+	return id > 0
+}
+
+// Parse 解析ID信息（仅适用于Snowflake ID）
+func (id ID) Parse() (*IDInfo, error) {
+	if !id.IsValid() {
+		return nil, fmt.Errorf("%w: got %d", ErrInvalidSnowflakeID, id)
+	}
+
+	timestamp := (int64(id) >> TimestampShift) + Epoch
+	datacenterID := (int64(id) >> DatacenterIDShift) & MaxDatacenterID
+	workerID := (int64(id) >> WorkerIDShift) & MaxWorkerID
+	sequence := int64(id) & MaxSequence
+
+	return &IDInfo{
+		ID:           int64(id),
+		Timestamp:    timestamp,
+		Time:         GetTimestamp(int64(id)),
+		DatacenterID: datacenterID,
+		WorkerID:     workerID,
+		Sequence:     sequence,
+	}, nil
+}
+
 // IDSlice ID切片类型，提供批量操作方法
 type IDSlice []ID
 
 // Int64Slice 转换为int64切片
-//
-// 返回:
-//
-//	[]int64: int64切片
 func (ids IDSlice) Int64Slice() []int64 {
 	result := make([]int64, len(ids))
 	for i, id := range ids {
@@ -221,10 +153,6 @@ func (ids IDSlice) Int64Slice() []int64 {
 }
 
 // StringSlice 转换为字符串切片
-//
-// 返回:
-//
-//	[]string: 字符串切片
 func (ids IDSlice) StringSlice() []string {
 	result := make([]string, len(ids))
 	for i, id := range ids {
@@ -234,14 +162,6 @@ func (ids IDSlice) StringSlice() []string {
 }
 
 // Contains 检查是否包含指定ID
-//
-// 参数:
-//
-//	id: 要查找的ID
-//
-// 返回:
-//
-//	bool: 如果包含返回true
 func (ids IDSlice) Contains(id ID) bool {
 	for _, v := range ids {
 		if v == id {
@@ -251,12 +171,7 @@ func (ids IDSlice) Contains(id ID) bool {
 	return false
 }
 
-// Deduplicate 去重
-// 返回新的切片，不修改原切片（内存安全）
-//
-// 返回:
-//
-//	IDSlice: 去重后的ID切片
+// Deduplicate 去重（返回新的切片，不修改原切片（内存安全））
 func (ids IDSlice) Deduplicate() IDSlice {
 	if len(ids) == 0 {
 		return IDSlice{} // 返回新的空切片而不是原切片引用
@@ -275,16 +190,7 @@ func (ids IDSlice) Deduplicate() IDSlice {
 	return result
 }
 
-// Filter 过滤ID
-// 返回新的切片，不修改原切片
-//
-// 参数:
-//
-//	predicate: 过滤条件函数（不能为nil）
-//
-// 返回:
-//
-//	IDSlice: 过滤后的ID切片
+// Filter 过滤ID（返回新的切片，不修改原切片）
 func (ids IDSlice) Filter(predicate func(ID) bool) IDSlice {
 	if predicate == nil {
 		// 如果predicate为nil，返回原切片的副本
@@ -302,19 +208,10 @@ func (ids IDSlice) Filter(predicate func(ID) bool) IDSlice {
 	return result
 }
 
-// IDSet ID集合类型，提供集合操作
-// 使用map实现，查找性能O(1)
+// IDSet ID集合类型，提供集合操作（使用map实现，查找性能O(1)）
 type IDSet map[ID]struct{}
 
 // NewIDSet 创建新的ID集合
-//
-// 参数:
-//
-//	ids: 初始ID列表（可选）
-//
-// 返回:
-//
-//	IDSet: ID集合实例
 func NewIDSet(ids ...ID) IDSet {
 	set := make(IDSet, len(ids))
 	for _, id := range ids {
@@ -324,51 +221,27 @@ func NewIDSet(ids ...ID) IDSet {
 }
 
 // Add 添加ID到集合
-//
-// 参数:
-//
-//	id: 要添加的ID
 func (s IDSet) Add(id ID) {
 	s[id] = struct{}{}
 }
 
 // Remove 从集合中移除ID
-//
-// 参数:
-//
-//	id: 要移除的ID
 func (s IDSet) Remove(id ID) {
 	delete(s, id)
 }
 
 // Contains 检查集合是否包含指定ID
-//
-// 参数:
-//
-//	id: 要查找的ID
-//
-// 返回:
-//
-//	bool: 如果包含返回true
 func (s IDSet) Contains(id ID) bool {
 	_, exists := s[id]
 	return exists
 }
 
 // Size 获取集合大小
-//
-// 返回:
-//
-//	int: 集合中ID的数量
 func (s IDSet) Size() int {
 	return len(s)
 }
 
 // ToSlice 转换为ID切片
-//
-// 返回:
-//
-//	IDSlice: ID切片
 func (s IDSet) ToSlice() IDSlice {
 	result := make(IDSlice, 0, len(s))
 	for id := range s {
@@ -377,16 +250,7 @@ func (s IDSet) ToSlice() IDSlice {
 	return result
 }
 
-// Union 返回两个集合的并集
-// 不修改原集合，返回新集合（内存安全）
-//
-// 参数:
-//
-//	other: 另一个ID集合（如果为nil，返回当前集合的副本）
-//
-// 返回:
-//
-//	IDSet: 并集结果
+// Union 返回两个集合的并集（不修改原集合，返回新集合（内存安全））
 func (s IDSet) Union(other IDSet) IDSet {
 	// nil 检查：如果 other 为 nil，返回当前集合的副本
 	if other == nil {
@@ -407,16 +271,7 @@ func (s IDSet) Union(other IDSet) IDSet {
 	return result
 }
 
-// Intersect 返回两个集合的交集
-// 不修改原集合，返回新集合
-//
-// 参数:
-//
-//	other: 另一个ID集合（如果为nil，返回空集合）
-//
-// 返回:
-//
-//	IDSet: 交集结果
+// Intersect 返回两个集合的交集（不修改原集合，返回新集合）
 func (s IDSet) Intersect(other IDSet) IDSet {
 	// nil 检查：如果 other 为 nil，交集为空
 	if other == nil {
@@ -438,16 +293,7 @@ func (s IDSet) Intersect(other IDSet) IDSet {
 	return result
 }
 
-// Difference 返回两个集合的差集（s中有但other中没有的）
-// 不修改原集合，返回新集合
-//
-// 参数:
-//
-//	other: 另一个ID集合（如果为nil，返回当前集合的副本）
-//
-// 返回:
-//
-//	IDSet: 差集结果
+// Difference 返回两个集合的差集（s中有但other中没有的）（不修改原集合，返回新集合）
 func (s IDSet) Difference(other IDSet) IDSet {
 	// nil 检查：如果 other 为 nil，返回当前集合的副本
 	if other == nil {
@@ -468,10 +314,6 @@ func (s IDSet) Difference(other IDSet) IDSet {
 }
 
 // IsEmpty 检查集合是否为空
-//
-// 返回:
-//
-//	bool: 如果集合为空返回true
 func (s IDSet) IsEmpty() bool {
 	return len(s) == 0
 }
@@ -484,10 +326,6 @@ func (s IDSet) Clear() {
 }
 
 // Clone 克隆集合，返回一个新的独立副本
-//
-// 返回:
-//
-//	IDSet: 集合的副本
 func (s IDSet) Clone() IDSet {
 	result := make(IDSet, len(s))
 	for id := range s {
@@ -497,14 +335,6 @@ func (s IDSet) Clone() IDSet {
 }
 
 // Equal 检查两个集合是否相等
-//
-// 参数:
-//
-//	other: 另一个ID集合
-//
-// 返回:
-//
-//	bool: 如果两个集合包含相同的元素返回true
 func (s IDSet) Equal(other IDSet) bool {
 	if len(s) != len(other) {
 		return false
