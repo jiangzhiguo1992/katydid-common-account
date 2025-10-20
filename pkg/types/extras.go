@@ -80,9 +80,8 @@ func NewExtrasWithCapacity(capacity int) Extras {
 //
 // 注意：
 // - value 为 nil 时仍会存储 nil 值，使用 SetOrDel 可自动删除
-// - 空字符串键名会被忽略（防御性检查）
+// - 空字符串键名会被忽略
 func (e Extras) Set(key string, value any) {
-	// 防御性检查：忽略空键名，避免无效数据
 	if key == "" {
 		return
 	}
@@ -101,7 +100,6 @@ func (e Extras) Set(key string, value any) {
 //
 // 业务优势：避免存储无意义的 nil 值，节省存储空间和序列化开销
 func (e Extras) SetOrDel(key string, value any) {
-	// 防御性检查：忽略空键名
 	if key == "" {
 		return
 	}

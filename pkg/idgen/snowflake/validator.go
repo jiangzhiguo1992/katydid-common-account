@@ -54,7 +54,6 @@ func (v *Validator) Validate(id int64) error {
 // ValidateBatch 批量验证ID
 // 实现core.IDValidator接口
 func (v *Validator) ValidateBatch(ids []int64) error {
-	// 防御性编程：检查切片是否为nil
 	if ids == nil {
 		return fmt.Errorf("ids slice cannot be nil")
 	}

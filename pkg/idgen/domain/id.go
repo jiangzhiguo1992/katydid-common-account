@@ -236,7 +236,7 @@ func (id ID) ExtractTimeWithType(generatorType core.GeneratorType) time.Time {
 	}
 	timestamp := parser.ExtractTimestamp(int64(id))
 
-	// 防御性检查：确保时间戳合理
+	// 确保时间戳合理
 	if timestamp <= 0 {
 		return time.Time{}
 	}
