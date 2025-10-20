@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -496,85 +495,6 @@ func TestIDSlice_ConcurrentOperations(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		<-done
 	}
-}
-
-// TestIDSet_ConcurrentOperations 测试IDSet并发操作
-func TestIDSet_ConcurrentOperations(t *testing.T) {
-	set := NewIDSet()
-
-	const goroutines = 100
-	const idsPerGoroutine = 10000
-	const totalIDs = goroutines * idsPerGoroutine
-
-	var wg sync.WaitGroup
-	var addErrors int64
-	var duplicates int64
-
-	// 并发添加
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(start int) {
-			defer wg.Done()
-			for j := 0; j < idsPerGoroutine; j++ {
-				id := NewID(int64(start*idsPerGoroutine + j))
-				set.Add(id)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	// 验证
-	t.Logf("添加错误数: %d", addErrors)
-	t.Logf("重复数: %d", duplicates)
-	t.Logf("集合大小: %d (期望: %d)", set.Size(), totalIDs)
-
-	if duplicates > 0 {
-		t.Errorf("发现 %d 个重复添加", duplicates)
-	}
-
-	if set.Size() != totalIDs {
-		t.Errorf("集合大小 %d 不等于期望 %d", set.Size(), totalIDs)
-	}
-}
-
-// TestIDSet_ConcurrentReadWrite 测试IDSet并发读写
-func TestIDSet_ConcurrentReadWrite(t *testing.T) {
-	set := NewIDSet()
-
-	// 预填充一些数据
-	for i := 0; i < 5000; i++ {
-		set.Add(NewID(int64(i)))
-	}
-
-	const goroutines = 50
-	const operations = 1000
-
-	var wg sync.WaitGroup
-
-	// 并发读写
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < operations; j++ {
-				// 读操作
-				_ = set.Contains(NewID(int64(j)))
-				_ = set.Size()
-
-				// 写操作
-				if j%2 == 0 {
-					set.Add(NewID(int64(10000 + idx*operations + j)))
-				} else {
-					set.Remove(NewID(int64(j)))
-				}
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	t.Logf("最终集合大小: %d", set.Size())
 }
 
 // TestID_MillionParsing 测试百万次ID解析

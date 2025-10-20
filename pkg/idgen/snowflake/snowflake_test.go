@@ -883,8 +883,8 @@ func TestConcurrentBatch_Million(t *testing.T) {
 			batchesPerGoroutine := tc.totalIDs / (tc.goroutines * tc.batchSize)
 
 			idMap := &sync.Map{}
-			errorCount := int64(0)
-			totalGenerated := int64(0)
+			var errorCount int64
+			var totalGenerated int64
 
 			startTime := time.Now()
 			var wg sync.WaitGroup
@@ -897,7 +897,7 @@ func TestConcurrentBatch_Million(t *testing.T) {
 						ids, err := gen.NextIDBatch(tc.batchSize)
 						if err != nil {
 							t.Errorf("批量生成失败: %v", err)
-							errorCount++
+							atomic.AddInt64(&errorCount, 1)
 							return
 						}
 
@@ -905,7 +905,7 @@ func TestConcurrentBatch_Million(t *testing.T) {
 							if _, loaded := idMap.LoadOrStore(id, struct{}{}); loaded {
 								t.Errorf("发现重复ID: %d", id)
 							}
-							totalGenerated++
+							atomic.AddInt64(&totalGenerated, 1)
 						}
 					}
 				}()
