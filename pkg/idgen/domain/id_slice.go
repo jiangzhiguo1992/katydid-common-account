@@ -18,7 +18,9 @@ func NewIDSlice(ids ...ID) IDSlice {
 	if len(ids) > maxSliceLength {
 		ids = ids[:maxSliceLength]
 	}
-	return IDSlice(ids)
+	result := make(IDSlice, len(ids))
+	copy(result, ids)
+	return result
 }
 
 // Int64Slice 转换为int64切片

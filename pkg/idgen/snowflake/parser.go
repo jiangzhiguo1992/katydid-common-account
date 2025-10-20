@@ -28,6 +28,7 @@ func (p *Parser) Parse(id int64) (*core.IDInfo, error) {
 		return nil, fmt.Errorf("invalid snowflake ID: %w", err)
 	}
 
+	// 提取各部分信息，使用位运算和掩码
 	timestamp := (id >> TimestampShift) + Epoch
 	datacenterID := (id >> DatacenterIDShift) & MaxDatacenterID
 	workerID := (id >> WorkerIDShift) & MaxWorkerID

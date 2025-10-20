@@ -22,11 +22,21 @@ func (c *Config) Validate() error {
 	}
 
 	if c.DatacenterID < 0 || c.DatacenterID > MaxDatacenterID {
-		return fmt.Errorf("%w: got %d", core.ErrInvalidDatacenterID, c.DatacenterID)
+		return fmt.Errorf("%w: got %d, valid range [0, %d]", core.ErrInvalidDatacenterID, c.DatacenterID, MaxDatacenterID)
 	}
 
 	if c.WorkerID < 0 || c.WorkerID > MaxWorkerID {
-		return fmt.Errorf("%w: got %d", core.ErrInvalidWorkerID, c.WorkerID)
+		return fmt.Errorf("%w: got %d, valid range [0, %d]", core.ErrInvalidWorkerID, c.WorkerID, MaxWorkerID)
+	}
+
+	// 验证时钟回拨容忍时间
+	if c.ClockBackwardTolerance < 0 {
+		return fmt.Errorf("clock backward tolerance must be non-negative, got %d", c.ClockBackwardTolerance)
+	}
+
+	if c.ClockBackwardTolerance > maxClockBackwardToleranceLimit {
+		return fmt.Errorf("clock backward tolerance too large: max %dms, got %dms",
+			maxClockBackwardToleranceLimit, c.ClockBackwardTolerance)
 	}
 
 	return nil

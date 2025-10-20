@@ -284,6 +284,10 @@ func (id ID) ExtractSequenceWithType(generatorType core.GeneratorType) int64 {
 		return -1 // ID无效
 	}
 
+	if !generatorType.IsValid() {
+		return -1 // 类型无效
+	}
+
 	parser, err := registry.GetParserRegistry().Get(generatorType)
 	if err != nil {
 		return -1 // 解析器获取失败
