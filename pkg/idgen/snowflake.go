@@ -44,7 +44,7 @@ const (
 	maxWaitRetries = 10
 
 	// 允许的未来时间容差（毫秒）
-	maxFutureTimeTolerance = 5 * 60 * 1000
+	maxFutureTimeTolerance = 60 * 1000 // 1分钟
 )
 
 var (
@@ -231,10 +231,12 @@ func (s *Snowflake) NextID() (int64, error) {
 // NextIDBatch 批量生成ID
 func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 	if n <= 0 {
-		return nil, fmt.Errorf("%w: batch size must be positive, got %d", ErrInvalidBatchSize, n)
+		return nil, fmt.Errorf("%w: batch size must be positive, got %d",
+			ErrInvalidBatchSize, n)
 	}
 	if n > maxBatchSize {
-		return nil, fmt.Errorf("%w: batch size too large (max %d), got %d", ErrInvalidBatchSize, maxBatchSize, n)
+		return nil, fmt.Errorf("%w: batch size too large (max %d), got %d",
+			ErrInvalidBatchSize, maxBatchSize, n)
 	}
 
 	s.mu.Lock()
@@ -328,7 +330,8 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 		// 根据策略处理时钟回拨
 		switch s.clockBackwardStrategy {
 		case StrategyError:
-			return 0, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
+			return 0, fmt.Errorf("%w: detected backward drift of %dms",
+				ErrClockMovedBackwards, offset)
 
 		case StrategyWait:
 			if offset <= s.clockBackwardTolerance {
@@ -347,11 +350,11 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 				}
 				// 等待后仍然回拨，返回错误
 				if timestamp < s.lastTimestamp {
-					return 0, fmt.Errorf("%w: backward %dms after %d retries",
+					return 0, fmt.Errorf("%w: backward drift %dms persisted after %d retries",
 						ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries)
 				}
 			} else {
-				return 0, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
+				return 0, fmt.Errorf("%w: backward drift %dms exceeds tolerance %dms",
 					ErrClockMovedBackwards, offset, s.clockBackwardTolerance)
 			}
 
@@ -431,7 +434,8 @@ func (s *Snowflake) nextIDBatchUnsafe(n int) ([]int64, error) {
 			switch s.clockBackwardStrategy {
 			case StrategyError:
 				// 返回已生成的ID和错误
-				return ids, fmt.Errorf("%w: backward %dms (generated %d IDs)", ErrClockMovedBackwards, offset, len(ids))
+				return ids, fmt.Errorf("%w: detected backward drift of %dms (generated %d/%d IDs)",
+					ErrClockMovedBackwards, offset, len(ids), n)
 			case StrategyWait:
 				if offset <= s.clockBackwardTolerance {
 					// 使用重试机制等待时钟追赶
@@ -447,12 +451,12 @@ func (s *Snowflake) nextIDBatchUnsafe(n int) ([]int64, error) {
 						retries++
 					}
 					if timestamp < s.lastTimestamp {
-						return ids, fmt.Errorf("%w: backward %dms after %d retries (generated %d IDs)",
-							ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries, len(ids))
+						return ids, fmt.Errorf("%w: backward drift persisted after %d retries (generated %d/%d IDs)",
+							ErrClockMovedBackwards, retries, len(ids), n)
 					}
 				} else {
-					return ids, fmt.Errorf("%w: backward %dms exceeds tolerance %dms (generated %d IDs)",
-						ErrClockMovedBackwards, offset, s.clockBackwardTolerance, len(ids))
+					return ids, fmt.Errorf("%w: backward drift %dms exceeds tolerance %dms (generated %d/%d IDs)",
+						ErrClockMovedBackwards, offset, s.clockBackwardTolerance, len(ids), n)
 				}
 			case StrategyUseLastTimestamp:
 				timestamp = s.lastTimestamp

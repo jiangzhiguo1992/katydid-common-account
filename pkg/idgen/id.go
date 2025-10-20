@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+const (
+	// 最大安全整数（JavaScript Number.MAX_SAFE_INTEGER）
+	maxSafeInteger = 9007199254740991 // 2^53 - 1
+
+	// ParseID支持的最大字符串长度，防止超长字符串攻击
+	maxParseIDStringLength = 256
+
+	// 切片操作的最大长度限制，防止内存耗尽
+	maxSliceLength = 1_000_000
+)
+
 // ID 封装的ID类型，提供便捷的转换和序列化方法
 type ID int64
 
@@ -31,6 +42,12 @@ func ParseID(s string) (ID, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, fmt.Errorf("empty ID string")
+	}
+
+	// 防止超长字符串导致的资源消耗
+	if len(s) > maxParseIDStringLength {
+		return 0, fmt.Errorf("ID string too long: max %d characters, got %d",
+			maxParseIDStringLength, len(s))
 	}
 
 	var val int64
@@ -89,12 +106,23 @@ func (id ID) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON 实现JSON反序列化（支持从字符串或数字反序列化）
 func (id *ID) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("empty JSON data")
+	}
+
+	if len(data) > maxParseIDStringLength {
+		return fmt.Errorf("JSON data too large")
+	}
+
 	// 尝试从字符串解析
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
 		val, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
-			return fmt.Errorf("failed to parse ID from string: %w", err)
+			return fmt.Errorf("invalid ID string format: %w", err)
+		}
+		if val < 0 {
+			return fmt.Errorf("invalid ID: must be non-negative")
 		}
 		*id = ID(val)
 		return nil
@@ -103,7 +131,10 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	// 尝试从数字解析
 	var num int64
 	if err := json.Unmarshal(data, &num); err != nil {
-		return fmt.Errorf("failed to parse ID from number: %w", err)
+		return fmt.Errorf("invalid ID format: %w", err)
+	}
+	if num < 0 {
+		return fmt.Errorf("invalid ID: must be non-negative")
 	}
 	*id = ID(num)
 	return nil
@@ -119,10 +150,24 @@ func (id ID) IsValid() bool {
 	return id > 0
 }
 
+// IsSafeForJavaScript 检查ID是否在JavaScript安全整数范围内
+func (id ID) IsSafeForJavaScript() bool {
+	return int64(id) >= 0 && int64(id) <= maxSafeInteger
+}
+
+// Validate 验证ID的有效性（包含Snowflake格式验证）
+func (id ID) Validate() error {
+	return ValidateSnowflakeID(int64(id))
+}
+
 // Parse 解析ID信息（仅适用于Snowflake ID）
 func (id ID) Parse() (*IDInfo, error) {
 	if !id.IsValid() {
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidSnowflakeID, id)
+	}
+
+	if err := ValidateSnowflakeID(int64(id)); err != nil {
+		return nil, fmt.Errorf("invalid snowflake ID: %w", err)
 	}
 
 	timestamp := (int64(id) >> TimestampShift) + Epoch
@@ -208,11 +253,25 @@ func (ids IDSlice) Filter(predicate func(ID) bool) IDSlice {
 	return result
 }
 
+// ValidateAll 验证切片中所有ID的有效性
+func (ids IDSlice) ValidateAll() error {
+	for i, id := range ids {
+		if err := id.Validate(); err != nil {
+			return fmt.Errorf("invalid ID at index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
 // IDSet ID集合类型，提供集合操作（使用map实现，查找性能O(1)）
 type IDSet map[ID]struct{}
 
 // NewIDSet 创建新的ID集合
 func NewIDSet(ids ...ID) IDSet {
+	if len(ids) > maxSliceLength {
+		ids = ids[:maxSliceLength]
+	}
+
 	set := make(IDSet, len(ids))
 	for _, id := range ids {
 		set[id] = struct{}{}
@@ -222,6 +281,9 @@ func NewIDSet(ids ...ID) IDSet {
 
 // Add 添加ID到集合
 func (s IDSet) Add(id ID) {
+	if len(s) >= maxSliceLength {
+		return
+	}
 	s[id] = struct{}{}
 }
 
@@ -261,12 +323,27 @@ func (s IDSet) Union(other IDSet) IDSet {
 		return result
 	}
 
-	result := make(IDSet, len(s)+len(other))
+	// 防止结果集合过大
+	estimatedSize := len(s) + len(other)
+	if estimatedSize > maxSliceLength {
+		estimatedSize = maxSliceLength
+	}
+
+	result := make(IDSet, estimatedSize)
+	count := 0
 	for id := range s {
+		if count >= maxSliceLength {
+			break
+		}
 		result[id] = struct{}{}
+		count++
 	}
 	for id := range other {
+		if count >= maxSliceLength {
+			break
+		}
 		result[id] = struct{}{}
+		count++
 	}
 	return result
 }
@@ -345,4 +422,14 @@ func (s IDSet) Equal(other IDSet) bool {
 		}
 	}
 	return true
+}
+
+// ValidateAll 验证集合中所有ID的有效性
+func (s IDSet) ValidateAll() error {
+	for id := range s {
+		if err := id.Validate(); err != nil {
+			return fmt.Errorf("invalid ID %d: %w", id, err)
+		}
+	}
+	return nil
 }

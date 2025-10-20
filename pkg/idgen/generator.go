@@ -21,6 +21,12 @@ var (
 
 	// ErrRegistryFull 注册表已满
 	ErrRegistryFull = errors.New("registry full: maximum number of generators reached")
+
+	// ErrKeyTooLong key长度超限
+	ErrKeyTooLong = errors.New("generator key too long")
+
+	// ErrInvalidKeyCharacters key包含非法字符
+	ErrInvalidKeyCharacters = errors.New("generator key contains invalid characters")
 )
 
 // GeneratorType 生成器类型定义
@@ -36,6 +42,15 @@ const (
 
 	// 默认最大生成器数量，防止内存泄漏
 	defaultMaxGenerators = 1000
+
+	// key长度限制，防止恶意超长key导致内存问题
+	maxKeyLength = 256
+
+	// 最小key长度
+	minKeyLength = 1
+
+	// 生成器类型最大长度
+	maxGeneratorTypeLength = 64
 )
 
 // GeneratorFactory ID生成器工厂接口
@@ -83,8 +98,8 @@ func GetGeneratorFromRegistry(key string) (IDGenerator, bool) {
 
 // RegisterFactory 注册生成器工厂
 func (r *GeneratorRegistry) RegisterFactory(generatorType GeneratorType, factory GeneratorFactory) error {
-	if generatorType == "" {
-		return ErrInvalidGeneratorType
+	if err := validateGeneratorType(generatorType); err != nil {
+		return err
 	}
 
 	if factory == nil {
@@ -104,14 +119,13 @@ func (r *GeneratorRegistry) RegisterFactory(generatorType GeneratorType, factory
 
 // CreateGenerator 创建ID生成器（如果已存在相同key的生成器，直接返回缓存的实例）
 func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorType, config any) (IDGenerator, error) {
-	// 验证key不为空
-	if key == "" {
-		return nil, ErrInvalidGeneratorKey
+	if err := validateKey(key); err != nil {
+		return nil, err
 	}
 
-	// 验证generatorType不为空
-	if generatorType == "" {
-		return nil, ErrInvalidGeneratorType
+	// 使用generatorType验证函数
+	if err := validateGeneratorType(generatorType); err != nil {
+		return nil, err
 	}
 
 	// 添加config空值检查
@@ -172,17 +186,8 @@ func (r *GeneratorRegistry) CreateGenerator(key string, generatorType GeneratorT
 }
 
 // GetGenerator 获取已缓存的生成器
-//
-// 参数:
-//
-//	key: 生成器唯一标识
-//
-// 返回:
-//
-//	IDGenerator: 生成器实例
-//	bool: 是否找到
 func (r *GeneratorRegistry) GetGenerator(key string) (IDGenerator, bool) {
-	if key == "" {
+	if err := validateKey(key); err != nil {
 		return nil, false
 	}
 
@@ -194,12 +199,8 @@ func (r *GeneratorRegistry) GetGenerator(key string) (IDGenerator, bool) {
 }
 
 // RemoveGenerator 移除已缓存的生成器
-//
-// 参数:
-//
-//	key: 生成器唯一标识
 func (r *GeneratorRegistry) RemoveGenerator(key string) {
-	if key == "" {
+	if err := validateKey(key); err != nil {
 		return
 	}
 
@@ -209,20 +210,16 @@ func (r *GeneratorRegistry) RemoveGenerator(key string) {
 	delete(r.generators, key)
 }
 
-// ClearGenerators 清空所有缓存的生成器
-// 注意：此方法会清空所有生成器，谨慎使用
+// ClearGenerators 清空所有缓存的生成器（注意：此方法会清空所有生成器，谨慎使用）
 func (r *GeneratorRegistry) ClearGenerators() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// 创建新map而不是遍历删除，更高效且避免潜在的map迭代问题
 	r.generators = make(map[string]IDGenerator)
 }
 
 // GetGeneratorCount 获取当前缓存的生成器数量
-//
-// 返回:
-//
-//	int: 生成器数量
 func (r *GeneratorRegistry) GetGeneratorCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -231,14 +228,6 @@ func (r *GeneratorRegistry) GetGeneratorCount() int {
 }
 
 // SetMaxGenerators 设置最大生成器数量限制
-//
-// 参数:
-//
-//	max: 最大数量（必须大于0）
-//
-// 返回:
-//
-//	error: 设置失败时返回错误
 func (r *GeneratorRegistry) SetMaxGenerators(max int) error {
 	if max <= 0 {
 		return errors.New("max generators must be positive")
@@ -252,10 +241,6 @@ func (r *GeneratorRegistry) SetMaxGenerators(max int) error {
 }
 
 // ListGeneratorTypes 列出所有已注册的生成器类型
-//
-// 返回:
-//
-//	[]GeneratorType: 生成器类型列表
 func (r *GeneratorRegistry) ListGeneratorTypes() []GeneratorType {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -268,10 +253,6 @@ func (r *GeneratorRegistry) ListGeneratorTypes() []GeneratorType {
 }
 
 // ListGeneratorKeys 列出所有已缓存的生成器key
-//
-// 返回:
-//
-//	[]string: 生成器key列表
 func (r *GeneratorRegistry) ListGeneratorKeys() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -295,6 +276,49 @@ func (f *SnowflakeFactory) Create(config any) (IDGenerator, error) {
 	}
 
 	return NewSnowflakeWithConfig(sfConfig)
+}
+
+// validateKey 验证生成器key的有效性
+func validateKey(key string) error {
+	if key == "" {
+		return ErrInvalidGeneratorKey
+	}
+
+	// 安全优化：检查key长度
+	if len(key) < minKeyLength {
+		return fmt.Errorf("%w: minimum length is %d", ErrInvalidGeneratorKey, minKeyLength)
+	}
+	if len(key) > maxKeyLength {
+		return fmt.Errorf("%w: maximum length is %d, got %d", ErrKeyTooLong, maxKeyLength, len(key))
+	}
+
+	// 安全优化：检查key是否包含控制字符或非法字符（防止注入攻击）
+	for i, r := range key {
+		// 只允许：字母、数字、下划线、连字符、点号
+		isValid := (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' || r == '-' || r == '.'
+
+		if !isValid {
+			return fmt.Errorf("%w: invalid character at position %d", ErrInvalidKeyCharacters, i)
+		}
+	}
+
+	return nil
+}
+
+// validateGeneratorType 验证生成器类型的有效性
+func validateGeneratorType(generatorType GeneratorType) error {
+	if generatorType == "" {
+		return ErrInvalidGeneratorType
+	}
+
+	if len(generatorType) > maxGeneratorTypeLength {
+		return fmt.Errorf("%w: maximum length is %d", ErrInvalidGeneratorType, maxGeneratorTypeLength)
+	}
+
+	return nil
 }
 
 // DefaultSnowflakeGenerator 默认的Snowflake生成器

@@ -247,7 +247,8 @@ func TestSnowflakeFactory(t *testing.T) {
 			WorkerID:     5,
 		}
 
-		gen, err := factory.Create(SnowflakeGeneratorType, config)
+		// 安全优化后：工厂接口只接受any类型的config参数
+		gen, err := factory.Create(config)
 		if err != nil {
 			t.Fatalf("创建失败: %v", err)
 		}
@@ -263,20 +264,17 @@ func TestSnowflakeFactory(t *testing.T) {
 		}
 	})
 
-	t.Run("错误的生成器类型", func(t *testing.T) {
-		config := &SnowflakeConfig{
-			DatacenterID: 6,
-			WorkerID:     6,
-		}
-
-		_, err := factory.Create("wrong-type", config)
+	t.Run("错误的配置类型", func(t *testing.T) {
+		// 安全优化后：传入错误的配置类型应该报错
+		_, err := factory.Create("invalid-config")
 		if err == nil {
 			t.Error("期望得到错误")
 		}
 	})
 
-	t.Run("错误的配置类型", func(t *testing.T) {
-		_, err := factory.Create(SnowflakeGeneratorType, "invalid-config")
+	t.Run("nil配置", func(t *testing.T) {
+		// 安全优化后：nil配置应该报错
+		_, err := factory.Create(nil)
 		if err == nil {
 			t.Error("期望得到错误")
 		}
