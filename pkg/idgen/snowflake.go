@@ -42,6 +42,9 @@ const (
 
 	// 等待策略最大重试次数
 	maxWaitRetries = 10
+
+	// 允许的未来时间容差（毫秒）
+	maxFutureTimeTolerance = 5 * 60 * 1000
 )
 
 var (
@@ -87,49 +90,30 @@ type Metrics struct {
 	TotalWaitTimeNs  atomic.Uint64 // 总等待时间（纳秒）
 }
 
-// IDGenerator 定义ID生成器接口（接口隔离原则）
-// 该接口只包含ID生成的核心功能，遵循最小接口原则
+// IDGenerator 定义ID生成器接口
 type IDGenerator interface {
 	// NextID 生成下一个唯一ID
-	// 返回生成的ID和可能的错误
 	NextID() (int64, error)
 	// NextIDBatch 批量生成ID
 	NextIDBatch(n int) ([]int64, error)
 }
 
 // Snowflake Snowflake算法的ID生成器实现
-// 实现了IDGenerator和IDParser接口（里氏替换原则）
 type Snowflake struct {
-	// 使用互斥锁保护并发访问（线程安全）
+	lastTimestamp int64 // 上次生成ID的时间戳
+	datacenterID  int64 // 数据中心ID（0-31）
+	workerID      int64 // 工作机器ID（0-31）
+	sequence      int64 // 当前毫秒内的序列号（0-4095）
+
+	clockBackwardStrategy  ClockBackwardStrategy // 时钟回拨处理策略
+	clockBackwardTolerance int64                 // 时钟回拨容忍时间（毫秒）
+
+	enableMetrics bool     // 监控开关
+	metrics       *Metrics // 性能监控指标
+
+	precomputedPart int64 // 预计算的ID部分，（datacenterI+和workerID）
+
 	mu sync.Mutex
-
-	// 上次生成ID的时间戳
-	lastTimestamp int64
-
-	// 数据中心ID（0-31）
-	datacenterID int64
-
-	// 工作机器ID（0-31）
-	workerID int64
-
-	// 当前毫秒内的序列号（0-4095）
-	sequence int64
-
-	// 时钟回拨处理策略
-	clockBackwardStrategy ClockBackwardStrategy
-
-	// 时钟回拨容忍时间（毫秒）
-	clockBackwardTolerance int64
-
-	// 监控开关
-	enableMetrics bool
-
-	// 性能监控指标
-	metrics *Metrics
-
-	// 预计算的ID部分
-	// datacenterID和workerID部分可以预先计算，减少每次生成时的位运算
-	precomputedPart int64
 }
 
 // SnowflakeConfig Snowflake配置选项
@@ -142,18 +126,6 @@ type SnowflakeConfig struct {
 }
 
 // NewSnowflake 创建一个新的Snowflake ID生成器
-//
-// 参数:
-//
-//	datacenterID: 数据中心ID，取值范围 [0, 31]
-//	workerID: 工作机器ID，取值范围 [0, 31]
-//
-// 返回:
-//
-//	*Snowflake: Snowflake ID生成器实例
-//	error: 参数验证失败时返回错误
-//
-// 注意: 建议使用NewSnowflakeWithConfig以获得更好的可扩展性
 func NewSnowflake(datacenterID, workerID int64) (*Snowflake, error) {
 	return NewSnowflakeWithConfig(&SnowflakeConfig{
 		DatacenterID:  datacenterID,
@@ -162,19 +134,9 @@ func NewSnowflake(datacenterID, workerID int64) (*Snowflake, error) {
 	})
 }
 
-// NewSnowflakeWithConfig 使用配置创建Snowflake ID生成器（开放封闭原则）
-// 通过配置对象扩展功能，无需修改原有代码
-//
-// 参数:
-//
-//	config: Snowflake配置选项
-//
-// 返回:
-//
-//	*Snowflake: Snowflake ID生成器实例
-//	error: 参数验证失败时返回错误
+// NewSnowflakeWithConfig 使用配置创建Snowflake ID生成器
 func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
-	// 参数验证（健壮性）
+	// 参数验证
 	if config == nil {
 		return nil, errors.New("config cannot be nil")
 	}
@@ -187,10 +149,8 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidWorkerID, config.WorkerID)
 	}
 
-	// 默认时钟回拨策略
+	// 默认时钟回拨策略，如果未设置策略，默认使用 StrategyError（更安全）
 	clockBackwardStrategy := config.ClockBackwardStrategy
-	// 如果未设置策略，默认使用 StrategyError（更安全）
-	// 注意：0 值就是 StrategyError，所以这个检查是正确的
 
 	// 默认时钟回拨容忍时间
 	clockBackwardTolerance := config.ClockBackwardTolerance
@@ -221,17 +181,6 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 }
 
 // NextID 生成下一个唯一ID
-// 该方法是线程安全的，可以在多个goroutine中并发调用
-//
-// 返回:
-//
-//	int64: 生成的唯一ID（63位正整数）
-//	error: 当检测到时钟回拨或时间戳溢出时返回错误
-//
-// 性能特性:
-//   - 单个实例每毫秒最多生成4096个ID
-//   - 使用互斥锁保证线程安全
-//   - 序列号耗尽时自动等待下一毫秒
 func (s *Snowflake) NextID() (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -240,17 +189,7 @@ func (s *Snowflake) NextID() (int64, error) {
 }
 
 // waitNextMillis 等待直到获取到比lastTimestamp更大的时间戳
-// 使用短暂休眠代替忙等待，减少CPU占用
-//
-// 参数:
-//
-//	lastTimestamp: 上一次的时间戳
-//
-// 返回:
-//
-//	int64: 新的时间戳（保证大于lastTimestamp）
 func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
-	// 内联时间函数调用
 	timestamp := time.Now().UnixNano() / 1e6
 	for timestamp <= lastTimestamp {
 		// 短暂休眠，避免CPU空转（只阻塞当前goroutine）
@@ -261,10 +200,6 @@ func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
 }
 
 // GetIDCount 获取已生成的ID总数（用于监控）
-//
-// 返回:
-//
-//	uint64: 已生成的ID数量，如果未启用监控则返回0
 func (s *Snowflake) GetIDCount() uint64 {
 	if !s.enableMetrics || s.metrics == nil {
 		return 0
@@ -282,19 +217,7 @@ func (s *Snowflake) GetDatacenterID() int64 {
 	return s.datacenterID
 }
 
-// ParseSnowflakeID 解析Snowflake ID，提取其中的时间戳、数据中心ID、工作机器ID和序列号
-// 这是一个便捷的全局函数，无需创建Snowflake实例
-//
-// 参数:
-//
-//	id: 要解析的Snowflake ID
-//
-// 返回:
-//
-//	timestamp: 生成ID时的时间戳（毫秒，Unix时间）
-//	datacenterID: 数据中心ID (0-31)
-//	workerID: 工作机器ID (0-31)
-//	sequence: 序列号 (0-4095)
+// ParseSnowflakeID 解析Snowflake ID
 func ParseSnowflakeID(id int64) (timestamp int64, datacenterID int64, workerID int64, sequence int64) {
 	timestamp = (id >> TimestampShift) + Epoch
 	datacenterID = (id >> DatacenterIDShift) & MaxDatacenterID
@@ -303,31 +226,13 @@ func ParseSnowflakeID(id int64) (timestamp int64, datacenterID int64, workerID i
 	return
 }
 
-// GetTimestamp 从Snowflake ID中提取时间戳并转换为time.Time类型
-// 这是一个便捷的全局函数
-//
-// 参数:
-//
-//	id: Snowflake ID
-//
-// 返回:
-//
-//	time.Time: ID生成时的时间
+// GetTimestamp 从Snowflake ID中提取时间戳
 func GetTimestamp(id int64) time.Time {
 	timestamp := (id >> TimestampShift) + Epoch
 	return time.UnixMilli(timestamp)
 }
 
 // ValidateSnowflakeID 验证Snowflake ID的有效性
-// 检查ID是否符合格式要求和时间戳是否合理
-//
-// 参数:
-//
-//	id: 要验证的Snowflake ID
-//
-// 返回:
-//
-//	error: 验证失败时返回错误，成功返回nil
 func ValidateSnowflakeID(id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("%w: id must be positive", ErrInvalidSnowflakeID)
@@ -337,37 +242,22 @@ func ValidateSnowflakeID(id int64) error {
 	timestamp := (id >> TimestampShift) + Epoch
 
 	// 检查时间戳是否在合理范围内
-	now := time.Now().UnixMilli()
 	if timestamp < Epoch {
 		return fmt.Errorf("%w: timestamp %d is before epoch %d",
 			ErrInvalidSnowflakeID, timestamp, Epoch)
 	}
 
-	// 允许一定的时钟误差（例如5分钟）
-	if timestamp > now+300000 {
-		return fmt.Errorf("%w: timestamp %d is too far in the future",
-			ErrInvalidSnowflakeID, timestamp)
+	// 允许一定的时钟误差，防止恶意构造ID
+	now := time.Now().UnixMilli()
+	if timestamp > now+maxFutureTimeTolerance {
+		return fmt.Errorf("%w: timestamp %d is too far in the future (max tolerance %dms)",
+			ErrInvalidSnowflakeID, timestamp, maxFutureTimeTolerance)
 	}
 
 	return nil
 }
 
 // NextIDBatch 批量生成ID
-// 通过一次加锁生成多个ID，减少锁竞争，提高批量生成场景的性能
-//
-// 参数:
-//
-//	n: 要生成的ID数量，必须在 [1, 4096] 范围内
-//
-// 返回:
-//
-//	[]int64: 生成的ID列表
-//	error: 生成失败时返回错误
-//
-// 使用场景:
-//   - 批量初始化数据
-//   - 预先生成ID池
-//   - 减少高并发场景下的锁竞争
 func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("%w: batch size must be positive, got %d", ErrInvalidBatchSize, n)
@@ -376,17 +266,13 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		return nil, fmt.Errorf("%w: batch size too large (max %d), got %d", ErrInvalidBatchSize, maxBatchSize, n)
 	}
 
-	s.mu.Lock()
+	s.mu.Lock() // TODO:GG
 	defer s.mu.Unlock()
 
 	ids := make([]int64, 0, n)
-
-	// 批量生成优化 - 预先计算可能需要的毫秒数
-	// 如果需要的ID数量超过单毫秒最大序列号，提前知道需要跨越多个毫秒
 	remainingIDs := n
 
 	for remainingIDs > 0 {
-		// 内联时间获取
 		timestamp := time.Now().UnixNano() / 1e6
 
 		// 时钟回拨检测
@@ -402,9 +288,10 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 				return ids, fmt.Errorf("%w: backward %dms (generated %d IDs)", ErrClockMovedBackwards, offset, len(ids))
 			case StrategyWait:
 				if offset <= s.clockBackwardTolerance {
-					// 使用重试机制，类似 nextIDUnsafe
+					// 使用重试机制等待时钟追赶
 					retries := 0
 					for retries < maxWaitRetries {
+						// 使用 offset+1 确保时钟真正前进
 						time.Sleep(time.Duration(offset+1) * time.Millisecond)
 						timestamp = time.Now().UnixNano() / 1e6
 						if timestamp >= s.lastTimestamp {
@@ -509,14 +396,7 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 }
 
 // nextIDUnsafe 内部使用的不加锁版本的ID生成方法
-// 注意: 调用此方法前必须先获取锁
-//
-// 返回:
-//
-//	int64: 生成的唯一ID
-//	error: 生成失败时返回错误
 func (s *Snowflake) nextIDUnsafe() (int64, error) {
-	// 内联时间函数，减少函数调用开销
 	timestamp := time.Now().UnixNano() / 1e6
 
 	// 时钟回拨检测
@@ -614,25 +494,15 @@ func (s *Snowflake) nextIDUnsafe() (int64, error) {
 	return id, nil
 }
 
-// GetMetrics 获取性能监控指标
-//
-// 返回:
-//
-//	map[string]uint64: 包含各项性能指标的映射
-//
-// 指标说明:
-//   - id_count: 已生成的ID总数
-//   - sequence_overflow: 序列号溢出次数（需要等待下一毫秒的次数）
-//   - clock_backward: 检测到时钟回拨的次数
-//   - wait_count: 等待下一毫秒的总次数
-//   - avg_wait_time_ns: 平均等待时间（纳秒）
+// GetMetrics 获取性能监控指标（线程安全）
 func (s *Snowflake) GetMetrics() map[string]uint64 {
-	if !s.enableMetrics {
+	if !s.enableMetrics || s.metrics == nil {
 		return map[string]uint64{
 			"metrics_enabled": 0,
 		}
 	}
 
+	// 原子读取，避免数据竞态
 	waitCount := s.metrics.WaitCount.Load()
 	var avgWaitTime uint64
 	if waitCount > 0 {
@@ -649,11 +519,7 @@ func (s *Snowflake) GetMetrics() map[string]uint64 {
 	}
 }
 
-// GetMetricsSnapshot 获取性能指标的快照（结构体形式）
-//
-// 返回:
-//
-//	*Metrics: 性能指标快照（指针类型，避免复制锁）
+// GetMetricsSnapshot 获取性能指标的快照
 func (s *Snowflake) GetMetricsSnapshot() *Metrics {
 	if !s.enableMetrics || s.metrics == nil {
 		return &Metrics{}
@@ -669,10 +535,8 @@ func (s *Snowflake) GetMetricsSnapshot() *Metrics {
 	return snapshot
 }
 
-// ResetMetrics 重置性能监控指标
-// 注意: 此方法不是线程安全的，仅用于测试场景
+// ResetMetrics 重置性能监控指标（仅用于测试）
 func (s *Snowflake) ResetMetrics() {
-	// 添加 nil 检查，防止 panic
 	if !s.enableMetrics || s.metrics == nil {
 		return
 	}
