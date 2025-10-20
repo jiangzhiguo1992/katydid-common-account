@@ -1,6 +1,7 @@
 package snowflake
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -651,7 +652,7 @@ func TestHighConcurrency_Million(t *testing.T) {
 						if err != nil {
 							t.Errorf("生成ID失败: %v", err)
 							atomic.AddInt64(&errorCount, 1)
-							continue
+							return
 						}
 
 						// 检查重复
@@ -897,7 +898,7 @@ func TestConcurrentBatch_Million(t *testing.T) {
 						if err != nil {
 							t.Errorf("批量生成失败: %v", err)
 							errorCount++
-							continue
+							return
 						}
 
 						for _, id := range ids {
@@ -1031,7 +1032,7 @@ func TestMultiGenerator_Concurrent(t *testing.T) {
 				id, err := g.NextID()
 				if err != nil {
 					t.Errorf("生成器%d生成ID失败: %v", genIndex, err)
-					continue
+					return
 				}
 
 				if _, loaded := idMap.LoadOrStore(id, genIndex); loaded {
@@ -1081,9 +1082,8 @@ func TestLongRunning_Stability(t *testing.T) {
 	}
 
 	const (
-		duration     = 30 * time.Second
-		goroutines   = 50
-		checkpointMS = 5000 // 每5秒报告一次
+		duration   = 30 * time.Second
+		goroutines = 50
 	)
 
 	idMap := &sync.Map{}
@@ -1106,7 +1106,7 @@ func TestLongRunning_Stability(t *testing.T) {
 				default:
 					id, err := gen.NextID()
 					if err != nil {
-						errorCount++
+						atomic.AddInt64(&errorCount, 1)
 						t.Errorf("生成ID失败: %v", err)
 						continue
 					}
@@ -1114,7 +1114,7 @@ func TestLongRunning_Stability(t *testing.T) {
 					if _, loaded := idMap.LoadOrStore(id, struct{}{}); loaded {
 						t.Errorf("发现重复ID: %d", id)
 					}
-					totalGenerated++
+					atomic.AddInt64(&totalGenerated, 1)
 				}
 			}
 		}()
@@ -1131,7 +1131,7 @@ func TestLongRunning_Stability(t *testing.T) {
 				return
 			case <-ticker.C:
 				elapsed := time.Since(startTime)
-				current := totalGenerated
+				current := atomic.LoadInt64(&totalGenerated)
 				rate := float64(current) / elapsed.Seconds()
 				metrics := gen.GetMetrics()
 
@@ -1155,25 +1155,27 @@ func TestLongRunning_Stability(t *testing.T) {
 		return true
 	})
 
+	totalGen := atomic.LoadInt64(&totalGenerated)
+	errCount := atomic.LoadInt64(&errorCount)
 	metrics := gen.GetMetrics()
-	idsPerSecond := float64(totalGenerated) / elapsed.Seconds()
+	idsPerSecond := float64(totalGen) / elapsed.Seconds()
 
 	t.Logf("============ 长时间运行稳定性报告 ============")
 	t.Logf("运行时间: %v", elapsed)
 	t.Logf("协程数: %d", goroutines)
-	t.Logf("生成总数: %d", totalGenerated)
+	t.Logf("生成总数: %d", totalGen)
 	t.Logf("唯一ID数: %d", uniqueCount)
-	t.Logf("错误数: %d", errorCount)
+	t.Logf("错误数: %d", errCount)
 	t.Logf("平均吞吐量: %.0f IDs/秒", idsPerSecond)
 	t.Logf("序列溢出: %d", metrics["sequence_overflow"])
 	t.Logf("等待次数: %d", metrics["wait_count"])
 	t.Logf("时钟回拨: %d", metrics["clock_backward"])
 
-	if uniqueCount != totalGenerated {
-		t.Errorf("发现重复ID: 唯一数%d != 总数%d", uniqueCount, totalGenerated)
+	if uniqueCount != totalGen {
+		t.Errorf("发现重复ID: 唯一数%d != 总数%d", uniqueCount, totalGen)
 	}
-	if errorCount > 0 {
-		t.Errorf("发生 %d 个错误", errorCount)
+	if errCount > 0 {
+		t.Errorf("发生 %d 个错误", errCount)
 	}
 }
 

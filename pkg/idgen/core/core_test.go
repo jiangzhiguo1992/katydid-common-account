@@ -175,7 +175,7 @@ func TestGeneratorType_Concurrent(t *testing.T) {
 	const goroutines = 1000
 	const iterations = 1000
 
-	errors := make(chan error, goroutines*iterations)
+	errChan := make(chan error, goroutines*iterations)
 	done := make(chan struct{})
 
 	// 并发测试类型验证
@@ -195,14 +195,17 @@ func TestGeneratorType_Concurrent(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		<-done
 	}
-	close(errors)
+	close(errChan)
 
 	// 检查错误
-	for err := range errors {
+	for err := range errChan {
 		if err != nil {
 			t.Errorf("并发测试失败: %v", err)
 		}
 	}
+
+	t.Logf("✓ 并发测试通过: %d 协程 × %d 迭代 = %d 次操作",
+		goroutines, iterations, goroutines*iterations)
 }
 
 // TestClockBackwardStrategy_Concurrent 测试ClockBackwardStrategy并发安全性
