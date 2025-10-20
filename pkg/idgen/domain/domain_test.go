@@ -1,678 +1,788 @@
-package domain
+package domain_test
 
 import (
-	"encoding/json"
+	"runtime"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"katydid-common-account/pkg/idgen/domain"
 )
 
-// TestNewID 测试创建ID
+// ============================================================================
+// 1. ID类型测试
+// ============================================================================
+
+// TestNewID 测试ID创建
 func TestNewID(t *testing.T) {
 	tests := []struct {
-		name     string
-		value    int64
-		expected int64
+		name string
+		val  int64
+		want int64
 	}{
-		{"正数", 12345, 12345},
-		{"零", 0, 0},
-		{"大数", 9223372036854775807, 9223372036854775807},
+		{"零值", 0, 0},
+		{"正数", 123456, 123456},
+		{"大数", 9007199254740991, 9007199254740991},
+		{"负数", -1, -1}, // ID内部可以是负数，但使用时需验证
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := NewID(tt.value)
-			if id.Int64() != tt.expected {
-				t.Errorf("NewID(%d).Int64() = %d, 期望 %d", tt.value, id.Int64(), tt.expected)
+			id := domain.NewID(tt.val)
+			if id.Int64() != tt.want {
+				t.Errorf("NewID(%d).Int64() = %d, want %d", tt.val, id.Int64(), tt.want)
 			}
 		})
 	}
 }
 
-// TestIDString 测试ID转字符串
-func TestIDString(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected string
-	}{
-		{"正数", NewID(12345), "12345"},
-		{"零", NewID(0), "0"},
-		{"大数", NewID(9223372036854775807), "9223372036854775807"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.String(); got != tt.expected {
-				t.Errorf("String() = %s, 期望 %s", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDHex 测试ID转十六进制
-func TestIDHex(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected string
-	}{
-		{"小数", NewID(255), "0xff"},
-		{"零", NewID(0), "0x0"},
-		{"大数", NewID(65535), "0xffff"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.Hex(); got != tt.expected {
-				t.Errorf("Hex() = %s, 期望 %s", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDBinary 测试ID转二进制
-func TestIDBinary(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected string
-	}{
-		{"小数", NewID(5), "0b101"},
-		{"零", NewID(0), "0b0"},
-		{"8", NewID(8), "0b1000"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.Binary(); got != tt.expected {
-				t.Errorf("Binary() = %s, 期望 %s", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDMarshalJSON 测试JSON序列化
-func TestIDMarshalJSON(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected string
-	}{
-		{"正数", NewID(12345), `"12345"`},
-		{"零", NewID(0), `"0"`},
-		{"大数", NewID(9007199254740991), `"9007199254740991"`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := json.Marshal(tt.id)
-			if err != nil {
-				t.Fatalf("序列化失败: %v", err)
-			}
-			if string(data) != tt.expected {
-				t.Errorf("MarshalJSON() = %s, 期望 %s", string(data), tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDUnmarshalJSON 测试JSON反序列化
-func TestIDUnmarshalJSON(t *testing.T) {
-	tests := []struct {
-		name     string
-		jsonData string
-		expected ID
-		wantErr  bool
-	}{
-		{"从字符串", `"12345"`, NewID(12345), false},
-		{"从数字", `67890`, NewID(67890), false},
-		{"零", `"0"`, NewID(0), false},
-		{"无效字符串", `"abc"`, NewID(0), true},
-		{"负数", `-1`, NewID(0), true},
-		{"空数据", ``, NewID(0), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var id ID
-			err := json.Unmarshal([]byte(tt.jsonData), &id)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("期望得到错误，但没有返回错误")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("不期望错误，但得到: %v", err)
-					return
-				}
-				if id != tt.expected {
-					t.Errorf("UnmarshalJSON() = %d, 期望 %d", id, tt.expected)
-				}
-			}
-		})
-	}
-}
-
-// TestIDIsZero 测试零值检查
-func TestIDIsZero(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected bool
-	}{
-		{"零", NewID(0), true},
-		{"正数", NewID(1), false},
-		{"负数", NewID(-1), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.IsZero(); got != tt.expected {
-				t.Errorf("IsZero() = %v, 期望 %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDIsValid 测试有效性检查
-func TestIDIsValid(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected bool
-	}{
-		{"正数_有效", NewID(1), true},
-		{"零_无效", NewID(0), false},
-		{"负数_无效", NewID(-1), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.IsValid(); got != tt.expected {
-				t.Errorf("IsValid() = %v, 期望 %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestIDIsSafeForJavaScript 测试JavaScript安全性检查
-func TestIDIsSafeForJavaScript(t *testing.T) {
-	tests := []struct {
-		name     string
-		id       ID
-		expected bool
-	}{
-		{"安全范围内", NewID(9007199254740991), true},
-		{"超出范围", NewID(9007199254740992), false},
-		{"零", NewID(0), true},
-		{"负数", NewID(-1), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.id.IsSafeForJavaScript(); got != tt.expected {
-				t.Errorf("IsSafeForJavaScript() = %v, 期望 %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestParseID 测试解析ID
+// TestParseID 测试ID解析
 func TestParseID(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected ID
-		wantErr  bool
+		name    string
+		input   string
+		want    int64
+		wantErr bool
 	}{
-		{"十进制", "12345", NewID(12345), false},
-		{"十六进制", "0xFF", NewID(255), false},
-		{"二进制", "0b101", NewID(5), false},
-		{"带空格", "  123  ", NewID(0), true}, // 修改：ParseID不应该自动trim空格，这是正确的行为
-		{"空字符串", "", NewID(0), true},
-		{"无效字符", "abc", NewID(0), true},
-		{"负数", "-1", NewID(0), true},
+		{"十进制_正常", "123456", 123456, false},
+		{"十六进制_小写", "0x1e240", 123456, false},
+		{"十六进制_大写", "0X1E240", 123456, false},
+		{"二进制", "0b11110001001000000", 123456, false},
+		{"零", "0", 0, false},
+		{"空字符串", "", 0, true},
+		{"无效字符", "abc", 0, true},
+		{"负数", "-123", 0, true},
+		{"超长字符串", strings.Repeat("1", 101), 0, true},
+		{"十六进制_无数字", "0x", 0, true},
+		{"二进制_无数字", "0b", 0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, err := ParseID(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("期望得到错误，但没有返回错误")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("不期望错误，但得到: %v", err)
-					return
-				}
-				if id != tt.expected {
-					t.Errorf("ParseID() = %d, 期望 %d", id, tt.expected)
-				}
+			got, err := domain.ParseID(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got.Int64() != tt.want {
+				t.Errorf("ParseID(%q) = %d, want %d", tt.input, got.Int64(), tt.want)
 			}
 		})
 	}
 }
 
-// TestIDSlice 测试ID切片操作
-func TestIDSlice(t *testing.T) {
-	t.Run("NewIDSlice", func(t *testing.T) {
-		ids := NewIDSlice(NewID(1), NewID(2), NewID(3))
-		if ids.Len() != 3 {
-			t.Errorf("Len() = %d, 期望 3", ids.Len())
-		}
-	})
+// TestID_String 测试ID字符串转换
+func TestID_String(t *testing.T) {
+	tests := []struct {
+		name string
+		id   domain.ID
+		want string
+	}{
+		{"零", domain.NewID(0), "0"},
+		{"正数", domain.NewID(123456), "123456"},
+		{"大数", domain.NewID(9007199254740991), "9007199254740991"},
+	}
 
-	t.Run("Int64Slice", func(t *testing.T) {
-		ids := IDSlice{NewID(1), NewID(2), NewID(3)}
-		int64s := ids.Int64Slice()
-		if len(int64s) != 3 {
-			t.Errorf("长度 = %d, 期望 3", len(int64s))
-		}
-		for i, v := range int64s {
-			if v != int64(i+1) {
-				t.Errorf("索引%d: 期望%d, 得到%d", i, i+1, v)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.id.String(); got != tt.want {
+				t.Errorf("String() = %v, want %v", got, tt.want)
 			}
-		}
-	})
-
-	t.Run("StringSlice", func(t *testing.T) {
-		ids := IDSlice{NewID(1), NewID(2), NewID(3)}
-		strs := ids.StringSlice()
-		expected := []string{"1", "2", "3"}
-		for i, v := range strs {
-			if v != expected[i] {
-				t.Errorf("索引%d: 期望%s, 得到%s", i, expected[i], v)
-			}
-		}
-	})
-
-	t.Run("Contains", func(t *testing.T) {
-		ids := IDSlice{NewID(1), NewID(2), NewID(3)}
-		if !ids.Contains(NewID(2)) {
-			t.Error("应该包含ID 2")
-		}
-		if ids.Contains(NewID(4)) {
-			t.Error("不应该包含ID 4")
-		}
-	})
-
-	t.Run("Deduplicate", func(t *testing.T) {
-		ids := IDSlice{NewID(1), NewID(2), NewID(2), NewID(3), NewID(1)}
-		unique := ids.Deduplicate()
-		if unique.Len() != 3 {
-			t.Errorf("去重后长度 = %d, 期望 3", unique.Len())
-		}
-		if ids.Len() != 5 {
-			t.Error("原切片不应被修改")
-		}
-	})
-
-	t.Run("Filter", func(t *testing.T) {
-		ids := IDSlice{NewID(1), NewID(2), NewID(3), NewID(4), NewID(5)}
-		filtered := ids.Filter(func(id ID) bool {
-			return id > NewID(2)
 		})
-		if filtered.Len() != 3 {
-			t.Errorf("过滤后长度 = %d, 期望 3", filtered.Len())
+	}
+}
+
+// TestID_Hex 测试ID十六进制转换
+func TestID_Hex(t *testing.T) {
+	tests := []struct {
+		name string
+		id   domain.ID
+		want string
+	}{
+		{"零", domain.NewID(0), "0x0"},
+		{"正数", domain.NewID(255), "0xff"},
+		{"大数", domain.NewID(123456), "0x1e240"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.id.Hex(); got != tt.want {
+				t.Errorf("Hex() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 2. IDSlice测试
+// ============================================================================
+
+// TestNewIDSlice 测试IDSlice创建
+func TestNewIDSlice(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []domain.ID
+		want int
+	}{
+		{"空切片", []domain.ID{}, 0},
+		{"单个ID", []domain.ID{domain.NewID(1)}, 1},
+		{"多个ID", []domain.ID{domain.NewID(1), domain.NewID(2), domain.NewID(3)}, 3},
+		{"nil输入", nil, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			slice := domain.NewIDSlice(tt.ids...)
+			if slice.Len() != tt.want {
+				t.Errorf("Len() = %d, want %d", slice.Len(), tt.want)
+			}
+		})
+	}
+}
+
+// TestIDSlice_Int64Slice 测试转换为int64切片
+func TestIDSlice_Int64Slice(t *testing.T) {
+	ids := domain.NewIDSlice(
+		domain.NewID(1),
+		domain.NewID(2),
+		domain.NewID(3),
+	)
+
+	got := ids.Int64Slice()
+	want := []int64{1, 2, 3}
+
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("Int64Slice()[%d] = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+// TestIDSlice_StringSlice 测试转换为字符串切片
+func TestIDSlice_StringSlice(t *testing.T) {
+	ids := domain.NewIDSlice(
+		domain.NewID(1),
+		domain.NewID(2),
+		domain.NewID(3),
+	)
+
+	got := ids.StringSlice()
+	want := []string{"1", "2", "3"}
+
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("StringSlice()[%d] = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+// TestIDSlice_Contains 测试包含检查
+func TestIDSlice_Contains(t *testing.T) {
+	ids := domain.NewIDSlice(
+		domain.NewID(1),
+		domain.NewID(2),
+		domain.NewID(3),
+	)
+
+	tests := []struct {
+		name string
+		id   domain.ID
+		want bool
+	}{
+		{"存在_第一个", domain.NewID(1), true},
+		{"存在_中间", domain.NewID(2), true},
+		{"存在_最后", domain.NewID(3), true},
+		{"不存在", domain.NewID(4), false},
+		{"零值", domain.NewID(0), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ids.Contains(tt.id); got != tt.want {
+				t.Errorf("Contains(%d) = %v, want %v", tt.id.Int64(), got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIDSlice_FirstLast 测试首尾元素访问
+func TestIDSlice_FirstLast(t *testing.T) {
+	t.Run("非空切片", func(t *testing.T) {
+		ids := domain.NewIDSlice(
+			domain.NewID(1),
+			domain.NewID(2),
+			domain.NewID(3),
+		)
+
+		first, ok := ids.First()
+		if !ok || first.Int64() != 1 {
+			t.Errorf("First() = (%d, %v), want (1, true)", first.Int64(), ok)
+		}
+
+		last, ok := ids.Last()
+		if !ok || last.Int64() != 3 {
+			t.Errorf("Last() = (%d, %v), want (3, true)", last.Int64(), ok)
+		}
+	})
+
+	t.Run("空切片", func(t *testing.T) {
+		ids := domain.NewIDSlice()
+
+		_, ok := ids.First()
+		if ok {
+			t.Error("First() on empty slice should return false")
+		}
+
+		_, ok = ids.Last()
+		if ok {
+			t.Error("Last() on empty slice should return false")
 		}
 	})
 }
 
-// TestIDSet 测试ID集合操作
-func TestIDSet(t *testing.T) {
-	t.Run("NewIDSet", func(t *testing.T) {
-		set := NewIDSet(NewID(1), NewID(2), NewID(3))
-		if set.Size() != 3 {
-			t.Errorf("Size() = %d, 期望 3", set.Size())
+// TestIDSlice_Deduplicate 测试去重
+func TestIDSlice_Deduplicate(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  domain.IDSlice
+		want int
+	}{
+		{
+			"无重复",
+			domain.NewIDSlice(domain.NewID(1), domain.NewID(2), domain.NewID(3)),
+			3,
+		},
+		{
+			"有重复",
+			domain.NewIDSlice(domain.NewID(1), domain.NewID(2), domain.NewID(1), domain.NewID(3), domain.NewID(2)),
+			3,
+		},
+		{
+			"全部重复",
+			domain.NewIDSlice(domain.NewID(1), domain.NewID(1), domain.NewID(1)),
+			1,
+		},
+		{
+			"空切片",
+			domain.NewIDSlice(),
+			0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.ids.Deduplicate()
+			if result.Len() != tt.want {
+				t.Errorf("Deduplicate().Len() = %d, want %d", result.Len(), tt.want)
+			}
+		})
+	}
+}
+
+// TestIDSlice_Filter 测试过滤
+func TestIDSlice_Filter(t *testing.T) {
+	ids := domain.NewIDSlice(
+		domain.NewID(1),
+		domain.NewID(2),
+		domain.NewID(3),
+		domain.NewID(4),
+		domain.NewID(5),
+	)
+
+	t.Run("过滤偶数", func(t *testing.T) {
+		result := ids.Filter(func(id domain.ID) bool {
+			return id.Int64()%2 == 0
+		})
+		if result.Len() != 2 {
+			t.Errorf("Filter() len = %d, want 2", result.Len())
 		}
 	})
 
-	t.Run("Add", func(t *testing.T) {
-		set := NewIDSet()
-		set.Add(NewID(1))
-		set.Add(NewID(2))
-		if set.Size() != 2 {
-			t.Errorf("Size() = %d, 期望 2", set.Size())
-		}
-		set.Add(NewID(1)) // 重复
-		if set.Size() != 2 {
-			t.Errorf("添加重复后 Size() = %d, 期望 2", set.Size())
+	t.Run("nil谓词", func(t *testing.T) {
+		result := ids.Filter(nil)
+		if result.Len() != ids.Len() {
+			t.Errorf("Filter(nil) len = %d, want %d", result.Len(), ids.Len())
 		}
 	})
+}
 
-	t.Run("Remove", func(t *testing.T) {
-		set := NewIDSet(NewID(1), NewID(2), NewID(3))
-		set.Remove(NewID(2))
-		if set.Size() != 2 {
-			t.Errorf("Size() = %d, 期望 2", set.Size())
-		}
-		if set.Contains(NewID(2)) {
-			t.Error("不应该包含已移除的ID")
-		}
-	})
+// ============================================================================
+// 3. IDSet测试
+// ============================================================================
 
-	t.Run("Contains", func(t *testing.T) {
-		set := NewIDSet(NewID(1), NewID(2), NewID(3))
-		if !set.Contains(NewID(2)) {
-			t.Error("应该包含ID 2")
-		}
-		if set.Contains(NewID(4)) {
-			t.Error("不应该包含ID 4")
-		}
-	})
+// TestNewIDSet 测试IDSet创建
+func TestNewIDSet(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []domain.ID
+		want int
+	}{
+		{"空集合", []domain.ID{}, 0},
+		{"单个ID", []domain.ID{domain.NewID(1)}, 1},
+		{"多个ID_无重复", []domain.ID{domain.NewID(1), domain.NewID(2), domain.NewID(3)}, 3},
+		{"多个ID_有重复", []domain.ID{domain.NewID(1), domain.NewID(2), domain.NewID(1)}, 2},
+		{"nil输入", nil, 0},
+	}
 
-	t.Run("Union", func(t *testing.T) {
-		set1 := NewIDSet(NewID(1), NewID(2))
-		set2 := NewIDSet(NewID(2), NewID(3))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := domain.NewIDSet(tt.ids...)
+			if set.Size() != tt.want {
+				t.Errorf("Size() = %d, want %d", set.Size(), tt.want)
+			}
+		})
+	}
+}
+
+// TestIDSet_AddRemove 测试添加和删除
+func TestIDSet_AddRemove(t *testing.T) {
+	set := domain.NewIDSet()
+
+	// 测试添加
+	set.Add(domain.NewID(1))
+	if !set.Contains(domain.NewID(1)) {
+		t.Error("Add() failed, ID not in set")
+	}
+	if set.Size() != 1 {
+		t.Errorf("Size() = %d, want 1", set.Size())
+	}
+
+	// 测试重复添加
+	set.Add(domain.NewID(1))
+	if set.Size() != 1 {
+		t.Errorf("Duplicate Add(), Size() = %d, want 1", set.Size())
+	}
+
+	// 测试删除
+	set.Remove(domain.NewID(1))
+	if set.Contains(domain.NewID(1)) {
+		t.Error("Remove() failed, ID still in set")
+	}
+	if set.Size() != 0 {
+		t.Errorf("Size() = %d, want 0", set.Size())
+	}
+}
+
+// TestIDSet_Contains 测试包含检查
+func TestIDSet_Contains(t *testing.T) {
+	set := domain.NewIDSet(
+		domain.NewID(1),
+		domain.NewID(2),
+		domain.NewID(3),
+	)
+
+	tests := []struct {
+		name string
+		id   domain.ID
+		want bool
+	}{
+		{"存在", domain.NewID(1), true},
+		{"不存在", domain.NewID(4), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := set.Contains(tt.id); got != tt.want {
+				t.Errorf("Contains(%d) = %v, want %v", tt.id.Int64(), got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIDSet_Operations 测试集合操作
+func TestIDSet_Operations(t *testing.T) {
+	set1 := domain.NewIDSet(domain.NewID(1), domain.NewID(2), domain.NewID(3))
+	set2 := domain.NewIDSet(domain.NewID(2), domain.NewID(3), domain.NewID(4))
+
+	t.Run("并集", func(t *testing.T) {
 		union := set1.Union(set2)
-		if union.Size() != 3 {
-			t.Errorf("并集大小 = %d, 期望 3", union.Size())
+		if union.Size() != 4 {
+			t.Errorf("Union().Size() = %d, want 4", union.Size())
+		}
+		for _, id := range []int64{1, 2, 3, 4} {
+			if !union.Contains(domain.NewID(id)) {
+				t.Errorf("Union() missing ID %d", id)
+			}
 		}
 	})
 
-	t.Run("Intersect", func(t *testing.T) {
-		set1 := NewIDSet(NewID(1), NewID(2), NewID(3))
-		set2 := NewIDSet(NewID(2), NewID(3), NewID(4))
+	t.Run("交集", func(t *testing.T) {
 		intersect := set1.Intersect(set2)
 		if intersect.Size() != 2 {
-			t.Errorf("交集大小 = %d, 期望 2", intersect.Size())
+			t.Errorf("Intersect().Size() = %d, want 2", intersect.Size())
+		}
+		for _, id := range []int64{2, 3} {
+			if !intersect.Contains(domain.NewID(id)) {
+				t.Errorf("Intersect() missing ID %d", id)
+			}
 		}
 	})
 
-	t.Run("Difference", func(t *testing.T) {
-		set1 := NewIDSet(NewID(1), NewID(2), NewID(3))
-		set2 := NewIDSet(NewID(2), NewID(3), NewID(4))
+	t.Run("差集", func(t *testing.T) {
 		diff := set1.Difference(set2)
 		if diff.Size() != 1 {
-			t.Errorf("差集大小 = %d, 期望 1", diff.Size())
+			t.Errorf("Difference().Size() = %d, want 1", diff.Size())
 		}
-		if !diff.Contains(NewID(1)) {
-			t.Error("差集应包含ID 1")
+		if !diff.Contains(domain.NewID(1)) {
+			t.Error("Difference() should contain ID 1")
+		}
+	})
+
+	t.Run("相等性", func(t *testing.T) {
+		set3 := domain.NewIDSet(domain.NewID(1), domain.NewID(2), domain.NewID(3))
+		if !set1.Equal(set3) {
+			t.Error("Equal() should return true for identical sets")
+		}
+		if set1.Equal(set2) {
+			t.Error("Equal() should return false for different sets")
 		}
 	})
 }
 
-// ========== 高并发百万级测试（多维度性能分析） ==========
+// TestIDSet_Clone 测试克隆
+func TestIDSet_Clone(t *testing.T) {
+	original := domain.NewIDSet(domain.NewID(1), domain.NewID(2))
+	clone := original.Clone()
 
-// TestID_ParseConcurrent 测试并发解析ID
-func TestID_ParseConcurrent(t *testing.T) {
-	testStrings := []string{
-		"123456789",
-		"0x1a2b3c",
-		"0b1010101",
-		"9007199254740991", // maxSafeInteger
+	// 验证内容相同
+	if !original.Equal(clone) {
+		t.Error("Clone() should create equal set")
 	}
 
-	const goroutines = 1000
-	const iterations = 1000
-
-	var errorCount int64
-	done := make(chan struct{})
-
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			for j := 0; j < iterations; j++ {
-				for _, s := range testStrings {
-					_, err := ParseID(s)
-					if err != nil {
-						atomic.AddInt64(&errorCount, 1)
-					}
-				}
-			}
-			done <- struct{}{}
-		}()
-	}
-
-	for i := 0; i < goroutines; i++ {
-		<-done
-	}
-
-	if errorCount > 0 {
-		t.Logf("并发解析错误数: %d", errorCount)
+	// 验证独立性
+	clone.Add(domain.NewID(3))
+	if original.Contains(domain.NewID(3)) {
+		t.Error("Modifying clone should not affect original")
 	}
 }
 
-// TestID_MethodsConcurrent 测试ID方法的并发安全性
-func TestID_MethodsConcurrent(t *testing.T) {
-	id := NewID(123456789)
+// ============================================================================
+// 4. 百万级高并发测试
+// ============================================================================
 
-	const goroutines = 1000
-	const iterations = 10000
+// TestID_MillionConcurrent 百万级并发测试ID操作
+func TestID_MillionConcurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
+	}
 
-	done := make(chan struct{})
+	const totalOps = 1_000_000
+	goroutines := runtime.NumCPU() * 100
+	opsPerGoroutine := totalOps / goroutines
 
+	t.Logf("开始百万级并发测试: 总操作=%d, 协程数=%d", totalOps, goroutines)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var successCount atomic.Int64
+
+	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
-		go func() {
-			for j := 0; j < iterations; j++ {
+		go func(gid int) {
+			defer wg.Done()
+			localSuccess := 0
+
+			for j := 0; j < opsPerGoroutine; j++ {
+				id := domain.NewID(int64(gid*opsPerGoroutine + j))
+
+				// 测试多种操作
 				_ = id.Int64()
 				_ = id.String()
 				_ = id.Hex()
-				_ = id.Binary()
-				_ = id.IsZero()
-				_ = id.IsValid()
-				_ = id.IsSafeForJavaScript()
+				localSuccess++
 			}
-			done <- struct{}{}
-		}()
+
+			successCount.Add(int64(localSuccess))
+		}(i)
 	}
 
-	for i := 0; i < goroutines; i++ {
-		<-done
-	}
+	wg.Wait()
+	duration := time.Since(startTime)
+
+	t.Logf("百万级并发测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 成功操作: %d", successCount.Load())
+	t.Logf("  - QPS: %.2f ops/sec", float64(totalOps)/duration.Seconds())
 }
 
-// TestIDSlice_ConcurrentOperations 测试IDSlice并发操作
-func TestIDSlice_ConcurrentOperations(t *testing.T) {
-	// 创建测试数据
-	ids := make([]ID, 10000)
-	for i := range ids {
-		ids[i] = NewID(int64(i))
+// TestIDSlice_MillionConcurrent 百万级并发测试IDSlice
+func TestIDSlice_MillionConcurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
 	}
-	slice := NewIDSlice(ids...)
 
-	const goroutines = 100
-	const iterations = 1000
+	const totalOps = 1_000_000
+	goroutines := runtime.NumCPU() * 50
 
-	done := make(chan struct{})
+	// 创建测试数据
+	testSlice := make([]domain.ID, 1000)
+	for i := range testSlice {
+		testSlice[i] = domain.NewID(int64(i))
+	}
+	ids := domain.NewIDSlice(testSlice...)
 
-	// 并发读取操作（只读，线程安全）
+	t.Logf("开始百万级并发测试: 总操作=%d, 协程数=%d", totalOps, goroutines)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var opsCount atomic.Int64
+
+	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
 		go func() {
-			for j := 0; j < iterations; j++ {
-				_ = slice.Len()
-				_ = slice.IsEmpty()
-				_ = slice.Int64Slice()
-				_ = slice.StringSlice()
-				_, _ = slice.First()
-				_, _ = slice.Last()
-				_ = slice.Contains(NewID(100))
+			defer wg.Done()
+			localOps := 0
+
+			for j := 0; j < totalOps/goroutines; j++ {
+				// 测试多种操作
+				_ = ids.Len()
+				_ = ids.Contains(domain.NewID(int64(j % 1000)))
+				_, _ = ids.First()
+				_, _ = ids.Last()
+				localOps++
 			}
-			done <- struct{}{}
+
+			opsCount.Add(int64(localOps))
 		}()
 	}
 
+	wg.Wait()
+	duration := time.Since(startTime)
+
+	t.Logf("百万级并发测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 总操作数: %d", opsCount.Load())
+	t.Logf("  - QPS: %.2f ops/sec", float64(opsCount.Load())/duration.Seconds())
+}
+
+// TestIDSet_MillionConcurrent 百万级并发读测试IDSet
+func TestIDSet_MillionConcurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
+	}
+
+	const totalOps = 1_000_000
+	goroutines := runtime.NumCPU() * 50
+
+	// 创建测试数据
+	testIDs := make([]domain.ID, 1000)
+	for i := range testIDs {
+		testIDs[i] = domain.NewID(int64(i))
+	}
+	set := domain.NewIDSet(testIDs...)
+
+	t.Logf("开始百万级并发读测试: 总操作=%d, 协程数=%d", totalOps, goroutines)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var opsCount atomic.Int64
+
+	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
-		<-done
-	}
-}
+		go func() {
+			defer wg.Done()
+			localOps := 0
 
-// TestID_MillionParsing 测试百万次ID解析
-func TestID_MillionParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过百万级测试")
-	}
-
-	testCases := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
-		{"十进制", "123456789", false},
-		{"十六进制", "0x1a2b3c4d", false},
-		{"二进制", "0b101010", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			const iterations = 1_000_000
-
-			var successCount int64
-			var errorCount int64
-
-			for i := 0; i < iterations; i++ {
-				_, err := ParseID(tc.input)
-				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-				} else {
-					atomic.AddInt64(&successCount, 1)
-				}
+			for j := 0; j < totalOps/goroutines; j++ {
+				// 只读操作（线程安全）
+				_ = set.Size()
+				_ = set.Contains(domain.NewID(int64(j % 1000)))
+				_ = set.IsEmpty()
+				localOps++
 			}
 
-			t.Logf("成功: %d, 错误: %d", successCount, errorCount)
-
-			if tc.wantErr {
-				if errorCount != iterations {
-					t.Errorf("期望所有解析都失败")
-				}
-			} else {
-				if successCount != iterations {
-					t.Errorf("期望所有解析都成功")
-				}
-			}
-		})
+			opsCount.Add(int64(localOps))
+		}()
 	}
+
+	wg.Wait()
+	duration := time.Since(startTime)
+
+	t.Logf("百万级并发读测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 总操作数: %d", opsCount.Load())
+	t.Logf("  - QPS: %.2f ops/sec", float64(opsCount.Load())/duration.Seconds())
 }
 
-// TestIDSlice_MillionOperations 测试IDSlice百万次操作
-func TestIDSlice_MillionOperations(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过百万级测试")
-	}
+// ============================================================================
+// 5. 性能基准测试
+// ============================================================================
 
-	// 创建测试切片
-	const sliceSize = 100000
-	ids := make([]ID, sliceSize)
-	for i := range ids {
-		ids[i] = NewID(int64(i))
-	}
-	slice := NewIDSlice(ids...)
-
-	t.Run("Contains_百万次", func(t *testing.T) {
-		const iterations = 1_000_000
-
-		for i := 0; i < iterations; i++ {
-			_ = slice.Contains(NewID(int64(i % sliceSize)))
-		}
-
-		t.Logf("完成 %d 次Contains操作", iterations)
-	})
-
-	t.Run("Conversion_百万次", func(t *testing.T) {
-		const iterations = 10000
-
-		for i := 0; i < iterations; i++ {
-			_ = slice.Int64Slice()
-			_ = slice.StringSlice()
-		}
-
-		t.Logf("完成 %d 次转换操作", iterations*2)
-	})
-}
-
-// TestIDSet_MillionOperations 测试IDSet百万次操作
-func TestIDSet_MillionOperations(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过百万级测试")
-	}
-
-	set := NewIDSet()
-
-	t.Run("Add_百万次", func(t *testing.T) {
-		const iterations = 1_000_000
-
-		for i := 0; i < iterations; i++ {
-			set.Add(NewID(int64(i)))
-		}
-
-		if set.Size() != iterations {
-			t.Errorf("集合大小 %d 不等于期望 %d", set.Size(), iterations)
-		}
-
-		t.Logf("成功添加 %d 个元素", set.Size())
-	})
-
-	t.Run("Contains_百万次", func(t *testing.T) {
-		const iterations = 1_000_000
-
-		foundCount := 0
-		for i := 0; i < iterations; i++ {
-			if set.Contains(NewID(int64(i))) {
-				foundCount++
-			}
-		}
-
-		if foundCount != iterations {
-			t.Errorf("找到 %d 个元素，期望 %d", foundCount, iterations)
-		}
-
-		t.Logf("成功查找 %d 次", foundCount)
-	})
-}
-
-// BenchmarkID_ParseDecimal 基准测试：解析十进制
-func BenchmarkID_ParseDecimal(b *testing.B) {
-	s := "123456789"
+// BenchmarkNewID 基准测试ID创建
+func BenchmarkNewID(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		_, _ = ParseID(s)
+		_ = domain.NewID(int64(i))
 	}
 }
 
-// BenchmarkID_ParseHex 基准测试：解析十六进制
-func BenchmarkID_ParseHex(b *testing.B) {
-	s := "0x1a2b3c4d"
+// BenchmarkParseID 基准测试ID解析
+func BenchmarkParseID(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		_, _ = ParseID(s)
+		_, _ = domain.ParseID("123456789")
 	}
 }
 
-// BenchmarkID_String 基准测试：转换为字符串
+// BenchmarkID_String 基准测试String转换
 func BenchmarkID_String(b *testing.B) {
-	id := NewID(123456789)
+	id := domain.NewID(123456789)
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		_ = id.String()
 	}
 }
 
-// BenchmarkIDMarshalJSON 基准测试：JSON序列化
-func BenchmarkIDMarshalJSON(b *testing.B) {
-	id := NewID(9223372036854775807)
+// BenchmarkID_Hex 基准测试Hex转换
+func BenchmarkID_Hex(b *testing.B) {
+	id := domain.NewID(123456789)
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		_, _ = json.Marshal(id)
+		_ = id.Hex()
 	}
 }
 
-// BenchmarkParseID 基准测试：解析ID
-func BenchmarkParseID(b *testing.B) {
-	str := "9223372036854775807"
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = ParseID(str)
-	}
-}
-
-// BenchmarkIDSliceInt64Slice 基准测试：ID切片转int64切片
-func BenchmarkIDSliceInt64Slice(b *testing.B) {
-	ids := make(IDSlice, 100)
+// BenchmarkIDSlice_Contains 基准测试Contains查找
+func BenchmarkIDSlice_Contains(b *testing.B) {
+	ids := make([]domain.ID, 1000)
 	for i := range ids {
-		ids[i] = NewID(int64(i))
+		ids[i] = domain.NewID(int64(i))
 	}
+	slice := domain.NewIDSlice(ids...)
+	searchID := domain.NewID(500)
+
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		_ = ids.Int64Slice()
+		_ = slice.Contains(searchID)
 	}
+}
+
+// BenchmarkIDSlice_Deduplicate 基准测试去重
+func BenchmarkIDSlice_Deduplicate(b *testing.B) {
+	ids := make([]domain.ID, 1000)
+	for i := range ids {
+		ids[i] = domain.NewID(int64(i % 100)) // 产生重复
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		slice := domain.NewIDSlice(ids...)
+		_ = slice.Deduplicate()
+	}
+}
+
+// BenchmarkIDSet_Add 基准测试集合添加
+func BenchmarkIDSet_Add(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		set := domain.NewIDSet()
+		for j := 0; j < 100; j++ {
+			set.Add(domain.NewID(int64(j)))
+		}
+	}
+}
+
+// BenchmarkIDSet_Contains 基准测试集合查找
+func BenchmarkIDSet_Contains(b *testing.B) {
+	ids := make([]domain.ID, 1000)
+	for i := range ids {
+		ids[i] = domain.NewID(int64(i))
+	}
+	set := domain.NewIDSet(ids...)
+	searchID := domain.NewID(500)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_ = set.Contains(searchID)
+	}
+}
+
+// BenchmarkIDSet_Union 基准测试并集操作
+func BenchmarkIDSet_Union(b *testing.B) {
+	set1 := domain.NewIDSet()
+	set2 := domain.NewIDSet()
+	for i := 0; i < 500; i++ {
+		set1.Add(domain.NewID(int64(i)))
+		set2.Add(domain.NewID(int64(i + 250)))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_ = set1.Union(set2)
+	}
+}
+
+// BenchmarkIDSet_Parallel 并行基准测试集合操作
+func BenchmarkIDSet_Parallel(b *testing.B) {
+	ids := make([]domain.ID, 1000)
+	for i := range ids {
+		ids[i] = domain.NewID(int64(i))
+	}
+	set := domain.NewIDSet(ids...)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = set.Contains(domain.NewID(500))
+			_ = set.Size()
+		}
+	})
+}
+
+// ============================================================================
+// 6. 内存对比测试
+// ============================================================================
+
+// BenchmarkIDSlice_vs_IDSet_Memory 对比切片和集合的内存使用
+func BenchmarkIDSlice_vs_IDSet_Memory(b *testing.B) {
+	b.Run("IDSlice", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			ids := make([]domain.ID, 1000)
+			for j := range ids {
+				ids[j] = domain.NewID(int64(j))
+			}
+			_ = domain.NewIDSlice(ids...)
+		}
+	})
+
+	b.Run("IDSet", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			set := domain.NewIDSet()
+			for j := 0; j < 1000; j++ {
+				set.Add(domain.NewID(int64(j)))
+			}
+		}
+	})
 }

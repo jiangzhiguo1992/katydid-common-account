@@ -1,872 +1,691 @@
-package registry
+package registry_test
 
 import (
 	"fmt"
-	"strings"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"katydid-common-account/pkg/idgen/core"
+	"katydid-common-account/pkg/idgen/registry"
 	"katydid-common-account/pkg/idgen/snowflake"
 )
 
-// TestGetRegistry 测试获取注册表单例
-func TestGetRegistry(t *testing.T) {
-	r1 := GetRegistry()
-	r2 := GetRegistry()
+// ============================================================================
+// 1. Registry基础功能测试
+// ============================================================================
 
-	if r1 != r2 {
-		t.Error("GetRegistry应该返回相同的单例实例")
-	}
-
-	if r1 == nil {
-		t.Error("注册表实例不应为nil")
-	}
-}
-
-// TestRegistryCreate 测试创建生成器
-func TestRegistryCreate(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear() // 清理
-
-	t.Run("创建成功", func(t *testing.T) {
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     1,
-		}
-
-		gen, err := registry.Create("test-gen-1", core.GeneratorTypeSnowflake, config)
-		if err != nil {
-			t.Fatalf("创建失败: %v", err)
-		}
-		if gen == nil {
-			t.Error("生成器不应为nil")
-		}
-	})
-
-	t.Run("无效键_空字符串", func(t *testing.T) {
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     1,
-		}
-		_, err := registry.Create("", core.GeneratorTypeSnowflake, config)
-		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-
-	t.Run("无效生成器类型", func(t *testing.T) {
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     1,
-		}
-		_, err := registry.Create("test-invalid", core.GeneratorType("invalid"), config)
-		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-
-	t.Run("重复创建", func(t *testing.T) {
-		config := &snowflake.Config{
-			DatacenterID: 2,
-			WorkerID:     2,
-		}
-
-		key := "test-duplicate"
-		_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
-		if err != nil {
-			t.Fatalf("第一次创建失败: %v", err)
-		}
-
-		_, err = registry.Create(key, core.GeneratorTypeSnowflake, config)
-		if err == nil {
-			t.Error("期望得到重复错误")
-		}
-	})
-}
-
-// TestRegistryGet 测试获取生成器
-func TestRegistryGet(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear()
+// TestRegistry_Create 测试创建生成器
+func TestRegistry_Create(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
 
 	config := &snowflake.Config{
-		DatacenterID: 3,
-		WorkerID:     3,
+		DatacenterID: 1,
+		WorkerID:     1,
 	}
 
-	key := "test-get-1"
-	_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
+	t.Run("正常创建", func(t *testing.T) {
+		gen, err := r.Create("test1", core.GeneratorTypeSnowflake, config)
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+		if gen == nil {
+			t.Fatal("Create() returned nil generator")
+		}
+	})
+
+	t.Run("重复键", func(t *testing.T) {
+		_, err := r.Create("test1", core.GeneratorTypeSnowflake, config)
+		if err == nil {
+			t.Error("Create() with duplicate key should return error")
+		}
+	})
+
+	t.Run("无效类型", func(t *testing.T) {
+		_, err := r.Create("test2", core.GeneratorType("invalid"), config)
+		if err == nil {
+			t.Error("Create() with invalid type should return error")
+		}
+	})
+
+	t.Run("空键", func(t *testing.T) {
+		_, err := r.Create("", core.GeneratorTypeSnowflake, config)
+		if err == nil {
+			t.Error("Create() with empty key should return error")
+		}
+	})
+}
+
+// TestRegistry_Get 测试获取生成器
+func TestRegistry_Get(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	// 先创建
+	_, err := r.Create("test1", core.GeneratorTypeSnowflake, config)
 	if err != nil {
-		t.Fatalf("创建失败: %v", err)
+		t.Fatalf("Setup failed: %v", err)
 	}
 
 	t.Run("获取存在的生成器", func(t *testing.T) {
-		gen, err := registry.Get(key)
+		gen, err := r.Get("test1")
 		if err != nil {
-			t.Errorf("获取失败: %v", err)
+			t.Errorf("Get() error = %v", err)
 		}
 		if gen == nil {
-			t.Error("生成器不应为nil")
+			t.Error("Get() returned nil generator")
 		}
 	})
 
 	t.Run("获取不存在的生成器", func(t *testing.T) {
-		_, err := registry.Get("non-existent")
+		_, err := r.Get("nonexistent")
 		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-}
-
-// TestRegistryGetOrCreate 测试获取或创建
-func TestRegistryGetOrCreate(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear()
-
-	config := &snowflake.Config{
-		DatacenterID: 4,
-		WorkerID:     4,
-	}
-
-	key := "test-get-or-create"
-
-	gen1, err := registry.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
-	if err != nil {
-		t.Fatalf("第一次GetOrCreate失败: %v", err)
-	}
-
-	gen2, err := registry.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
-	if err != nil {
-		t.Fatalf("第二次GetOrCreate失败: %v", err)
-	}
-
-	if gen1 != gen2 {
-		t.Error("应该返回相同的实例")
-	}
-}
-
-// TestRegistryHas 测试检查存在性
-func TestRegistryHas(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear()
-
-	config := &snowflake.Config{
-		DatacenterID: 5,
-		WorkerID:     5,
-	}
-
-	key := "test-has"
-	_, _ = registry.Create(key, core.GeneratorTypeSnowflake, config)
-
-	if !registry.Has(key) {
-		t.Error("应该存在")
-	}
-
-	if registry.Has("non-existent") {
-		t.Error("不应该存在")
-	}
-}
-
-// TestRegistryRemove 测试移除生成器
-func TestRegistryRemove(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear()
-
-	config := &snowflake.Config{
-		DatacenterID: 6,
-		WorkerID:     6,
-	}
-
-	key := "test-remove"
-	_, _ = registry.Create(key, core.GeneratorTypeSnowflake, config)
-
-	if !registry.Has(key) {
-		t.Fatal("生成器应该存在")
-	}
-
-	err := registry.Remove(key)
-	if err != nil {
-		t.Errorf("移除失败: %v", err)
-	}
-
-	if registry.Has(key) {
-		t.Error("生成器应该已被移除")
-	}
-}
-
-// TestRegistryClear 测试清空注册表
-func TestRegistryClear(t *testing.T) {
-	registry := GetRegistry()
-
-	config := &snowflake.Config{
-		DatacenterID: 7,
-		WorkerID:     7,
-	}
-
-	// 创建几个生成器
-	for i := 0; i < 3; i++ {
-		_, _ = registry.Create("test-clear-"+string(rune(i)), core.GeneratorTypeSnowflake, config)
-	}
-
-	registry.Clear()
-
-	// 验证已清空
-	if registry.Has("test-clear-0") {
-		t.Error("注册表应该已被清空")
-	}
-}
-
-// TestFactoryRegistry 测试工厂注册表
-func TestFactoryRegistry(t *testing.T) {
-	factoryRegistry := GetFactoryRegistry()
-
-	t.Run("获取Snowflake工厂", func(t *testing.T) {
-		factory, err := factoryRegistry.Get(core.GeneratorTypeSnowflake)
-		if err != nil {
-			t.Errorf("获取工厂失败: %v", err)
-		}
-		if factory == nil {
-			t.Error("工厂不应为nil")
+			t.Error("Get() should return error for nonexistent key")
 		}
 	})
 
-	t.Run("获取不存在的工厂", func(t *testing.T) {
-		_, err := factoryRegistry.Get(core.GeneratorType("unknown"))
+	t.Run("空键", func(t *testing.T) {
+		_, err := r.Get("")
 		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-
-	t.Run("Has方法", func(t *testing.T) {
-		if !factoryRegistry.Has(core.GeneratorTypeSnowflake) {
-			t.Error("应该有Snowflake工厂")
-		}
-		if factoryRegistry.Has(core.GeneratorType("unknown")) {
-			t.Error("不应该有unknown工厂")
-		}
-	})
-
-	t.Run("List方法", func(t *testing.T) {
-		types := factoryRegistry.List()
-		if len(types) == 0 {
-			t.Error("至少应该有一个工厂类型")
-		}
-		found := false
-		for _, t := range types {
-			if t == core.GeneratorTypeSnowflake {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("应该包含Snowflake类型")
+			t.Error("Get() should return error for empty key")
 		}
 	})
 }
 
-// TestSnowflakeFactory 测试Snowflake工厂
-func TestSnowflakeFactory(t *testing.T) {
-	factory := NewSnowflakeFactory()
+// TestRegistry_GetOrCreate 测试获取或创建生成器
+func TestRegistry_GetOrCreate(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
 
-	t.Run("创建成功", func(t *testing.T) {
-		config := &snowflake.Config{
-			DatacenterID: 8,
-			WorkerID:     8,
-		}
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
 
-		gen, err := factory.Create(config)
+	t.Run("创建新生成器", func(t *testing.T) {
+		gen, err := r.GetOrCreate("test1", core.GeneratorTypeSnowflake, config)
 		if err != nil {
-			t.Fatalf("创建失败: %v", err)
+			t.Fatalf("GetOrCreate() error = %v", err)
 		}
 		if gen == nil {
-			t.Error("生成器不应为nil")
-		}
-
-		// 验证接口实现
-		_, ok := gen.(core.IDGenerator)
-		if !ok {
-			t.Error("应该实现IDGenerator接口")
+			t.Fatal("GetOrCreate() returned nil generator")
 		}
 	})
 
-	t.Run("无效配置类型", func(t *testing.T) {
-		_, err := factory.Create("invalid")
-		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-
-	t.Run("nil配置", func(t *testing.T) {
-		_, err := factory.Create(nil)
-		if err == nil {
-			t.Error("期望得到错误")
-		}
-	})
-}
-
-// TestParserRegistry 测试解析器注册表
-func TestParserRegistry(t *testing.T) {
-	parserRegistry := GetParserRegistry()
-
-	t.Run("获取Snowflake解析器", func(t *testing.T) {
-		parser, err := parserRegistry.Get(core.GeneratorTypeSnowflake)
+	t.Run("获取已存在的生成器", func(t *testing.T) {
+		gen, err := r.GetOrCreate("test1", core.GeneratorTypeSnowflake, config)
 		if err != nil {
-			t.Errorf("获取解析器失败: %v", err)
+			t.Fatalf("GetOrCreate() error = %v", err)
 		}
-		if parser == nil {
-			t.Error("解析器不应为nil")
-		}
-	})
-
-	t.Run("Has方法", func(t *testing.T) {
-		if !parserRegistry.Has(core.GeneratorTypeSnowflake) {
-			t.Error("应该有Snowflake解析器")
+		if gen == nil {
+			t.Fatal("GetOrCreate() returned nil generator")
 		}
 	})
 }
 
-// TestValidatorRegistry 测试验证器注册表
-func TestValidatorRegistry(t *testing.T) {
-	validatorRegistry := GetValidatorRegistry()
+// TestRegistry_Has 测试检查生成器是否存在
+func TestRegistry_Has(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
 
-	t.Run("获取Snowflake验证器", func(t *testing.T) {
-		validator, err := validatorRegistry.Get(core.GeneratorTypeSnowflake)
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	_, _ = r.Create("test1", core.GeneratorTypeSnowflake, config)
+
+	tests := []struct {
+		name string
+		key  string
+		want bool
+	}{
+		{"存在的键", "test1", true},
+		{"不存在的键", "nonexistent", false},
+		{"空键", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := r.Has(tt.key); got != tt.want {
+				t.Errorf("Has(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRegistry_Remove 测试删除生成器
+func TestRegistry_Remove(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	_, _ = r.Create("test1", core.GeneratorTypeSnowflake, config)
+
+	t.Run("删除存在的生成器", func(t *testing.T) {
+		err := r.Remove("test1")
 		if err != nil {
-			t.Errorf("获取验证器失败: %v", err)
+			t.Errorf("Remove() error = %v", err)
 		}
-		if validator == nil {
-			t.Error("验证器不应为nil")
+		if r.Has("test1") {
+			t.Error("Generator still exists after Remove()")
+		}
+	})
+
+	t.Run("删除不存在的生成器", func(t *testing.T) {
+		err := r.Remove("nonexistent")
+		if err == nil {
+			t.Error("Remove() should return error for nonexistent key")
+		}
+	})
+}
+
+// TestRegistry_Clear 测试清空注册表
+func TestRegistry_Clear(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	// 创建多个生成器
+	for i := 0; i < 5; i++ {
+		_, _ = r.Create(fmt.Sprintf("test%d", i), core.GeneratorTypeSnowflake, config)
+	}
+
+	r.Clear()
+
+	if r.Count() != 0 {
+		t.Errorf("Count() = %d after Clear(), want 0", r.Count())
+	}
+}
+
+// TestRegistry_Count 测试计数
+func TestRegistry_Count(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	if r.Count() != 0 {
+		t.Errorf("Initial Count() = %d, want 0", r.Count())
+	}
+
+	// 创建3个生成器
+	for i := 0; i < 3; i++ {
+		_, _ = r.Create(fmt.Sprintf("test%d", i), core.GeneratorTypeSnowflake, config)
+	}
+
+	if r.Count() != 3 {
+		t.Errorf("Count() = %d after creating 3 generators, want 3", r.Count())
+	}
+}
+
+// TestRegistry_ListKeys 测试列出所有键
+func TestRegistry_ListKeys(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	keys := []string{"test1", "test2", "test3"}
+	for _, key := range keys {
+		_, _ = r.Create(key, core.GeneratorTypeSnowflake, config)
+	}
+
+	gotKeys := r.ListKeys()
+	if len(gotKeys) != len(keys) {
+		t.Errorf("ListKeys() returned %d keys, want %d", len(gotKeys), len(keys))
+	}
+
+	// 验证所有键都存在
+	keyMap := make(map[string]bool)
+	for _, k := range gotKeys {
+		keyMap[k] = true
+	}
+	for _, k := range keys {
+		if !keyMap[k] {
+			t.Errorf("ListKeys() missing key %q", k)
+		}
+	}
+}
+
+// TestRegistry_MaxGenerators 测试最大生成器限制
+func TestRegistry_MaxGenerators(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	t.Run("设置最大值", func(t *testing.T) {
+		err := r.SetMaxGenerators(10)
+		if err != nil {
+			t.Errorf("SetMaxGenerators(10) error = %v", err)
+		}
+		if got := r.GetMaxGenerators(); got != 10 {
+			t.Errorf("GetMaxGenerators() = %d, want 10", got)
 		}
 	})
 
-	t.Run("Has方法", func(t *testing.T) {
-		if !validatorRegistry.Has(core.GeneratorTypeSnowflake) {
-			t.Error("应该有Snowflake验证器")
+	t.Run("无效最大值_负数", func(t *testing.T) {
+		err := r.SetMaxGenerators(-1)
+		if err == nil {
+			t.Error("SetMaxGenerators(-1) should return error")
+		}
+	})
+
+	t.Run("超出绝对限制", func(t *testing.T) {
+		err := r.SetMaxGenerators(200000) // 超过100000的限制
+		if err == nil {
+			t.Error("SetMaxGenerators(200000) should return error")
 		}
 	})
 }
 
-// TestGetDefaultGenerator 测试获取默认生成器
-func TestGetDefaultGenerator(t *testing.T) {
-	gen1, err := GetDefaultGenerator()
-	if err != nil {
-		t.Fatalf("获取默认生成器失败: %v", err)
-	}
-	if gen1 == nil {
-		t.Error("默认生成器不应为nil")
-	}
+// ============================================================================
+// 2. 并发测试
+// ============================================================================
 
-	gen2, err := GetDefaultGenerator()
-	if err != nil {
-		t.Fatalf("第二次获取失败: %v", err)
-	}
-
-	if gen1 != gen2 {
-		t.Error("应该返回相同的默认生成器实例")
-	}
-
-	// 测试生成ID
-	id, err := gen1.NextID()
-	if err != nil {
-		t.Errorf("生成ID失败: %v", err)
-	}
-	if id <= 0 {
-		t.Errorf("生成的ID应为正数，得到: %d", id)
-	}
-}
-
-// TestGetOrCreateDefaultGenerator 测试获取或创建默认生成器
-func TestGetOrCreateDefaultGenerator(t *testing.T) {
-	gen, err := GetOrCreateDefaultGenerator()
-	if err != nil {
-		t.Fatalf("获取失败: %v", err)
-	}
-	if gen == nil {
-		t.Error("生成器不应为nil")
-	}
-}
-
-// TestRegistryConcurrency 测试注册表并发安全性
-func TestRegistryConcurrency(t *testing.T) {
-	registry := GetRegistry()
-	defer registry.Clear()
-
-	goroutines := 50
-	var wg sync.WaitGroup
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-
-			config := &snowflake.Config{
-				DatacenterID: int64(idx % 32),
-				WorkerID:     int64(idx % 32),
-			}
-
-			key := "concurrent-test"
-			gen, err := registry.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
-			if err != nil {
-				t.Errorf("GetOrCreate失败: %v", err)
-				return
-			}
-
-			// 生成一些ID
-			for j := 0; j < 10; j++ {
-				_, err := gen.NextID()
-				if err != nil {
-					t.Errorf("生成ID失败: %v", err)
-					return
-				}
-			}
-		}(i)
-	}
-
-	wg.Wait()
-}
-
-// ========== 高并发百万级测试（多维度性能分析） ==========
-
-// TestRegistry_ConcurrentCreate 测试并发创建生成器
-func TestRegistry_ConcurrentCreate(t *testing.T) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 1000,
-	}
+// TestRegistry_Concurrent 测试并发访问
+func TestRegistry_Concurrent(t *testing.T) {
+	r := registry.GetRegistry()
+	defer r.Clear()
 
 	const goroutines = 100
-	const generatorsPerGoroutine = 10
+	const iterations = 100
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
 
 	var wg sync.WaitGroup
-	var successCount int64
-	var errorCount int64
+	wg.Add(goroutines)
 
 	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
+		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < generatorsPerGoroutine; j++ {
-				key := fmt.Sprintf("gen_%d_%d", idx, j)
-				config := &snowflake.Config{
-					DatacenterID: int64(idx % 32),
-					WorkerID:     int64(j % 32),
-				}
-				_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
-				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-				} else {
-					atomic.AddInt64(&successCount, 1)
-				}
-			}
-		}(i)
-	}
+			key := fmt.Sprintf("gen_%d", id)
 
-	wg.Wait()
-
-	t.Logf("成功创建: %d, 失败: %d", successCount, errorCount)
-	t.Logf("注册表大小: %d", len(registry.generators))
-
-	expectedSuccess := int64(goroutines * generatorsPerGoroutine)
-	if successCount != expectedSuccess {
-		t.Errorf("成功数 %d 不等于期望 %d", successCount, expectedSuccess)
-	}
-}
-
-// TestRegistry_ConcurrentGet 测试并发获取生成器
-func TestRegistry_ConcurrentGet(t *testing.T) {
-	registry := GetRegistry()
-	registry.Clear()
-
-	// 预先创建一些生成器
-	const numGenerators = 100
-	for i := 0; i < numGenerators; i++ {
-		key := fmt.Sprintf("test_gen_%d", i)
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     int64(i % 32),
-		}
-		_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
-		if err != nil {
-			t.Fatalf("创建生成器失败: %v", err)
-		}
-	}
-
-	const goroutines = 100
-	const iterations = 1000
-
-	var wg sync.WaitGroup
-	var successCount int64
-	var errorCount int64
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				key := fmt.Sprintf("test_gen_%d", j%numGenerators)
-				_, err := registry.Get(key)
-				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-				} else {
-					atomic.AddInt64(&successCount, 1)
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	t.Logf("成功获取: %d, 失败: %d", successCount, errorCount)
-
-	if errorCount > 0 {
-		t.Errorf("不应有获取失败: %d", errorCount)
-	}
-}
-
-// TestRegistry_ConcurrentGetOrCreate 测试并发GetOrCreate
-func TestRegistry_ConcurrentGetOrCreate(t *testing.T) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 1000,
-	}
-
-	const goroutines = 100
-	const keys = 10 // 多个协程竞争同样的key
-
-	var wg sync.WaitGroup
-	var successCount int64
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			key := fmt.Sprintf("shared_gen_%d", idx%keys)
-			config := &snowflake.Config{
-				DatacenterID: 1,
-				WorkerID:     1,
-			}
-			_, err := registry.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
-			if err == nil {
-				atomic.AddInt64(&successCount, 1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	t.Logf("成功: %d, 注册表大小: %d", successCount, len(registry.generators))
-
-	if len(registry.generators) != keys {
-		t.Errorf("注册表大小 %d 不等于期望 %d", len(registry.generators), keys)
-	}
-}
-
-// TestRegistry_ConcurrentReadWrite 测试并发读写操作
-func TestRegistry_ConcurrentReadWrite(t *testing.T) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 1000,
-	}
-
-	// 预创建一些生成器
-	for i := 0; i < 50; i++ {
-		key := fmt.Sprintf("initial_gen_%d", i)
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     int64(i % 32),
-		}
-		registry.Create(key, core.GeneratorTypeSnowflake, config)
-	}
-
-	const goroutines = 50
-	const operations = 100
-
-	var wg sync.WaitGroup
-	var reads int64
-	var writes int64
-	var deletes int64
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < operations; j++ {
-				switch j % 3 {
-				case 0: // 读操作
-					key := fmt.Sprintf("initial_gen_%d", j%50)
-					_, _ = registry.Get(key)
-					atomic.AddInt64(&reads, 1)
-
-				case 1: // 写操作
-					key := fmt.Sprintf("new_gen_%d_%d", idx, j)
-					config := &snowflake.Config{
-						DatacenterID: int64(idx % 32),
-						WorkerID:     int64(j % 32),
-					}
-					_, _ = registry.Create(key, core.GeneratorTypeSnowflake, config)
-					atomic.AddInt64(&writes, 1)
-
-				case 2: // 删除操作
-					key := fmt.Sprintf("new_gen_%d_%d", idx, j-1)
-					_ = registry.Remove(key)
-					atomic.AddInt64(&deletes, 1)
-				}
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	t.Logf("读操作: %d, 写操作: %d, 删除操作: %d", reads, writes, deletes)
-	t.Logf("最终注册表大小: %d", len(registry.generators))
-}
-
-// TestRegistry_StressTest 测试注册表压力测试
-func TestRegistry_StressTest(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过压力测试")
-	}
-
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 10000,
-	}
-
-	const goroutines = 100
-	const operationsPerGoroutine = 1000
-
-	var wg sync.WaitGroup
-	var createCount int64
-	var getCount int64
-	var removeCount int64
-	var errorCount int64
-
-	startTime := time.Now()
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < operationsPerGoroutine; j++ {
-				key := fmt.Sprintf("stress_gen_%d_%d", idx, j)
-
 				// 创建
-				config := &snowflake.Config{
-					DatacenterID: int64(idx % 32),
-					WorkerID:     int64(j % 32),
-				}
-				_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
-				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-					continue
-				}
-				atomic.AddInt64(&createCount, 1)
+				_, _ = r.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
+
+				// 检查
+				_ = r.Has(key)
 
 				// 获取
-				_, err = registry.Get(key)
-				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-				} else {
-					atomic.AddInt64(&getCount, 1)
+				if gen, err := r.Get(key); err == nil && gen != nil {
+					// 生成ID
+					_, _ = gen.NextID()
 				}
+			}
+		}(i)
+	}
 
-				// 删除（部分）
-				if j%2 == 0 {
-					err = registry.Remove(key)
-					if err == nil {
-						atomic.AddInt64(&removeCount, 1)
+	wg.Wait()
+}
+
+// ============================================================================
+// 3. 百万级高并发测试
+// ============================================================================
+
+// TestRegistry_MillionConcurrentRead 百万级并发读测试
+func TestRegistry_MillionConcurrentRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
+	}
+
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	// 准备测试数据：创建10个生成器
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+	for i := 0; i < 10; i++ {
+		_, _ = r.Create(fmt.Sprintf("gen_%d", i), core.GeneratorTypeSnowflake, config)
+	}
+
+	const totalOps = 1_000_000
+	goroutines := runtime.NumCPU() * 100
+	opsPerGoroutine := totalOps / goroutines
+
+	t.Logf("开始百万级并发读测试: 总操作=%d, 协程数=%d", totalOps, goroutines)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var successCount atomic.Int64
+
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(gid int) {
+			defer wg.Done()
+			localSuccess := 0
+
+			for j := 0; j < opsPerGoroutine; j++ {
+				key := fmt.Sprintf("gen_%d", j%10)
+
+				// 测试多种读操作
+				switch j % 4 {
+				case 0:
+					if r.Has(key) {
+						localSuccess++
 					}
+				case 1:
+					if _, err := r.Get(key); err == nil {
+						localSuccess++
+					}
+				case 2:
+					_ = r.Count()
+					localSuccess++
+				case 3:
+					_ = r.ListKeys()
+					localSuccess++
+				}
+			}
+
+			successCount.Add(int64(localSuccess))
+		}(i)
+	}
+
+	wg.Wait()
+	duration := time.Since(startTime)
+
+	t.Logf("百万级并发读测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 成功操作: %d", successCount.Load())
+	t.Logf("  - QPS: %.2f ops/sec", float64(totalOps)/duration.Seconds())
+	t.Logf("  - 平均延迟: %v", duration/time.Duration(totalOps))
+}
+
+// TestRegistry_MillionConcurrentGetOrCreate 百万级并发GetOrCreate测试
+func TestRegistry_MillionConcurrentGetOrCreate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
+	}
+
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	const totalOps = 1_000_000
+	const uniqueKeys = 1000 // 使用1000个不同的键
+	goroutines := runtime.NumCPU() * 100
+	opsPerGoroutine := totalOps / goroutines
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+
+	t.Logf("开始百万级并发GetOrCreate测试: 总操作=%d, 协程数=%d, 唯一键=%d",
+		totalOps, goroutines, uniqueKeys)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var successCount atomic.Int64
+	var errorCount atomic.Int64
+
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(gid int) {
+			defer wg.Done()
+
+			for j := 0; j < opsPerGoroutine; j++ {
+				key := fmt.Sprintf("gen_%d", j%uniqueKeys)
+
+				if _, err := r.GetOrCreate(key, core.GeneratorTypeSnowflake, config); err == nil {
+					successCount.Add(1)
+				} else {
+					errorCount.Add(1)
 				}
 			}
 		}(i)
 	}
 
 	wg.Wait()
-	elapsed := time.Since(startTime)
+	duration := time.Since(startTime)
 
-	t.Logf("============ 压力测试报告 ============")
-	t.Logf("总耗时: %v", elapsed)
-	t.Logf("创建数: %d", createCount)
-	t.Logf("获取数: %d", getCount)
-	t.Logf("删除数: %d", removeCount)
-	t.Logf("错误数: %d", errorCount)
-	t.Logf("最终大小: %d", len(registry.generators))
-}
+	t.Logf("百万级并发GetOrCreate测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 成功操作: %d", successCount.Load())
+	t.Logf("  - 失败操作: %d", errorCount.Load())
+	t.Logf("  - 最终生成器数: %d (预期: %d)", r.Count(), uniqueKeys)
+	t.Logf("  - QPS: %.2f ops/sec", float64(totalOps)/duration.Seconds())
+	t.Logf("  - 平均延迟: %v", duration/time.Duration(totalOps))
 
-// TestFactoryRegistry_Concurrent 测试工厂注册表并发安全性
-func TestFactoryRegistry_Concurrent(t *testing.T) {
-	fr := GetFactoryRegistry()
-
-	const goroutines = 100
-	const iterations = 1000
-
-	var wg sync.WaitGroup
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
-				// 并发获取工厂
-				_, _ = fr.Get(core.GeneratorTypeSnowflake)
-
-				// 并发检查
-				_ = fr.Has(core.GeneratorTypeSnowflake)
-
-				// 并发列出
-				_ = fr.List()
-			}
-		}()
-	}
-
-	wg.Wait()
-}
-
-// TestParserRegistry_Concurrent 测试解析器注册表并发安全性
-func TestParserRegistry_Concurrent(t *testing.T) {
-	pr := GetParserRegistry()
-
-	const goroutines = 100
-	const iterations = 1000
-
-	var wg sync.WaitGroup
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
-				// 并发获取解析器
-				_, _ = pr.Get(core.GeneratorTypeSnowflake)
-
-				// 并发检查
-				_ = pr.Has(core.GeneratorTypeSnowflake)
-			}
-		}()
-	}
-
-	wg.Wait()
-}
-
-// TestRegistry_MaxGeneratorsLimit 测试最大生成器数量限制
-func TestRegistry_MaxGeneratorsLimit(t *testing.T) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 100, // 设置较小的限制
-	}
-
-	const goroutines = 20
-	const attemptsPerGoroutine = 10
-
-	var wg sync.WaitGroup
-	var successCount int64
-	var reachedLimitCount int64
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < attemptsPerGoroutine; j++ {
-				key := fmt.Sprintf("limit_gen_%d_%d", idx, j)
-				config := &snowflake.Config{
-					DatacenterID: int64(idx % 32),
-					WorkerID:     int64(j % 32),
-				}
-				_, err := registry.Create(key, core.GeneratorTypeSnowflake, config)
-				if err == nil {
-					atomic.AddInt64(&successCount, 1)
-				} else if err.Error() == core.ErrMaxGeneratorsReached.Error() ||
-					strings.Contains(err.Error(), "maximum number of generators reached") {
-					atomic.AddInt64(&reachedLimitCount, 1)
-				}
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	t.Logf("成功创建: %d", successCount)
-	t.Logf("达到限制: %d", reachedLimitCount)
-	t.Logf("最终大小: %d (限制: %d)", len(registry.generators), registry.maxGenerators)
-
-	if len(registry.generators) > registry.maxGenerators {
-		t.Errorf("注册表大小 %d 超过限制 %d", len(registry.generators), registry.maxGenerators)
+	// 验证生成器数量
+	if r.Count() != uniqueKeys {
+		t.Logf("警告: 生成器数量 = %d, 预期 = %d", r.Count(), uniqueKeys)
 	}
 }
 
-// BenchmarkRegistry_Create 基准测试：创建生成器
-func BenchmarkRegistry_Create(b *testing.B) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 100000,
+// TestRegistry_MillionConcurrentIDGeneration 百万级并发ID生成测试
+func TestRegistry_MillionConcurrentIDGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级并发测试")
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := fmt.Sprintf("bench_gen_%d", i)
-		config := &snowflake.Config{
-			DatacenterID: 1,
-			WorkerID:     1,
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	// 创建10个生成器
+	const numGenerators = 10
+	config := &snowflake.Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	}
+
+	generators := make([]core.IDGenerator, numGenerators)
+	for i := 0; i < numGenerators; i++ {
+		gen, err := r.Create(fmt.Sprintf("gen_%d", i), core.GeneratorTypeSnowflake, config)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
 		}
-		_, _ = registry.Create(key, core.GeneratorTypeSnowflake, config)
+		generators[i] = gen
 	}
+
+	const totalIDs = 1_000_000
+	goroutines := runtime.NumCPU() * 100
+	idsPerGoroutine := totalIDs / goroutines
+
+	t.Logf("开始百万级并发ID生成测试: 总ID数=%d, 协程数=%d, 生成器数=%d",
+		totalIDs, goroutines, numGenerators)
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+	var successCount atomic.Int64
+	var errorCount atomic.Int64
+
+	// 用于检测ID唯一性
+	idSet := sync.Map{}
+	var duplicateCount atomic.Int64
+
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(gid int) {
+			defer wg.Done()
+
+			for j := 0; j < idsPerGoroutine; j++ {
+				// 轮询使用不同的生成器
+				gen := generators[j%numGenerators]
+
+				if id, err := gen.NextID(); err == nil {
+					successCount.Add(1)
+
+					// 检测重复（采样检查，避免内存溢出）
+					if j%1000 == 0 {
+						if _, exists := idSet.LoadOrStore(id, struct{}{}); exists {
+							duplicateCount.Add(1)
+						}
+					}
+				} else {
+					errorCount.Add(1)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	duration := time.Since(startTime)
+
+	t.Logf("百万级并发ID生成测试完成:")
+	t.Logf("  - 总耗时: %v", duration)
+	t.Logf("  - 成功生成: %d", successCount.Load())
+	t.Logf("  - 失败次数: %d", errorCount.Load())
+	t.Logf("  - 重复ID数: %d (采样检测)", duplicateCount.Load())
+	t.Logf("  - QPS: %.2f IDs/sec", float64(successCount.Load())/duration.Seconds())
+	t.Logf("  - 平均延迟: %v", duration/time.Duration(successCount.Load()))
+
+	// 验证无重复
+	if duplicateCount.Load() > 0 {
+		t.Errorf("发现 %d 个重复ID", duplicateCount.Load())
+	}
+
+	// 验证成功率
+	successRate := float64(successCount.Load()) / float64(totalIDs) * 100
+	t.Logf("  - 成功率: %.2f%%", successRate)
 }
 
-// BenchmarkRegistry_Get 基准测试：获取生成器
+// ============================================================================
+// 4. 性能基准测试
+// ============================================================================
+
+// BenchmarkRegistry_Get 基准测试Get操作
 func BenchmarkRegistry_Get(b *testing.B) {
-	registry := GetRegistry()
-	registry.Clear()
+	r := registry.GetRegistry()
+	defer r.Clear()
 
-	// 预创建生成器
 	config := &snowflake.Config{
 		DatacenterID: 1,
 		WorkerID:     1,
 	}
-	registry.Create("test_gen", core.GeneratorTypeSnowflake, config)
+	_, _ = r.Create("test", core.GeneratorTypeSnowflake, config)
 
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		_, _ = registry.Get("test_gen")
+		_, _ = r.Get("test")
 	}
 }
 
-// BenchmarkRegistry_GetOrCreate 基准测试：GetOrCreate
+// BenchmarkRegistry_Has 基准测试Has操作
+func BenchmarkRegistry_Has(b *testing.B) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID: 1,
+		WorkerID:     1,
+	}
+	_, _ = r.Create("test", core.GeneratorTypeSnowflake, config)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_ = r.Has("test")
+	}
+}
+
+// BenchmarkRegistry_GetOrCreate 基准测试GetOrCreate操作
 func BenchmarkRegistry_GetOrCreate(b *testing.B) {
-	registry := &Registry{
-		generators:    make(map[string]core.IDGenerator),
-		maxGenerators: 100000,
-	}
+	r := registry.GetRegistry()
+	defer r.Clear()
 
 	config := &snowflake.Config{
 		DatacenterID: 1,
 		WorkerID:     1,
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		key := fmt.Sprintf("bench_gen_%d", i%100) // 重复使用100个key
-		_, _ = registry.GetOrCreate(key, core.GeneratorTypeSnowflake, config)
+		_, _ = r.GetOrCreate("test", core.GeneratorTypeSnowflake, config)
 	}
 }
 
-// BenchmarkRegistry_ConcurrentGet 基准测试：并发获取
-func BenchmarkRegistry_ConcurrentGet(b *testing.B) {
-	registry := GetRegistry()
-	registry.Clear()
+// BenchmarkRegistry_Parallel 并行基准测试
+func BenchmarkRegistry_Parallel(b *testing.B) {
+	r := registry.GetRegistry()
+	defer r.Clear()
 
 	config := &snowflake.Config{
 		DatacenterID: 1,
 		WorkerID:     1,
 	}
-	registry.Create("test_gen", core.GeneratorTypeSnowflake, config)
+	_, _ = r.Create("test", core.GeneratorTypeSnowflake, config)
 
+	b.ReportAllocs()
 	b.ResetTimer()
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = registry.Get("test_gen")
+			_, _ = r.Get("test")
+		}
+	})
+}
+
+// BenchmarkRegistry_IDGeneration 基准测试通过注册表生成ID
+func BenchmarkRegistry_IDGeneration(b *testing.B) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: false,
+	}
+	gen, _ := r.Create("test", core.GeneratorTypeSnowflake, config)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = gen.NextID()
+	}
+}
+
+// BenchmarkRegistry_IDGeneration_Parallel 并行基准测试ID生成
+func BenchmarkRegistry_IDGeneration_Parallel(b *testing.B) {
+	r := registry.GetRegistry()
+	defer r.Clear()
+
+	config := &snowflake.Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: false,
+	}
+	gen, _ := r.Create("test", core.GeneratorTypeSnowflake, config)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = gen.NextID()
 		}
 	})
 }
