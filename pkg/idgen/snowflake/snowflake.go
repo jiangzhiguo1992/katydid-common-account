@@ -168,9 +168,11 @@ func (g *Generator) nextIDUnsafe() (int64, error) {
 			if g.metrics != nil {
 				g.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
 			}
+			// 重置序列号为-1，后面会递增为0
 			g.sequence = -1
 			g.lastTimestamp = timestamp
 		}
+		// 序列号递增（溢出后也会执行到这里）
 		g.sequence++
 	} else {
 		// 新的毫秒，序列号重置
@@ -180,6 +182,7 @@ func (g *Generator) nextIDUnsafe() (int64, error) {
 
 	// 组装ID
 	timeDiff := timestamp - Epoch
+	// 使用预计算的部分组装ID，减少位运算
 	id := (timeDiff << TimestampShift) | g.precomputedPart | g.sequence
 
 	// 更新监控指标
@@ -210,6 +213,9 @@ func (g *Generator) nextIDBatchUnsafe(n int) ([]int64, error) {
 		// 计算当前毫秒可用的ID数量
 		var availableInCurrentMs int
 		if timestamp == g.lastTimestamp {
+			// 同一毫秒内，计算剩余可用序列号数量
+			// s.sequence 是当前已使用过的序列号（0-4095）
+			// 可用数量：MaxSequence - s.sequence（例如：s.sequence=9，则剩余4095-9=4086个）
 			availableInCurrentMs = int(MaxSequence - g.sequence)
 			if availableInCurrentMs <= 0 {
 				// 等待下一毫秒
@@ -222,14 +228,16 @@ func (g *Generator) nextIDBatchUnsafe(n int) ([]int64, error) {
 				if g.metrics != nil {
 					g.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
 				}
+				// 新毫秒，序列号重置为-1，下面循环会从0开始
 				g.sequence = -1
 				g.lastTimestamp = timestamp
-				availableInCurrentMs = MaxSequence + 1
+				availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 			}
 		} else {
+			// 新的毫秒，序列号重置为-1，下面循环会从0开始
 			g.sequence = -1
 			g.lastTimestamp = timestamp
-			availableInCurrentMs = MaxSequence + 1
+			availableInCurrentMs = MaxSequence + 1 // 0-4095，共4096个
 		}
 
 		// 本轮生成数量
@@ -240,14 +248,17 @@ func (g *Generator) nextIDBatchUnsafe(n int) ([]int64, error) {
 
 		// 生成ID
 		timeDiff := timestamp - Epoch
+		// 使用预计算的部分（在循环外计算以提高性能）
 		baseID := (timeDiff << TimestampShift) | g.precomputedPart
 
+		// 生成ID：先递增序列号，再使用
 		for i := 0; i < batchSize; i++ {
 			g.sequence++
 			id := baseID | g.sequence
 			ids = append(ids, id)
 		}
 
+		// 剩下的remainingIDs会进入下一个循环
 		remainingIDs -= batchSize
 	}
 
