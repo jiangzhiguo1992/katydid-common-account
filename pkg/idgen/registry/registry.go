@@ -2,7 +2,7 @@ package registry
 
 import (
 	"fmt"
-	"log/slog"
+	"log"
 	"regexp"
 	"sync"
 
@@ -96,7 +96,7 @@ func (r *Registry) Create(key string, generatorType core.GeneratorType, config a
 	// 步骤7：注册生成器
 	r.generators[key] = generator
 
-	slog.Info("生成器创建成功", "key", key, "type", generatorType)
+	log.Println("生成器创建成功", "key", key, "type", generatorType)
 
 	return generator, nil
 }
@@ -166,7 +166,7 @@ func (r *Registry) Remove(key string) error {
 	// 删除生成器
 	delete(r.generators, key)
 
-	slog.Info("生成器已移除", "key", key)
+	log.Println("生成器已移除", "key", key)
 
 	return nil
 }
@@ -180,7 +180,7 @@ func (r *Registry) Clear() {
 	r.generators = make(map[string]core.IDGenerator)
 
 	// 日志建议：此处可添加日志记录
-	slog.Warn("注册表已清空", "操作", "Clear")
+	log.Println("注册表已清空", "操作", "Clear")
 }
 
 // Count 获取生成器数量
@@ -227,7 +227,7 @@ func (r *Registry) SetMaxGenerators(max int) error {
 
 	r.maxGenerators = max
 
-	slog.Info("注册表容量已调整", "new_max", max, "current_count", len(r.generators))
+	log.Println("注册表容量已调整", "new_max", max, "current_count", len(r.generators))
 
 	return nil
 }

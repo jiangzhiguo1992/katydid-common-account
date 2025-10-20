@@ -2,7 +2,7 @@ package registry
 
 import (
 	"fmt"
-	"log/slog"
+	"log"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
@@ -56,7 +56,7 @@ func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.
 	// 注册解析器（允许覆盖已有解析器）
 	r.parsers[generatorType] = parser
 
-	slog.Info("解析器已注册", "type", generatorType)
+	log.Println("解析器已注册", "type", generatorType)
 
 	return nil
 }
@@ -117,7 +117,7 @@ func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator
 	// 注册验证器（允许覆盖已有验证器）
 	r.validators[generatorType] = validator
 
-	slog.Info("验证器已注册", "type", generatorType)
+	log.Println("验证器已注册", "type", generatorType)
 
 	return nil
 }

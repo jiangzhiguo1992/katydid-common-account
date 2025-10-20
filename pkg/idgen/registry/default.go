@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"log/slog"
+	"log"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
@@ -39,9 +39,9 @@ func GetDefaultGenerator() (core.IDGenerator, error) {
 		defaultGenerator, defaultGeneratorErr = factory.Create(config)
 
 		if defaultGeneratorErr != nil {
-			slog.Error("默认生成器初始化失败", "error", defaultGeneratorErr)
+			log.Println("默认生成器初始化失败", "error", defaultGeneratorErr)
 		} else {
-			slog.Info("默认生成器初始化成功", "datacenter_id", 0, "worker_id", 0)
+			log.Println("默认生成器初始化成功", "datacenter_id", 0, "worker_id", 0)
 		}
 	})
 
@@ -69,9 +69,9 @@ func GetOrCreateDefaultGenerator() (core.IDGenerator, error) {
 	generator, err := registry.GetOrCreate(DefaultGeneratorKey, core.GeneratorTypeSnowflake, config)
 
 	if err != nil {
-		slog.Error("默认生成器创建失败", "error", err)
+		log.Println("默认生成器创建失败", "error", err)
 	} else {
-		slog.Info("默认生成器创建成功", "key", DefaultGeneratorKey)
+		log.Println("默认生成器创建成功", "key", DefaultGeneratorKey)
 	}
 
 	return generator, err
@@ -86,5 +86,5 @@ func ResetDefaultGenerator() {
 	defaultGeneratorErr = nil
 
 	// 日志建议：此处可添加日志记录
-	slog.Warn("默认生成器已重置", "warning", "此操作仅用于测试")
+	log.Println("默认生成器已重置", "warning", "此操作仅用于测试")
 }

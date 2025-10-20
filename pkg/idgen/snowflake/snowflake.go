@@ -2,7 +2,7 @@ package snowflake
 
 import (
 	"fmt"
-	"log/slog"
+	"log"
 	"sync"
 	"time"
 
@@ -76,7 +76,7 @@ func NewWithConfig(config *Config) (*Generator, error) {
 		parser:          NewParser(),
 	}
 
-	slog.Info("Snowflake生成器创建成功",
+	log.Println("Snowflake生成器创建成功",
 		"datacenter_id", config.DatacenterID,
 		"worker_id", config.WorkerID,
 		"metrics_enabled", config.EnableMetrics)
@@ -171,7 +171,7 @@ func (g *Generator) nextIDUnsafe() (int64, error) {
 	// 步骤2：时钟回拨检测与处理
 	if timestamp < g.lastTimestamp {
 		if err := g.handleClockBackward(timestamp); err != nil {
-			slog.Error("时钟回拨，ID生成失败",
+			log.Println("时钟回拨，ID生成失败",
 				"current_timestamp", timestamp,
 				"last_timestamp", g.lastTimestamp,
 				"error", err)
@@ -234,7 +234,7 @@ func (g *Generator) nextIDBatchUnsafe(n int) ([]int64, error) {
 		if timestamp < g.lastTimestamp {
 			if err := g.handleClockBackward(timestamp); err != nil {
 				// 返回已生成的ID和错误
-				slog.Warn("批量生成ID时遇到时钟回拨",
+				log.Println("批量生成ID时遇到时钟回拨",
 					"generated", len(ids),
 					"requested", n,
 					"error", err)
@@ -345,7 +345,7 @@ func (g *Generator) handleClockBackward(currentTimestamp int64) error {
 	case core.StrategyUseLastTimestamp:
 		// 策略3：使用上次时间戳（风险较高，仅特殊场景）
 		// 警告：此策略可能导致ID重复，生产环境慎用！
-		slog.Warn("使用上次时间戳策略处理时钟回拨",
+		log.Println("使用上次时间戳策略处理时钟回拨",
 			"offset", offset,
 			"warning", "可能存在ID重复风险")
 		return nil

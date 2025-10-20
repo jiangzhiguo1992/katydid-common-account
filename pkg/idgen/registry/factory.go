@@ -2,10 +2,9 @@ package registry
 
 import (
 	"fmt"
-	"log/slog"
-
 	"katydid-common-account/pkg/idgen/core"
 	"katydid-common-account/pkg/idgen/snowflake"
+	"log"
 )
 
 // init 初始化全局工厂注册表
@@ -23,7 +22,7 @@ func init() {
 	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
 	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
 
-	slog.Info("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
+	log.Println("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
 }
 
 // SnowflakeFactory Snowflake生成器工厂
@@ -77,7 +76,7 @@ func (r *FactoryRegistry) Register(generatorType core.GeneratorType, factory cor
 	// 注册工厂（允许覆盖已有工厂）
 	r.factories[generatorType] = factory
 
-	slog.Info("工厂已注册", "type", generatorType)
+	log.Println("工厂已注册", "type", generatorType)
 
 	return nil
 }

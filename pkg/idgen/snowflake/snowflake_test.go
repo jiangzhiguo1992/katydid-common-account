@@ -1,7 +1,9 @@
 package snowflake
 
 import (
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -598,5 +600,579 @@ func BenchmarkValidateID(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = validator.Validate(id)
+	}
+}
+
+// ========== 高并发百万级测试（多维度性能分析） ==========
+
+// TestHighConcurrency_Million 测试百万级高并发ID生成
+func TestHighConcurrency_Million(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过百万级测试（使用 -short 标志）")
+	}
+
+	gen, err := NewWithConfig(&Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name            string
+		goroutines      int
+		idsPerGoroutine int
+		totalIDs        int
+	}{
+		{"百万_1000协程x1000", 1000, 1000, 1_000_000},
+		{"百万_500协程x2000", 500, 2000, 1_000_000},
+		{"百万_100协程x10000", 100, 10000, 1_000_000},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gen.ResetMetrics()
+			startTime := time.Now()
+
+			// 使用map存储ID检查唯一性（内存压力测试）
+			idMap := &sync.Map{}
+			var duplicateCount int64
+			var errorCount int64
+
+			var wg sync.WaitGroup
+			for i := 0; i < tc.goroutines; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for j := 0; j < tc.idsPerGoroutine; j++ {
+						id, err := gen.NextID()
+						if err != nil {
+							t.Errorf("生成ID失败: %v", err)
+							atomic.AddInt64(&errorCount, 1)
+							continue
+						}
+
+						// 检查重复
+						if _, loaded := idMap.LoadOrStore(id, struct{}{}); loaded {
+							t.Errorf("发现重复ID: %d", id)
+							atomic.AddInt64(&duplicateCount, 1)
+						}
+					}
+				}()
+			}
+
+			wg.Wait()
+			elapsed := time.Since(startTime)
+
+			// 统计实际生成的ID数量
+			actualCount := int64(0)
+			idMap.Range(func(key, value interface{}) bool {
+				actualCount++
+				return true
+			})
+
+			// 性能报告
+			idsPerSecond := float64(tc.totalIDs) / elapsed.Seconds()
+			avgLatency := elapsed.Nanoseconds() / int64(tc.totalIDs)
+
+			t.Logf("============ 性能报告 ============")
+			t.Logf("总ID数: %d", tc.totalIDs)
+			t.Logf("协程数: %d", tc.goroutines)
+			t.Logf("唯一ID数: %d", actualCount)
+			t.Logf("重复ID数: %d", atomic.LoadInt64(&duplicateCount))
+			t.Logf("错误数: %d", atomic.LoadInt64(&errorCount))
+			t.Logf("总耗时: %v", elapsed)
+			t.Logf("吞吐量: %.0f IDs/秒", idsPerSecond)
+			t.Logf("平均延迟: %d 纳秒", avgLatency)
+
+			metrics := gen.GetMetrics()
+			t.Logf("序列溢出次数: %d", metrics["sequence_overflow"])
+			t.Logf("等待次数: %d", metrics["wait_count"])
+			t.Logf("总等待时间: %d 纳秒", metrics["total_wait_time_ns"])
+
+			// 断言
+			dupCount := atomic.LoadInt64(&duplicateCount)
+			errCount := atomic.LoadInt64(&errorCount)
+			if dupCount > 0 {
+				t.Errorf("发现 %d 个重复ID", dupCount)
+			}
+			if errCount > 0 {
+				t.Errorf("发生 %d 个错误", errCount)
+			}
+			if actualCount != int64(tc.totalIDs) {
+				t.Errorf("唯一ID数 %d 不等于预期 %d", actualCount, tc.totalIDs)
+			}
+		})
+	}
+}
+
+// TestMemoryUsage_Million 测试百万级ID生成的内存使用
+func TestMemoryUsage_Million(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过内存测试（使用 -short 标志）")
+	}
+
+	gen, err := New(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const totalIDs = 1_000_000
+
+	// 记录初始内存
+	var m1 runtime.MemStats
+	runtime.ReadMemStats(&m1)
+	runtime.GC()
+	runtime.ReadMemStats(&m1)
+
+	startTime := time.Now()
+	ids := make([]int64, 0, totalIDs)
+
+	// 生成100万个ID
+	for i := 0; i < totalIDs; i++ {
+		id, err := gen.NextID()
+		if err != nil {
+			t.Fatalf("生成ID失败: %v", err)
+		}
+		ids = append(ids, id)
+	}
+
+	elapsed := time.Since(startTime)
+
+	// 记录结束内存
+	var m2 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m2)
+
+	// 计算内存使用
+	allocBytes := m2.TotalAlloc - m1.TotalAlloc
+	sysBytes := m2.Sys - m1.Sys
+	heapAllocBytes := m2.HeapAlloc - m1.HeapAlloc
+
+	t.Logf("============ 内存使用报告 ============")
+	t.Logf("生成ID数: %d", totalIDs)
+	t.Logf("总耗时: %v", elapsed)
+	t.Logf("分配内存: %.2f MB", float64(allocBytes)/(1024*1024))
+	t.Logf("系统内存: %.2f MB", float64(sysBytes)/(1024*1024))
+	t.Logf("堆内存: %.2f MB", float64(heapAllocBytes)/(1024*1024))
+	t.Logf("单ID内存: %.2f 字节", float64(allocBytes)/float64(totalIDs))
+	t.Logf("GC次数: %d", m2.NumGC-m1.NumGC)
+
+	// 验证唯一性
+	idSet := make(map[int64]bool, totalIDs)
+	for _, id := range ids {
+		if idSet[id] {
+			t.Errorf("发现重复ID: %d", id)
+		}
+		idSet[id] = true
+	}
+}
+
+// TestBatchPerformance_Million 测试批量生成性能（百万级）
+func TestBatchPerformance_Million(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过批量性能测试（使用 -short 标志）")
+	}
+
+	gen, err := NewWithConfig(&Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name      string
+		batchSize int
+		batches   int
+		totalIDs  int
+	}{
+		{"小批量_1000x1000", 1000, 1000, 1_000_000},
+		{"中批量_5000x200", 5000, 200, 1_000_000},
+		{"大批量_10000x100", 10000, 100, 1_000_000},
+		{"超大批量_50000x20", 50000, 20, 1_000_000},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gen.ResetMetrics()
+			allIDs := make([]int64, 0, tc.totalIDs)
+
+			startTime := time.Now()
+			for i := 0; i < tc.batches; i++ {
+				ids, err := gen.NextIDBatch(tc.batchSize)
+				if err != nil {
+					t.Fatalf("批量生成失败: %v", err)
+				}
+				allIDs = append(allIDs, ids...)
+			}
+			elapsed := time.Since(startTime)
+
+			// 检查唯一性
+			idMap := make(map[int64]bool, len(allIDs))
+			duplicates := 0
+			for _, id := range allIDs {
+				if idMap[id] {
+					duplicates++
+				}
+				idMap[id] = true
+			}
+
+			idsPerSecond := float64(tc.totalIDs) / elapsed.Seconds()
+
+			t.Logf("============ 批量性能报告 ============")
+			t.Logf("批次大小: %d", tc.batchSize)
+			t.Logf("批次数: %d", tc.batches)
+			t.Logf("总ID数: %d", tc.totalIDs)
+			t.Logf("唯一ID数: %d", len(idMap))
+			t.Logf("重复数: %d", duplicates)
+			t.Logf("总耗时: %v", elapsed)
+			t.Logf("吞吐量: %.0f IDs/秒", idsPerSecond)
+			t.Logf("单批次耗时: %v", elapsed/time.Duration(tc.batches))
+
+			metrics := gen.GetMetrics()
+			t.Logf("序列溢出: %d", metrics["sequence_overflow"])
+			t.Logf("等待次数: %d", metrics["wait_count"])
+
+			if duplicates > 0 {
+				t.Errorf("发现 %d 个重复ID", duplicates)
+			}
+			if len(allIDs) != tc.totalIDs {
+				t.Errorf("生成ID数 %d 不等于预期 %d", len(allIDs), tc.totalIDs)
+			}
+		})
+	}
+}
+
+// TestConcurrentBatch_Million 测试并发批量生成（百万级）
+func TestConcurrentBatch_Million(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过并发批量测试（使用 -short 标志）")
+	}
+
+	gen, err := NewWithConfig(&Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name       string
+		goroutines int
+		batchSize  int
+		totalIDs   int
+	}{
+		{"并发批量_100协程x10000批量", 100, 10000, 1_000_000},
+		{"并发批量_50协程x20000批量", 50, 20000, 1_000_000},
+		{"并发批量_20协程x50000批量", 20, 50000, 1_000_000},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gen.ResetMetrics()
+
+			// 计算每个协程需要的批次数
+			batchesPerGoroutine := tc.totalIDs / (tc.goroutines * tc.batchSize)
+
+			idMap := &sync.Map{}
+			errorCount := int64(0)
+			totalGenerated := int64(0)
+
+			startTime := time.Now()
+			var wg sync.WaitGroup
+
+			for i := 0; i < tc.goroutines; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for j := 0; j < batchesPerGoroutine; j++ {
+						ids, err := gen.NextIDBatch(tc.batchSize)
+						if err != nil {
+							t.Errorf("批量生成失败: %v", err)
+							errorCount++
+							continue
+						}
+
+						for _, id := range ids {
+							if _, loaded := idMap.LoadOrStore(id, struct{}{}); loaded {
+								t.Errorf("发现重复ID: %d", id)
+							}
+							totalGenerated++
+						}
+					}
+				}()
+			}
+
+			wg.Wait()
+			elapsed := time.Since(startTime)
+
+			// 统计唯一ID数
+			uniqueCount := int64(0)
+			idMap.Range(func(key, value interface{}) bool {
+				uniqueCount++
+				return true
+			})
+
+			idsPerSecond := float64(totalGenerated) / elapsed.Seconds()
+
+			t.Logf("============ 并发批量性能报告 ============")
+			t.Logf("协程数: %d", tc.goroutines)
+			t.Logf("批次大小: %d", tc.batchSize)
+			t.Logf("生成总数: %d", totalGenerated)
+			t.Logf("唯一ID数: %d", uniqueCount)
+			t.Logf("错误数: %d", errorCount)
+			t.Logf("总耗时: %v", elapsed)
+			t.Logf("吞吐量: %.0f IDs/秒", idsPerSecond)
+
+			metrics := gen.GetMetrics()
+			t.Logf("序列溢出: %d", metrics["sequence_overflow"])
+			t.Logf("等待次数: %d", metrics["wait_count"])
+			t.Logf("时钟回拨: %d", metrics["clock_backward"])
+
+			if uniqueCount != totalGenerated {
+				t.Errorf("发现重复ID: 唯一数%d != 总数%d", uniqueCount, totalGenerated)
+			}
+		})
+	}
+}
+
+// TestStressTest_Sequential 测试顺序压力（最大吞吐量）
+func TestStressTest_Sequential(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过顺序压力测试（使用 -short 标志）")
+	}
+
+	gen, err := NewWithConfig(&Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const totalIDs = 5_000_000 // 500万
+
+	startTime := time.Now()
+	prevID := int64(0)
+	monotonic := true
+
+	for i := 0; i < totalIDs; i++ {
+		id, err := gen.NextID()
+		if err != nil {
+			t.Fatalf("生成ID失败 (第%d个): %v", i+1, err)
+		}
+
+		// 检查单调性
+		if id <= prevID {
+			monotonic = false
+			t.Errorf("ID不单调: 前一个=%d, 当前=%d, 位置=%d", prevID, id, i)
+		}
+		prevID = id
+	}
+
+	elapsed := time.Since(startTime)
+	idsPerSecond := float64(totalIDs) / elapsed.Seconds()
+
+	metrics := gen.GetMetrics()
+
+	t.Logf("============ 顺序压力测试报告 ============")
+	t.Logf("总ID数: %d", totalIDs)
+	t.Logf("总耗时: %v", elapsed)
+	t.Logf("吞吐量: %.0f IDs/秒", idsPerSecond)
+	t.Logf("平均延迟: %d 纳秒", elapsed.Nanoseconds()/int64(totalIDs))
+	t.Logf("ID单调性: %v", monotonic)
+	t.Logf("序列溢出: %d", metrics["sequence_overflow"])
+	t.Logf("等待次数: %d", metrics["wait_count"])
+	t.Logf("总等待时间: %.2f 毫秒", float64(metrics["total_wait_time_ns"])/1e6)
+
+	if !monotonic {
+		t.Error("ID序列不单调")
+	}
+}
+
+// TestMultiGenerator_Concurrent 测试多生成器并发（模拟分布式）
+func TestMultiGenerator_Concurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过多生成器测试（使用 -short 标志）")
+	}
+
+	const (
+		numGenerators = 10
+		idsPerGen     = 100_000
+		totalIDs      = numGenerators * idsPerGen
+	)
+
+	generators := make([]*Generator, numGenerators)
+	for i := 0; i < numGenerators; i++ {
+		gen, err := New(int64(i/5), int64(i%5))
+		if err != nil {
+			t.Fatalf("创建生成器%d失败: %v", i, err)
+		}
+		generators[i] = gen
+	}
+
+	idMap := &sync.Map{}
+	startTime := time.Now()
+
+	var wg sync.WaitGroup
+	for i, gen := range generators {
+		wg.Add(1)
+		go func(genIndex int, g *Generator) {
+			defer wg.Done()
+			for j := 0; j < idsPerGen; j++ {
+				id, err := g.NextID()
+				if err != nil {
+					t.Errorf("生成器%d生成ID失败: %v", genIndex, err)
+					continue
+				}
+
+				if _, loaded := idMap.LoadOrStore(id, genIndex); loaded {
+					t.Errorf("生成器%d产生重复ID: %d", genIndex, id)
+				}
+			}
+		}(i, gen)
+	}
+
+	wg.Wait()
+	elapsed := time.Since(startTime)
+
+	uniqueCount := int64(0)
+	idMap.Range(func(key, value interface{}) bool {
+		uniqueCount++
+		return true
+	})
+
+	idsPerSecond := float64(totalIDs) / elapsed.Seconds()
+
+	t.Logf("============ 多生成器并发测试报告 ============")
+	t.Logf("生成器数: %d", numGenerators)
+	t.Logf("每生成器ID数: %d", idsPerGen)
+	t.Logf("总ID数: %d", totalIDs)
+	t.Logf("唯一ID数: %d", uniqueCount)
+	t.Logf("总耗时: %v", elapsed)
+	t.Logf("吞吐量: %.0f IDs/秒", idsPerSecond)
+
+	if uniqueCount != int64(totalIDs) {
+		t.Errorf("发现重复ID: 唯一数%d != 总数%d", uniqueCount, totalIDs)
+	}
+}
+
+// TestLongRunning_Stability 测试长时间运行稳定性
+func TestLongRunning_Stability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过长时间运行测试（使用 -short 标志）")
+	}
+
+	gen, err := NewWithConfig(&Config{
+		DatacenterID:  1,
+		WorkerID:      1,
+		EnableMetrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		duration     = 30 * time.Second
+		goroutines   = 50
+		checkpointMS = 5000 // 每5秒报告一次
+	)
+
+	idMap := &sync.Map{}
+	stopChan := make(chan struct{})
+	totalGenerated := int64(0)
+	errorCount := int64(0)
+
+	startTime := time.Now()
+
+	// 启动生成器协程
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stopChan:
+					return
+				default:
+					id, err := gen.NextID()
+					if err != nil {
+						errorCount++
+						t.Errorf("生成ID失败: %v", err)
+						continue
+					}
+
+					if _, loaded := idMap.LoadOrStore(id, struct{}{}); loaded {
+						t.Errorf("发现重复ID: %d", id)
+					}
+					totalGenerated++
+				}
+			}
+		}()
+	}
+
+	// 监控协程
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ticker.C:
+				elapsed := time.Since(startTime)
+				current := totalGenerated
+				rate := float64(current) / elapsed.Seconds()
+				metrics := gen.GetMetrics()
+
+				t.Logf("[%v] 已生成: %d, 速率: %.0f IDs/秒, 溢出: %d, 等待: %d",
+					elapsed.Round(time.Second), current, rate,
+					metrics["sequence_overflow"], metrics["wait_count"])
+			}
+		}
+	}()
+
+	// 运行指定时间
+	time.Sleep(duration)
+	close(stopChan)
+	wg.Wait()
+
+	elapsed := time.Since(startTime)
+
+	uniqueCount := int64(0)
+	idMap.Range(func(key, value interface{}) bool {
+		uniqueCount++
+		return true
+	})
+
+	metrics := gen.GetMetrics()
+	idsPerSecond := float64(totalGenerated) / elapsed.Seconds()
+
+	t.Logf("============ 长时间运行稳定性报告 ============")
+	t.Logf("运行时间: %v", elapsed)
+	t.Logf("协程数: %d", goroutines)
+	t.Logf("生成总数: %d", totalGenerated)
+	t.Logf("唯一ID数: %d", uniqueCount)
+	t.Logf("错误数: %d", errorCount)
+	t.Logf("平均吞吐量: %.0f IDs/秒", idsPerSecond)
+	t.Logf("序列溢出: %d", metrics["sequence_overflow"])
+	t.Logf("等待次数: %d", metrics["wait_count"])
+	t.Logf("时钟回拨: %d", metrics["clock_backward"])
+
+	if uniqueCount != totalGenerated {
+		t.Errorf("发现重复ID: 唯一数%d != 总数%d", uniqueCount, totalGenerated)
+	}
+	if errorCount > 0 {
+		t.Errorf("发生 %d 个错误", errorCount)
 	}
 }
