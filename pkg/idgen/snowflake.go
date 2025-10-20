@@ -81,23 +81,6 @@ const (
 	StrategyUseLastTimestamp
 )
 
-// Metrics 性能监控指标
-type Metrics struct {
-	IDCount          atomic.Uint64 // 已生成ID总数
-	SequenceOverflow atomic.Uint64 // 序列号溢出次数
-	ClockBackward    atomic.Uint64 // 时钟回拨次数
-	WaitCount        atomic.Uint64 // 等待下一毫秒次数
-	TotalWaitTimeNs  atomic.Uint64 // 总等待时间（纳秒）
-}
-
-// IDGenerator 定义ID生成器接口
-type IDGenerator interface {
-	// NextID 生成下一个唯一ID
-	NextID() (int64, error)
-	// NextIDBatch 批量生成ID
-	NextIDBatch(n int) ([]int64, error)
-}
-
 // Snowflake Snowflake算法的ID生成器实现
 type Snowflake struct {
 	lastTimestamp int64 // 上次生成ID的时间戳
@@ -123,6 +106,23 @@ type SnowflakeConfig struct {
 	ClockBackwardStrategy  ClockBackwardStrategy // 时钟回拨处理策略（可选，默认StrategyError）
 	ClockBackwardTolerance int64                 // 时钟回拨容忍时间（毫秒，可选，默认5ms）
 	EnableMetrics          bool                  // 是否启用监控
+}
+
+// IDGenerator 定义ID生成器接口
+type IDGenerator interface {
+	// NextID 生成下一个唯一ID
+	NextID() (int64, error)
+	// NextIDBatch 批量生成ID
+	NextIDBatch(n int) ([]int64, error)
+}
+
+// Metrics 性能监控指标
+type Metrics struct {
+	IDCount          atomic.Uint64 // 已生成ID总数
+	SequenceOverflow atomic.Uint64 // 序列号溢出次数
+	ClockBackward    atomic.Uint64 // 时钟回拨次数
+	WaitCount        atomic.Uint64 // 等待下一毫秒次数
+	TotalWaitTimeNs  atomic.Uint64 // 总等待时间（纳秒）
 }
 
 // NewSnowflake 创建一个新的Snowflake ID生成器
@@ -180,43 +180,6 @@ func NewSnowflakeWithConfig(config *SnowflakeConfig) (*Snowflake, error) {
 	}, nil
 }
 
-// NextID 生成下一个唯一ID
-func (s *Snowflake) NextID() (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.nextIDUnsafe()
-}
-
-// waitNextMillis 等待直到获取到比lastTimestamp更大的时间戳
-func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
-	timestamp := time.Now().UnixNano() / 1e6
-	for timestamp <= lastTimestamp {
-		// 短暂休眠，避免CPU空转（只阻塞当前goroutine）
-		time.Sleep(sleepDuration)
-		timestamp = time.Now().UnixNano() / 1e6
-	}
-	return timestamp
-}
-
-// GetIDCount 获取已生成的ID总数（用于监控）
-func (s *Snowflake) GetIDCount() uint64 {
-	if !s.enableMetrics || s.metrics == nil {
-		return 0
-	}
-	return s.metrics.IDCount.Load()
-}
-
-// GetWorkerID 获取工作机器ID
-func (s *Snowflake) GetWorkerID() int64 {
-	return s.workerID
-}
-
-// GetDatacenterID 获取数据中心ID
-func (s *Snowflake) GetDatacenterID() int64 {
-	return s.datacenterID
-}
-
 // ParseSnowflakeID 解析Snowflake ID
 func ParseSnowflakeID(id int64) (timestamp int64, datacenterID int64, workerID int64, sequence int64) {
 	timestamp = (id >> TimestampShift) + Epoch
@@ -257,6 +220,14 @@ func ValidateSnowflakeID(id int64) error {
 	return nil
 }
 
+// NextID 生成下一个唯一ID
+func (s *Snowflake) NextID() (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.nextIDUnsafe()
+}
+
 // NextIDBatch 批量生成ID
 func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 	if n <= 0 {
@@ -266,9 +237,184 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 		return nil, fmt.Errorf("%w: batch size too large (max %d), got %d", ErrInvalidBatchSize, maxBatchSize, n)
 	}
 
-	s.mu.Lock() // TODO:GG
+	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.nextIDBatchUnsafe(n)
+}
+
+// GetIDCount 获取已生成的ID总数（用于监控）
+func (s *Snowflake) GetIDCount() uint64 {
+	if !s.enableMetrics || s.metrics == nil {
+		return 0
+	}
+	return s.metrics.IDCount.Load()
+}
+
+// GetWorkerID 获取工作机器ID
+func (s *Snowflake) GetWorkerID() int64 {
+	return s.workerID
+}
+
+// GetDatacenterID 获取数据中心ID
+func (s *Snowflake) GetDatacenterID() int64 {
+	return s.datacenterID
+}
+
+// GetMetrics 获取性能监控指标（线程安全）
+func (s *Snowflake) GetMetrics() map[string]uint64 {
+	if !s.enableMetrics || s.metrics == nil {
+		return map[string]uint64{
+			"metrics_enabled": 0,
+		}
+	}
+
+	// 原子读取，避免数据竞态
+	waitCount := s.metrics.WaitCount.Load()
+	var avgWaitTime uint64
+	if waitCount > 0 {
+		avgWaitTime = s.metrics.TotalWaitTimeNs.Load() / waitCount
+	}
+
+	return map[string]uint64{
+		"metrics_enabled":   1,
+		"id_count":          s.metrics.IDCount.Load(),
+		"sequence_overflow": s.metrics.SequenceOverflow.Load(),
+		"clock_backward":    s.metrics.ClockBackward.Load(),
+		"wait_count":        waitCount,
+		"avg_wait_time_ns":  avgWaitTime,
+	}
+}
+
+// GetMetricsSnapshot 获取性能指标的快照
+func (s *Snowflake) GetMetricsSnapshot() *Metrics {
+	if !s.enableMetrics || s.metrics == nil {
+		return &Metrics{}
+	}
+
+	// 创建快照并复制当前值
+	snapshot := &Metrics{}
+	snapshot.IDCount.Store(s.metrics.IDCount.Load())
+	snapshot.SequenceOverflow.Store(s.metrics.SequenceOverflow.Load())
+	snapshot.ClockBackward.Store(s.metrics.ClockBackward.Load())
+	snapshot.WaitCount.Store(s.metrics.WaitCount.Load())
+	snapshot.TotalWaitTimeNs.Store(s.metrics.TotalWaitTimeNs.Load())
+	return snapshot
+}
+
+// ResetMetrics 重置性能监控指标（仅用于测试）
+func (s *Snowflake) ResetMetrics() {
+	if !s.enableMetrics || s.metrics == nil {
+		return
+	}
+	s.metrics.IDCount.Store(0)
+	s.metrics.SequenceOverflow.Store(0)
+	s.metrics.ClockBackward.Store(0)
+	s.metrics.WaitCount.Store(0)
+	s.metrics.TotalWaitTimeNs.Store(0)
+}
+
+// nextIDUnsafe 内部使用的不加锁版本的ID生成方法
+func (s *Snowflake) nextIDUnsafe() (int64, error) {
+	timestamp := time.Now().UnixNano() / 1e6
+
+	// 时钟回拨检测
+	if timestamp < s.lastTimestamp {
+		offset := s.lastTimestamp - timestamp
+		if s.enableMetrics && s.metrics != nil {
+			s.metrics.ClockBackward.Add(1)
+		}
+
+		// 根据策略处理时钟回拨
+		switch s.clockBackwardStrategy {
+		case StrategyError:
+			return 0, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
+
+		case StrategyWait:
+			if offset <= s.clockBackwardTolerance {
+				// 使用重试机制等待时钟追赶
+				retries := 0
+				for retries < maxWaitRetries {
+					// 使用 offset+1 确保时钟真正前进
+					time.Sleep(time.Duration(offset+1) * time.Millisecond)
+					timestamp = time.Now().UnixNano() / 1e6
+					if timestamp >= s.lastTimestamp {
+						break
+					}
+					// 重新计算偏移量
+					offset = s.lastTimestamp - timestamp
+					retries++
+				}
+				// 等待后仍然回拨，返回错误
+				if timestamp < s.lastTimestamp {
+					return 0, fmt.Errorf("%w: backward %dms after %d retries",
+						ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries)
+				}
+			} else {
+				return 0, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
+					ErrClockMovedBackwards, offset, s.clockBackwardTolerance)
+			}
+
+		case StrategyUseLastTimestamp:
+			timestamp = s.lastTimestamp
+		}
+	}
+
+	// 永远不会触发（当前时间总在Epoch之后）
+	//if timeDiff < 0 {
+	//	return 0, fmt.Errorf("%w: current time %d is before epoch %d",
+	//		ErrTimestampOverflow, timestamp, Epoch)
+	//}
+	// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
+	//if timeDiff > maxTimestampDiff {
+	//	return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
+	//		ErrTimestampOverflow, timeDiff, maxTimestampDiff)
+	//}
+
+	// 同一毫秒内，序列号递增；不同毫秒，序列号重置
+	if timestamp == s.lastTimestamp {
+		// 先检查是否会溢出，再递增
+		if s.sequence >= MaxSequence {
+			// 序列号已达上限，需要等待下一毫秒
+			if s.enableMetrics && s.metrics != nil {
+				s.metrics.SequenceOverflow.Add(1)
+				s.metrics.WaitCount.Add(1)
+			}
+			startTime := time.Now()
+			timestamp = s.waitNextMillis(s.lastTimestamp)
+			if s.enableMetrics && s.metrics != nil {
+				s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
+			}
+
+			// 重置序列号为-1，后面会递增为0
+			s.sequence = -1
+			s.lastTimestamp = timestamp
+		}
+		// 序列号递增（溢出后也会执行到这里）
+		s.sequence++
+	} else {
+		// 不同毫秒，序列号重置为0
+		s.sequence = 0
+		s.lastTimestamp = timestamp
+	}
+
+	// timeDiff必须在所有timestamp更新完成后计算
+	// 这样可以确保序列号溢出等待下一毫秒后，使用的是新的timestamp
+	timeDiff := timestamp - Epoch
+
+	// 使用预计算的部分组装ID，减少位运算
+	id := (timeDiff << TimestampShift) | s.precomputedPart | s.sequence
+
+	// 只在启用监控时才更新指标
+	if s.enableMetrics && s.metrics != nil {
+		s.metrics.IDCount.Add(1)
+	}
+
+	return id, nil
+}
+
+// nextIDBatchUnsafe 内部使用的不加锁版本的IDBatch生成方法
+func (s *Snowflake) nextIDBatchUnsafe(n int) ([]int64, error) {
 	ids := make([]int64, 0, n)
 	remainingIDs := n
 
@@ -395,154 +541,13 @@ func (s *Snowflake) NextIDBatch(n int) ([]int64, error) {
 	return ids, nil
 }
 
-// nextIDUnsafe 内部使用的不加锁版本的ID生成方法
-func (s *Snowflake) nextIDUnsafe() (int64, error) {
+// waitNextMillis 等待直到获取到比lastTimestamp更大的时间戳
+func (s *Snowflake) waitNextMillis(lastTimestamp int64) int64 {
 	timestamp := time.Now().UnixNano() / 1e6
-
-	// 时钟回拨检测
-	if timestamp < s.lastTimestamp {
-		offset := s.lastTimestamp - timestamp
-		if s.enableMetrics && s.metrics != nil {
-			s.metrics.ClockBackward.Add(1)
-		}
-
-		// 根据策略处理时钟回拨
-		switch s.clockBackwardStrategy {
-		case StrategyError:
-			return 0, fmt.Errorf("%w: backward %dms", ErrClockMovedBackwards, offset)
-
-		case StrategyWait:
-			if offset <= s.clockBackwardTolerance {
-				// 使用重试机制等待时钟追赶
-				retries := 0
-				for retries < maxWaitRetries {
-					// 使用 offset+1 确保时钟真正前进
-					time.Sleep(time.Duration(offset+1) * time.Millisecond)
-					timestamp = time.Now().UnixNano() / 1e6
-					if timestamp >= s.lastTimestamp {
-						break
-					}
-					// 重新计算偏移量
-					offset = s.lastTimestamp - timestamp
-					retries++
-				}
-				// 等待后仍然回拨，返回错误
-				if timestamp < s.lastTimestamp {
-					return 0, fmt.Errorf("%w: backward %dms after %d retries",
-						ErrClockMovedBackwards, s.lastTimestamp-timestamp, retries)
-				}
-			} else {
-				return 0, fmt.Errorf("%w: backward %dms exceeds tolerance %dms",
-					ErrClockMovedBackwards, offset, s.clockBackwardTolerance)
-			}
-
-		case StrategyUseLastTimestamp:
-			timestamp = s.lastTimestamp
-		}
+	for timestamp <= lastTimestamp {
+		// 短暂休眠，避免CPU空转（只阻塞当前goroutine）
+		time.Sleep(sleepDuration)
+		timestamp = time.Now().UnixNano() / 1e6
 	}
-
-	// 永远不会触发（当前时间总在Epoch之后）
-	//if timeDiff < 0 {
-	//	return 0, fmt.Errorf("%w: current time %d is before epoch %d",
-	//		ErrTimestampOverflow, timestamp, Epoch)
-	//}
-	// 即使用满了69年，后续也会改进更好的方案，理论上不用检查
-	//if timeDiff > maxTimestampDiff {
-	//	return 0, fmt.Errorf("%w: timestamp difference %d exceeds maximum %d",
-	//		ErrTimestampOverflow, timeDiff, maxTimestampDiff)
-	//}
-
-	// 同一毫秒内，序列号递增；不同毫秒，序列号重置
-	if timestamp == s.lastTimestamp {
-		// 先检查是否会溢出，再递增
-		if s.sequence >= MaxSequence {
-			// 序列号已达上限，需要等待下一毫秒
-			if s.enableMetrics && s.metrics != nil {
-				s.metrics.SequenceOverflow.Add(1)
-				s.metrics.WaitCount.Add(1)
-			}
-			startTime := time.Now()
-			timestamp = s.waitNextMillis(s.lastTimestamp)
-			if s.enableMetrics && s.metrics != nil {
-				s.metrics.TotalWaitTimeNs.Add(uint64(time.Since(startTime).Nanoseconds()))
-			}
-
-			// 重置序列号为-1，后面会递增为0
-			s.sequence = -1
-			s.lastTimestamp = timestamp
-		}
-		// 序列号递增（溢出后也会执行到这里）
-		s.sequence++
-	} else {
-		// 不同毫秒，序列号重置为0
-		s.sequence = 0
-		s.lastTimestamp = timestamp
-	}
-
-	// timeDiff必须在所有timestamp更新完成后计算
-	// 这样可以确保序列号溢出等待下一毫秒后，使用的是新的timestamp
-	timeDiff := timestamp - Epoch
-
-	// 使用预计算的部分组装ID，减少位运算
-	id := (timeDiff << TimestampShift) | s.precomputedPart | s.sequence
-
-	// 只在启用监控时才更新指标
-	if s.enableMetrics && s.metrics != nil {
-		s.metrics.IDCount.Add(1)
-	}
-
-	return id, nil
-}
-
-// GetMetrics 获取性能监控指标（线程安全）
-func (s *Snowflake) GetMetrics() map[string]uint64 {
-	if !s.enableMetrics || s.metrics == nil {
-		return map[string]uint64{
-			"metrics_enabled": 0,
-		}
-	}
-
-	// 原子读取，避免数据竞态
-	waitCount := s.metrics.WaitCount.Load()
-	var avgWaitTime uint64
-	if waitCount > 0 {
-		avgWaitTime = s.metrics.TotalWaitTimeNs.Load() / waitCount
-	}
-
-	return map[string]uint64{
-		"metrics_enabled":   1,
-		"id_count":          s.metrics.IDCount.Load(),
-		"sequence_overflow": s.metrics.SequenceOverflow.Load(),
-		"clock_backward":    s.metrics.ClockBackward.Load(),
-		"wait_count":        waitCount,
-		"avg_wait_time_ns":  avgWaitTime,
-	}
-}
-
-// GetMetricsSnapshot 获取性能指标的快照
-func (s *Snowflake) GetMetricsSnapshot() *Metrics {
-	if !s.enableMetrics || s.metrics == nil {
-		return &Metrics{}
-	}
-
-	// 创建快照并复制当前值
-	snapshot := &Metrics{}
-	snapshot.IDCount.Store(s.metrics.IDCount.Load())
-	snapshot.SequenceOverflow.Store(s.metrics.SequenceOverflow.Load())
-	snapshot.ClockBackward.Store(s.metrics.ClockBackward.Load())
-	snapshot.WaitCount.Store(s.metrics.WaitCount.Load())
-	snapshot.TotalWaitTimeNs.Store(s.metrics.TotalWaitTimeNs.Load())
-	return snapshot
-}
-
-// ResetMetrics 重置性能监控指标（仅用于测试）
-func (s *Snowflake) ResetMetrics() {
-	if !s.enableMetrics || s.metrics == nil {
-		return
-	}
-	s.metrics.IDCount.Store(0)
-	s.metrics.SequenceOverflow.Store(0)
-	s.metrics.ClockBackward.Store(0)
-	s.metrics.WaitCount.Store(0)
-	s.metrics.TotalWaitTimeNs.Store(0)
+	return timestamp
 }
