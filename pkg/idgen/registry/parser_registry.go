@@ -2,23 +2,30 @@ package registry
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
 )
 
-// ParserRegistry 解析器注册表（单例模式，管理解析器实例）
-// 遵循依赖倒置原则：通过接口管理解析器
+// ParserRegistry 解析器注册表
 type ParserRegistry struct {
-	parsers map[core.GeneratorType]core.IDParser
-	mu      sync.RWMutex
+	parsers map[core.GeneratorType]core.IDParser // 解析器映射表
+	mu      sync.RWMutex                         // 读写锁，保护并发访问
 }
 
 var (
-	globalParserRegistry    *ParserRegistry
-	parserRegistryOnce      sync.Once
+	// globalParserRegistry 全局解析器注册表实例（单例）
+	globalParserRegistry *ParserRegistry
+
+	// parserRegistryOnce 确保解析器注册表只初始化一次
+	parserRegistryOnce sync.Once
+
+	// globalValidatorRegistry 全局验证器注册表实例（单例）
 	globalValidatorRegistry *ValidatorRegistry
-	validatorRegistryOnce   sync.Once
+
+	// validatorRegistryOnce 确保验证器注册表只初始化一次
+	validatorRegistryOnce sync.Once
 )
 
 // GetParserRegistry 获取全局解析器注册表
@@ -33,10 +40,12 @@ func GetParserRegistry() *ParserRegistry {
 
 // Register 注册解析器
 func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.IDParser) error {
+	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return core.ErrInvalidGeneratorType
 	}
 
+	// 验证解析器不为nil
 	if parser == nil {
 		return fmt.Errorf("parser cannot be nil")
 	}
@@ -44,7 +53,11 @@ func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// 注册解析器（允许覆盖已有解析器）
 	r.parsers[generatorType] = parser
+
+	slog.Info("解析器已注册", "type", generatorType)
+
 	return nil
 }
 
@@ -70,10 +83,10 @@ func (r *ParserRegistry) Has(generatorType core.GeneratorType) bool {
 	return exists
 }
 
-// ValidatorRegistry 验证器注册表（单例模式）
+// ValidatorRegistry 验证器注册表
 type ValidatorRegistry struct {
-	validators map[core.GeneratorType]core.IDValidator
-	mu         sync.RWMutex
+	validators map[core.GeneratorType]core.IDValidator // 验证器映射表
+	mu         sync.RWMutex                            // 读写锁，保护并发访问
 }
 
 // GetValidatorRegistry 获取全局验证器注册表
@@ -88,10 +101,12 @@ func GetValidatorRegistry() *ValidatorRegistry {
 
 // Register 注册验证器
 func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator core.IDValidator) error {
+	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return core.ErrInvalidGeneratorType
 	}
 
+	// 验证验证器不为nil
 	if validator == nil {
 		return fmt.Errorf("validator cannot be nil")
 	}
@@ -99,7 +114,11 @@ func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// 注册验证器（允许覆盖已有验证器）
 	r.validators[generatorType] = validator
+
+	slog.Info("验证器已注册", "type", generatorType)
+
 	return nil
 }
 

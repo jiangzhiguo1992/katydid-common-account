@@ -2,41 +2,16 @@ package registry
 
 import (
 	"fmt"
+	"log/slog"
 
 	"katydid-common-account/pkg/idgen/core"
 	"katydid-common-account/pkg/idgen/snowflake"
 )
 
-// SnowflakeFactory Snowflake生成器工厂（工厂模式，依赖倒置）
-type SnowflakeFactory struct{}
-
-// NewSnowflakeFactory 创建Snowflake工厂实例
-func NewSnowflakeFactory() *SnowflakeFactory {
-	return &SnowflakeFactory{}
-}
-
-// Create 创建Snowflake生成器实例（实现core.GeneratorFactory接口）
-func (f *SnowflakeFactory) Create(config any) (core.IDGenerator, error) {
-	// 类型断言：将通用配置转换为具体配置
-	sfConfig, ok := config.(*snowflake.Config)
-	if !ok {
-		return nil, fmt.Errorf("invalid config type: expected *snowflake.Config, got %T", config)
-	}
-
-	// 使用snowflake包创建生成器
-	return snowflake.NewWithConfig(sfConfig)
-}
-
-// FactoryRegistry 工厂注册表（单例模式）
-type FactoryRegistry struct {
-	factories map[core.GeneratorType]core.GeneratorFactory
-}
-
-// globalFactoryRegistry 全局工厂注册表实例
-var globalFactoryRegistry *FactoryRegistry
-
-// init 初始化全局工厂注册表，注册默认工厂、解析器和验证器
+// init 初始化全局工厂注册表
+// 说明：在包加载时自动执行，注册默认的工厂、解析器和验证器
 func init() {
+	// 创建工厂注册表
 	globalFactoryRegistry = &FactoryRegistry{
 		factories: make(map[core.GeneratorType]core.GeneratorFactory),
 	}
@@ -44,27 +19,66 @@ func init() {
 	// 注册Snowflake工厂
 	_ = globalFactoryRegistry.Register(core.GeneratorTypeSnowflake, NewSnowflakeFactory())
 
-	// 注册Snowflake解析器和验证器（依赖倒置：通过接口注册）
+	// 注册Snowflake解析器和验证器
 	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
 	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
+
+	slog.Info("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
 }
+
+// SnowflakeFactory Snowflake生成器工厂
+type SnowflakeFactory struct{}
+
+// NewSnowflakeFactory 创建Snowflake工厂实例
+// 说明：工厂本身是无状态的，可以创建多个实例或共享单个实例
+func NewSnowflakeFactory() *SnowflakeFactory {
+	return &SnowflakeFactory{}
+}
+
+// Create 创建Snowflake生成器实例
+// 实现core.GeneratorFactory接口
+func (f *SnowflakeFactory) Create(config any) (core.IDGenerator, error) {
+	// 类型断言：将通用配置转换为Snowflake配置
+	sfConfig, ok := config.(*snowflake.Config)
+	if !ok {
+		return nil, fmt.Errorf("invalid config type: expected *snowflake.Config, got %T", config)
+	}
+
+	// 使用snowflake包创建生成器
+	// 注意：NewWithConfig内部会验证配置
+	return snowflake.NewWithConfig(sfConfig)
+}
+
+// FactoryRegistry 工厂注册表
+type FactoryRegistry struct {
+	factories map[core.GeneratorType]core.GeneratorFactory // 工厂映射表
+}
+
+// globalFactoryRegistry 全局工厂注册表实例（单例）
+var globalFactoryRegistry *FactoryRegistry
 
 // GetFactoryRegistry 获取全局工厂注册表
 func GetFactoryRegistry() *FactoryRegistry {
 	return globalFactoryRegistry
 }
 
-// Register 注册工厂（开放封闭原则：可扩展新的工厂）
+// Register 注册工厂
 func (r *FactoryRegistry) Register(generatorType core.GeneratorType, factory core.GeneratorFactory) error {
+	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return fmt.Errorf("%w: %s", core.ErrInvalidGeneratorType, generatorType)
 	}
 
+	// 验证工厂不为nil
 	if factory == nil {
 		return fmt.Errorf("factory cannot be nil")
 	}
 
+	// 注册工厂（允许覆盖已有工厂）
 	r.factories[generatorType] = factory
+
+	slog.Info("工厂已注册", "type", generatorType)
+
 	return nil
 }
 

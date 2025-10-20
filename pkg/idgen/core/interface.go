@@ -1,54 +1,52 @@
 package core
 
-// IDGenerator 定义ID生成器的基础接口（单一职责：只负责生成ID）
-// 遵循接口隔离原则：客户端只需要知道如何生成ID
+// IDGenerator ID生成器基础接口
 type IDGenerator interface {
-	// NextID 生成下一个唯一ID
-	// 返回：生成的ID和可能的错误
+	// NextID 生成下一个唯一ID（线程安全）
 	NextID() (int64, error)
 }
 
-// BatchGenerator 批量生成接口（接口隔离：将批量功能独立出来）
-// 不是所有生成器都支持批量生成，因此独立为单独接口
+// BatchGenerator 批量ID生成接口
 type BatchGenerator interface {
 	IDGenerator
-	// NextIDBatch 批量生成指定数量的ID
-	// 参数：n - 要生成的ID数量
-	// 返回：ID切片和可能的错误
+
+	// NextIDBatch 批量生成指定数量的ID（线程安全）
 	NextIDBatch(n int) ([]int64, error)
 }
 
-// ConfigurableGenerator 可配置的生成器接口（接口隔离）
-// 支持运行时获取配置信息
+// ConfigurableGenerator 可配置的生成器接口
 type ConfigurableGenerator interface {
 	// GetWorkerID 获取工作机器ID
+	// 返回值：工作机器ID（0-31）
 	GetWorkerID() int64
+
 	// GetDatacenterID 获取数据中心ID
+	// 返回值：数据中心ID（0-31）
 	GetDatacenterID() int64
 }
 
-// MonitorableGenerator 可监控的生成器接口（接口隔离）
-// 支持性能监控和指标收集
+// MonitorableGenerator 可监控的生成器接口
 type MonitorableGenerator interface {
 	// GetMetrics 获取性能监控指标
 	GetMetrics() map[string]uint64
+
 	// ResetMetrics 重置性能监控指标
 	ResetMetrics()
+
 	// GetIDCount 获取已生成的ID总数
 	GetIDCount() uint64
 }
 
-// ParseableGenerator 可解析的生成器接口（接口隔离）
-// 支持从ID中提取元信息
+// ParseableGenerator 可解析的生成器接口
 type ParseableGenerator interface {
-	// ParseID 解析ID，提取其中的时间戳、机器ID等信息
+	// ParseID 解析ID，提取其中的时间戳、机器ID等元信息
 	ParseID(id int64) (*IDInfo, error)
+
 	// ValidateID 验证ID的有效性
 	ValidateID(id int64) error
 }
 
 // FullFeaturedGenerator 完整功能的生成器接口
-// 组合所有功能接口，遵循接口组合原则
 type FullFeaturedGenerator interface {
 	IDGenerator
 	BatchGenerator
@@ -57,42 +55,44 @@ type FullFeaturedGenerator interface {
 	ParseableGenerator
 }
 
-// GeneratorFactory 生成器工厂接口（依赖倒置：依赖抽象而非具体实现）
-// 用于创建不同类型的ID生成器
+// GeneratorFactory 生成器工厂接口
 type GeneratorFactory interface {
 	// Create 根据配置创建生成器实例
-	// 参数：config - 生成器配置（使用any以支持不同类型的配置）
-	// 返回：生成器实例和可能的错误
 	Create(config any) (IDGenerator, error)
 }
 
-// IDInfo ID信息结构（用于解析结果）
+// IDInfo ID信息结构
 type IDInfo struct {
-	ID           int64 // 原始ID
-	Timestamp    int64 // 时间戳（毫秒）
-	DatacenterID int64 // 数据中心ID
-	WorkerID     int64 // 工作机器ID
-	Sequence     int64 // 序列号
+	ID           int64 // 原始ID值
+	Timestamp    int64 // 时间戳（Unix毫秒）
+	DatacenterID int64 // 数据中心ID（0-31）
+	WorkerID     int64 // 工作机器ID（0-31）
+	Sequence     int64 // 序列号（0-4095，同一毫秒内的序号）
 }
 
-// IDParser ID解析器接口（依赖倒置：domain包依赖此接口而非具体实现）
+// IDParser ID解析器接口
 type IDParser interface {
-	// Parse 解析ID，提取元信息
+	// Parse 解析ID，提取完整的元信息
 	Parse(id int64) (*IDInfo, error)
+
 	// ExtractTimestamp 提取时间戳（Unix毫秒）
 	ExtractTimestamp(id int64) int64
+
 	// ExtractDatacenterID 提取数据中心ID
 	ExtractDatacenterID(id int64) int64
+
 	// ExtractWorkerID 提取工作机器ID
 	ExtractWorkerID(id int64) int64
+
 	// ExtractSequence 提取序列号
 	ExtractSequence(id int64) int64
 }
 
-// IDValidator ID验证器接口（依赖倒置）
+// IDValidator ID验证器接口
 type IDValidator interface {
 	// Validate 验证ID的有效性
 	Validate(id int64) error
+
 	// ValidateBatch 批量验证ID
 	ValidateBatch(ids []int64) error
 }
