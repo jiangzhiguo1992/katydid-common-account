@@ -26,7 +26,7 @@ func (v *Validator) Validate(id int64) error {
 	// 提取时间戳
 	timestamp := (id >> TimestampShift) + Epoch
 
-	// 检查时间戳是否在合理范围内
+	// 检查时间戳是否在Epoch之后
 	if timestamp < Epoch {
 		return fmt.Errorf("%w: timestamp %d is before epoch %d",
 			core.ErrInvalidSnowflakeID, timestamp, Epoch)

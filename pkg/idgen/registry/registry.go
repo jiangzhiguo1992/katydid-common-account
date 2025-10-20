@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
@@ -10,9 +11,14 @@ import (
 const (
 	// 默认最大生成器数量
 	defaultMaxGenerators = 100
+	// 绝对最大生成器数量（硬性上限）
+	absoluteMaxGenerators = 100_000
 	// 键的最大长度
 	maxKeyLength = 256
 )
+
+// 键的合法字符正则表达式（只允许字母、数字、下划线、连字符、点）
+var keyFormatRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
 
 // Registry 生成器注册表（单例模式，管理生成器实例的生命周期）
 type Registry struct {
@@ -175,6 +181,11 @@ func (r *Registry) SetMaxGenerators(max int) error {
 		return fmt.Errorf("max generators must be positive")
 	}
 
+	// 添加绝对上限检查
+	if max > absoluteMaxGenerators {
+		return fmt.Errorf("max generators cannot exceed absolute limit %d", absoluteMaxGenerators)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -204,6 +215,11 @@ func validateKey(key string) error {
 	if len(key) > maxKeyLength {
 		return fmt.Errorf("%w: key too long (max %d), got %d",
 			core.ErrInvalidKey, maxKeyLength, len(key))
+	}
+
+	// 验证键格式（只允许安全字符）
+	if !keyFormatRegex.MatchString(key) {
+		return fmt.Errorf("%w: key contains invalid characters", core.ErrInvalidKeyFormat)
 	}
 
 	return nil

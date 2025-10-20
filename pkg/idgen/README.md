@@ -354,12 +354,10 @@ pkg/idgen/
 │   ├── validator.go  # ID 验证器
 │   └── metrics.go    # 性能监控
 │
-├── registry/          # 注册表管理
-│   ├── registry.go   # 生成器注册表
-│   ├── factory.go    # 工厂接口实现
-│   └── default.go    # 默认实例管理
-│
-└── exports.go         # 向后兼容的导出接口
+└── registry/          # 注册表管理
+    ├── registry.go   # 生成器注册表
+    ├── factory.go    # 工厂接口实现
+    └── default.go    # 默认实例管理
 ```
 
 ### SOLID 设计原则

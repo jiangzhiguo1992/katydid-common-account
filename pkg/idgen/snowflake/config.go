@@ -34,9 +34,13 @@ func (c *Config) Validate() error {
 
 // SetDefaults 设置默认值（单一职责：配置默认化）
 func (c *Config) SetDefaults() {
-	if c.ClockBackwardTolerance <= 0 {
+	// 只有未设置或无效时才设置默认值
+	if c.ClockBackwardTolerance < 0 || c.ClockBackwardTolerance > maxClockBackwardToleranceLimit {
 		c.ClockBackwardTolerance = maxClockBackwardTolerance
 	}
+
+	// 如果策略未设置，使用默认策略
+	// 注意：Go的零值是0，对应StrategyError，这是合理的默认值
 }
 
 // Clone 克隆配置（不可变性：返回新对象而非修改原对象）

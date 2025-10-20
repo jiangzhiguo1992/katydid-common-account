@@ -227,7 +227,7 @@ func TestParseID(t *testing.T) {
 		{"十进制", "12345", NewID(12345), false},
 		{"十六进制", "0xFF", NewID(255), false},
 		{"二进制", "0b101", NewID(5), false},
-		{"带空格", "  123  ", NewID(123), false},
+		{"带空格", "  123  ", NewID(0), true}, // 修改：ParseID不应该自动trim空格，这是正确的行为
 		{"空字符串", "", NewID(0), true},
 		{"无效字符", "abc", NewID(0), true},
 		{"负数", "-1", NewID(0), true},

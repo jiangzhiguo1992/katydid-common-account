@@ -38,4 +38,13 @@ var (
 
 	// ErrMaxGeneratorsReached 达到最大生成器数量
 	ErrMaxGeneratorsReached = errors.New("maximum number of generators reached")
+
+	// ErrParserNotFound 解析器未找到
+	ErrParserNotFound = errors.New("parser not found")
+
+	// ErrValidatorNotFound 验证器未找到
+	ErrValidatorNotFound = errors.New("validator not found")
+
+	// ErrInvalidKeyFormat 无效的键格式
+	ErrInvalidKeyFormat = errors.New("invalid key format: only alphanumeric, underscore, hyphen, and dot allowed")
 )

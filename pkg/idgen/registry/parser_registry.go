@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
@@ -37,7 +38,7 @@ func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.
 	}
 
 	if parser == nil {
-		return core.ErrNilConfig
+		return fmt.Errorf("parser cannot be nil")
 	}
 
 	r.mu.Lock()
@@ -54,7 +55,7 @@ func (r *ParserRegistry) Get(generatorType core.GeneratorType) (core.IDParser, e
 
 	parser, exists := r.parsers[generatorType]
 	if !exists {
-		return nil, core.ErrGeneratorNotFound
+		return nil, core.ErrParserNotFound
 	}
 
 	return parser, nil
@@ -92,7 +93,7 @@ func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator
 	}
 
 	if validator == nil {
-		return core.ErrNilConfig
+		return fmt.Errorf("validator cannot be nil")
 	}
 
 	r.mu.Lock()
@@ -109,7 +110,7 @@ func (r *ValidatorRegistry) Get(generatorType core.GeneratorType) (core.IDValida
 
 	validator, exists := r.validators[generatorType]
 	if !exists {
-		return nil, core.ErrGeneratorNotFound
+		return nil, core.ErrValidatorNotFound
 	}
 
 	return validator, nil

@@ -27,6 +27,9 @@ const (
 	// 时钟回拨最大容忍时间（毫秒）
 	maxClockBackwardTolerance = 5
 
+	// 时钟回拨容忍度的绝对上限（毫秒），防止无限等待
+	maxClockBackwardToleranceLimit = 1000
+
 	// 批量生成最大数量（支持跨毫秒生成）
 	maxBatchSize = 100_000
 
