@@ -1,0 +1,76 @@
+package snowflake
+
+import (
+	"fmt"
+	"time"
+
+	"katydid-common-account/pkg/idgen/core"
+)
+
+// Parser Snowflake ID解析器（单一职责：只负责ID解析）
+type Parser struct {
+	validator *Validator
+}
+
+// NewParser 创建新的解析器实例
+func NewParser() *Parser {
+	return &Parser{
+		validator: NewValidator(),
+	}
+}
+
+// Parse 解析Snowflake ID，提取时间戳、数据中心ID、工作机器ID、序列号
+func (p *Parser) Parse(id int64) (*core.IDInfo, error) {
+	// 先验证ID的有效性
+	if err := p.validator.Validate(id); err != nil {
+		return nil, fmt.Errorf("invalid snowflake ID: %w", err)
+	}
+
+	timestamp := (id >> TimestampShift) + Epoch
+	datacenterID := (id >> DatacenterIDShift) & MaxDatacenterID
+	workerID := (id >> WorkerIDShift) & MaxWorkerID
+	sequence := id & MaxSequence
+
+	return &core.IDInfo{
+		ID:           id,
+		Timestamp:    timestamp,
+		DatacenterID: datacenterID,
+		WorkerID:     workerID,
+		Sequence:     sequence,
+	}, nil
+}
+
+// ExtractTimestamp 从Snowflake ID中提取时间戳
+func (p *Parser) ExtractTimestamp(id int64) time.Time {
+	timestamp := (id >> TimestampShift) + Epoch
+	return time.UnixMilli(timestamp)
+}
+
+// ExtractDatacenterID 从Snowflake ID中提取数据中心ID
+func (p *Parser) ExtractDatacenterID(id int64) int64 {
+	return (id >> DatacenterIDShift) & MaxDatacenterID
+}
+
+// ExtractWorkerID 从Snowflake ID中提取工作机器ID
+func (p *Parser) ExtractWorkerID(id int64) int64 {
+	return (id >> WorkerIDShift) & MaxWorkerID
+}
+
+// ExtractSequence 从Snowflake ID中提取序列号
+func (p *Parser) ExtractSequence(id int64) int64 {
+	return id & MaxSequence
+}
+
+// ParseSnowflakeID 全局解析函数（向后兼容）
+func ParseSnowflakeID(id int64) (timestamp int64, datacenterID int64, workerID int64, sequence int64) {
+	timestamp = (id >> TimestampShift) + Epoch
+	datacenterID = (id >> DatacenterIDShift) & MaxDatacenterID
+	workerID = (id >> WorkerIDShift) & MaxWorkerID
+	sequence = id & MaxSequence
+	return
+}
+
+// GetTimestamp 全局时间戳提取函数（向后兼容）
+func GetTimestamp(id int64) time.Time {
+	return NewParser().ExtractTimestamp(id)
+}
