@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -453,7 +452,7 @@ func TestID_MethodsConcurrent(t *testing.T) {
 				_ = id.Binary()
 				_ = id.IsZero()
 				_ = id.IsValid()
-				_ = id.IsSafeForJS()
+				_ = id.IsSafeForJavaScript()
 			}
 			done <- struct{}{}
 		}()
@@ -518,9 +517,7 @@ func TestIDSet_ConcurrentOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < idsPerGoroutine; j++ {
 				id := NewID(int64(start*idsPerGoroutine + j))
-				if !set.Add(id) {
-					atomic.AddInt64(&duplicates, 1)
-				}
+				set.Add(id)
 			}
 		}(i)
 	}
@@ -530,14 +527,14 @@ func TestIDSet_ConcurrentOperations(t *testing.T) {
 	// 验证
 	t.Logf("添加错误数: %d", addErrors)
 	t.Logf("重复数: %d", duplicates)
-	t.Logf("集合大小: %d (期望: %d)", set.Len(), totalIDs)
+	t.Logf("集合大小: %d (期望: %d)", set.Size(), totalIDs)
 
 	if duplicates > 0 {
 		t.Errorf("发现 %d 个重复添加", duplicates)
 	}
 
-	if set.Len() != totalIDs {
-		t.Errorf("集合大小 %d 不等于期望 %d", set.Len(), totalIDs)
+	if set.Size() != totalIDs {
+		t.Errorf("集合大小 %d 不等于期望 %d", set.Size(), totalIDs)
 	}
 }
 
@@ -563,7 +560,7 @@ func TestIDSet_ConcurrentReadWrite(t *testing.T) {
 			for j := 0; j < operations; j++ {
 				// 读操作
 				_ = set.Contains(NewID(int64(j)))
-				_ = set.Len()
+				_ = set.Size()
 
 				// 写操作
 				if j%2 == 0 {
@@ -577,7 +574,7 @@ func TestIDSet_ConcurrentReadWrite(t *testing.T) {
 
 	wg.Wait()
 
-	t.Logf("最终集合大小: %d", set.Len())
+	t.Logf("最终集合大小: %d", set.Size())
 }
 
 // TestID_MillionParsing 测试百万次ID解析
@@ -678,11 +675,11 @@ func TestIDSet_MillionOperations(t *testing.T) {
 			set.Add(NewID(int64(i)))
 		}
 
-		if set.Len() != iterations {
-			t.Errorf("集合大小 %d 不等于期望 %d", set.Len(), iterations)
+		if set.Size() != iterations {
+			t.Errorf("集合大小 %d 不等于期望 %d", set.Size(), iterations)
 		}
 
-		t.Logf("成功添加 %d 个元素", set.Len())
+		t.Logf("成功添加 %d 个元素", set.Size())
 	})
 
 	t.Run("Contains_百万次", func(t *testing.T) {

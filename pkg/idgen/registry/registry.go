@@ -122,16 +122,48 @@ func (r *Registry) Get(key string) (core.IDGenerator, error) {
 
 // GetOrCreate 获取生成器，如果不存在则创建
 func (r *Registry) GetOrCreate(key string, generatorType core.GeneratorType, config any) (core.IDGenerator, error) {
-	// 快速路径：先尝试获取（使用读锁，性能更好）
-	r.mu.RLock()
+	// 步骤1：验证参数
+	if err := validateKey(key); err != nil {
+		return nil, err
+	}
+
+	if !generatorType.IsValid() {
+		return nil, fmt.Errorf("%w: %s", core.ErrInvalidGeneratorType, generatorType)
+	}
+
+	// 步骤2：加写锁，保护注册表
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 步骤3：检查key是否已存在
 	if generator, exists := r.generators[key]; exists {
-		r.mu.RUnlock()
 		return generator, nil
 	}
-	r.mu.RUnlock()
 
-	// 慢速路径：不存在则创建（Create方法内部会加写锁）
-	return r.Create(key, generatorType, config)
+	// 步骤4：检查数量限制
+	if len(r.generators) >= r.maxGenerators {
+		return nil, fmt.Errorf("%w: current %d, max %d",
+			core.ErrMaxGeneratorsReached, len(r.generators), r.maxGenerators)
+	}
+
+	// 步骤5：从工厂注册表获取工厂
+	factory, err := GetFactoryRegistry().Get(generatorType)
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤6：使用工厂创建生成器
+	generator, err := factory.Create(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create generator: %w", err)
+	}
+
+	// 步骤7：注册生成器
+	r.generators[key] = generator
+
+	log.Println("生成器创建成功", "key", key, "type", generatorType)
+
+	return generator, nil
 }
 
 // Has 检查生成器是否存在

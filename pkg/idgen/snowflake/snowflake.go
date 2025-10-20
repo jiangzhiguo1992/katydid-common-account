@@ -45,6 +45,10 @@ func New(datacenterID, workerID int64) (*Generator, error) {
 // NewWithConfig 使用配置创建Snowflake ID生成器
 // 说明：完整配置方式，支持自定义时钟回拨策略和监控开关
 func NewWithConfig(config *Config) (*Generator, error) {
+	if config == nil {
+		return nil, core.ErrNilConfig
+	}
+
 	// 步骤1：验证配置
 	if err := config.Validate(); err != nil {
 		return nil, err
