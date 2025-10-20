@@ -902,6 +902,9 @@ func (e Extras) Clone() Extras {
 //
 // 注意：相同的键会被 other 的值覆盖
 func (e Extras) Merge(other Extras) {
+	if other == nil {
+		return
+	}
 	for k, v := range other {
 		e[k] = v
 	}
@@ -1475,6 +1478,14 @@ func (e Extras) GetPath(path string) (any, bool) {
 	}
 
 	keys := strings.Split(path, ".")
+
+	// 检查空键
+	for _, key := range keys {
+		if key == "" {
+			return nil, false // 拒绝
+		}
+	}
+
 	current := any(e)
 
 	for _, key := range keys {
@@ -1563,12 +1574,25 @@ func (e Extras) GetExtrasPath(path string) (Extras, bool) {
 }
 
 // SetPath 支持路径设置（自动创建中间节点）
+//
+// 错误情况：
+// - 路径为空字符串
+// - 路径包含空键（如 "a..b"）
+// - 中间节点存在但不是 Extras/map[string]any 类型
 func (e Extras) SetPath(path string, value any) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
 
 	keys := strings.Split(path, ".")
+
+	// 检查空键
+	for _, key := range keys {
+		if key == "" {
+			return fmt.Errorf("path contains empty key: %s", path)
+		}
+	}
+
 	if len(keys) == 1 {
 		e.Set(path, value)
 		return nil
@@ -1582,6 +1606,10 @@ func (e Extras) SetPath(path string, value any) error {
 		if existing, ok := current.GetExtras(key); ok {
 			current = existing
 		} else {
+			// 检查是否存在非 Extras 类型的值
+			if _, exists := current[key]; exists {
+				return fmt.Errorf("path conflict at key '%s': existing value is not an Extras type", key)
+			}
 			newMap := NewExtras()
 			current.Set(key, newMap)
 			current = newMap
@@ -1594,7 +1622,11 @@ func (e Extras) SetPath(path string, value any) error {
 }
 
 // Range 遍历所有键值对（零分配）
+//
 // 返回false可提前终止遍历
+//
+// 警告：遍历期间不要修改map，否则会panic
+// 如需并发访问，请使用外部锁保护
 func (e Extras) Range(fn func(key string, value any) bool) {
 	for k, v := range e {
 		if !fn(k, v) {
@@ -1604,6 +1636,8 @@ func (e Extras) Range(fn func(key string, value any) bool) {
 }
 
 // RangeKeys 仅遍历键（零分配）
+//
+// 警告：遍历期间不要修改map
 func (e Extras) RangeKeys(fn func(key string) bool) {
 	for k := range e {
 		if !fn(k) {
