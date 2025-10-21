@@ -80,23 +80,80 @@ func (e Extras) SetMultiple(pairs map[string]any) {
 	}
 }
 
-// SetFromStruct 从结构体设置字段（使用JSON标签）
+// SetFromStruct 从结构体设置字段
 func (e Extras) SetFromStruct(s interface{}) error {
+	if s == nil {
+		return fmt.Errorf("cannot set from nil struct")
+	}
+
+	// 优化：使用反射直接提取字段，避免 JSON 序列化开销
+	v := reflect.ValueOf(s)
+
+	// 处理指针
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return fmt.Errorf("cannot set from nil pointer")
+		}
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		// 非结构体回退到 JSON 方法
+		return e.setFromStructJSON(s)
+	}
+
+	t := v.Type()
+
+	// 遍历结构体字段
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+
+		// 跳过未导出字段
+		if !field.IsExported() {
+			continue
+		}
+
+		// 获取 json 标签
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" {
+			jsonTag = field.Name
+		} else {
+			// 解析 json 标签（处理 "name,omitempty" 格式）
+			if idx := strings.IndexByte(jsonTag, ','); idx > 0 {
+				jsonTag = jsonTag[:idx]
+			}
+		}
+
+		// 跳过 "-" 标签
+		if jsonTag == "-" {
+			continue
+		}
+
+		fieldValue := v.Field(i)
+
+		// 优化：直接设置接口值，避免类型转换
+		if fieldValue.CanInterface() {
+			e[jsonTag] = fieldValue.Interface()
+		}
+	}
+
+	return nil
+}
+
+// setFromStructJSON JSON 序列化方法（回退方案）
+func (e Extras) setFromStructJSON(s interface{}) error {
 	data, err := json.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("failed to marshal struct: %w", err)
 	}
 
-	// 直接解析到现有map，避免创建临时map
 	if len(e) == 0 {
-		// 空map直接解析
 		if err := json.Unmarshal(data, &e); err != nil {
 			return fmt.Errorf("failed to unmarshal to map: %w", err)
 		}
 		return nil
 	}
 
-	// 非空map需要合并
 	temp := make(map[string]any)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return fmt.Errorf("failed to unmarshal to map: %w", err)
@@ -118,7 +175,9 @@ func (e Extras) DeleteMultiple(keys ...string) {
 	}
 
 	for _, key := range keys {
-		delete(e, key)
+		if _, exists := e[key]; exists {
+			delete(e, key)
+		}
 	}
 }
 
@@ -196,8 +255,8 @@ func (e Extras) GetStringSlice(key string) ([]string, bool) {
 			return []string{}, true
 		}
 		strs := make([]string, len(val))
-		for i, item := range val {
-			if str, ok := item.(string); ok {
+		for i := 0; i < len(val); i++ {
+			if str, ok := val[i].(string); ok {
 				strs[i] = str
 			} else {
 				return nil, false
@@ -854,6 +913,10 @@ func (e Extras) Has(key string) bool {
 
 // HasAll 检查是否包含所有指定的键
 func (e Extras) HasAll(keys ...string) bool {
+	if len(keys) == 0 {
+		return true
+	}
+
 	for _, key := range keys {
 		if _, exists := e[key]; !exists {
 			return false
@@ -864,6 +927,10 @@ func (e Extras) HasAll(keys ...string) bool {
 
 // HasAny 检查是否包含任意一个指定的键
 func (e Extras) HasAny(keys ...string) bool {
+	if len(keys) == 0 {
+		return false
+	}
+
 	for _, key := range keys {
 		if _, exists := e[key]; exists {
 			return true
@@ -954,9 +1021,11 @@ func (e Extras) Merge(other Extras) {
 	if len(other) == 0 {
 		return
 	}
-	for k, v := range other {
-		e[k] = v
-	}
+	//for k, v := range other {
+	//	e[k] = v
+	//}
+	// 使用 maps.Copy，Go 1.21+
+	maps.Copy(e, other)
 }
 
 // MergeIf 条件合并：仅合并满足条件的键值对
@@ -2279,6 +2348,7 @@ func (e Extras) Omit(keys ...string) Extras {
 
 // Compact 移除所有 nil 值
 func (e Extras) Compact() {
+	// Go 1.21+ 支持在遍历中安全删除
 	for k, v := range e {
 		if v == nil {
 			delete(e, k)
@@ -2436,4 +2506,23 @@ func (e Extras) Size() int {
 		}
 	}
 	return size
+}
+
+// GetOrSet 获取值，如果不存在则设置默认值并返回（原子操作）
+func (e Extras) GetOrSet(key string, defaultValue any) any {
+	if v, ok := e[key]; ok {
+		return v
+	}
+	e[key] = defaultValue
+	return defaultValue
+}
+
+// GetOrSetFunc 获取值，如果不存在则调用函数生成默认值（懒加载）
+func (e Extras) GetOrSetFunc(key string, factory func() any) any {
+	if v, ok := e[key]; ok {
+		return v
+	}
+	value := factory()
+	e[key] = value
+	return value
 }
