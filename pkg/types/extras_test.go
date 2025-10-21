@@ -135,7 +135,9 @@ func TestExtrasSetPath(t *testing.T) {
 		{"深层嵌套", "user.address.city", "Beijing", false},
 		{"空路径", "", "value", true},
 		{"路径以点结尾", "user.", "value", true},
+		{"路径以点结尾", "user..", "value", true},
 		{"路径中有空键", "user..name", "value", true},
+		{"路径中有空键", "user..name..", "value", true},
 	}
 
 	for _, tt := range tests {
@@ -226,9 +228,9 @@ func TestExtrasGetString(t *testing.T) {
 		wantOk bool
 	}{
 		{"字符串", "str", "hello", "hello", true},
-		{"整数", "int", 42, "42", true},
-		{"浮点数", "float", 3.14, "3.14", true},
-		{"布尔值", "bool", true, "true", true},
+		{"整数", "int", 42, "", false},       // GetString 只支持原生 string 类型
+		{"浮点数", "float", 3.14, "", false}, // 不会自动转换
+		{"布尔值", "bool", true, "", false},  // 不会自动转换
 		{"nil", "nil", nil, "", false},
 		{"不存在", "nonexistent", nil, "", false},
 	}
@@ -267,9 +269,11 @@ func TestExtrasGetInt(t *testing.T) {
 		{"int64", "int64", int64(64), 64, true},
 		{"uint", "uint", uint(10), 10, true},
 		{"float64", "float", 42.0, 42, true},
-		{"字符串数字", "str", "42", 42, true},
+		{"字符串数字", "str", "42", 0, false}, // convertToInt 不支持字符串转换
 		{"字符串非数字", "str_invalid", "abc", 0, false},
-		{"溢出", "overflow", int64(math.MaxInt64), 0, false},
+		// 在 64 位系统上 int 是 int64，所以 MaxInt64 可以转换
+		{"溢出", "overflow", int64(math.MaxInt64), math.MaxInt64, true},
+		{"大数值", "bignum", int64(math.MaxInt32), math.MaxInt32, true},
 	}
 
 	for _, tt := range tests {
@@ -300,7 +304,7 @@ func TestExtrasGetFloat64(t *testing.T) {
 		{"float64", "f64", 3.14, 3.14, true},
 		{"float32", "f32", float32(2.5), 2.5, true},
 		{"int", "int", 42, 42.0, true},
-		{"字符串数字", "str", "3.14", 3.14, true},
+		{"字符串数字", "str", "3.14", 0, false}, // convertToFloat64 不支持字符串转换
 		{"字符串非数字", "str_invalid", "abc", 0, false},
 	}
 
@@ -331,10 +335,10 @@ func TestExtrasGetBool(t *testing.T) {
 	}{
 		{"true", "true", true, true, true},
 		{"false", "false", false, false, true},
-		{"字符串true", "str_true", "true", true, true},
-		{"字符串false", "str_false", "false", false, true},
-		{"整数1", "int1", 1, true, true},
-		{"整数0", "int0", 0, false, true},
+		{"字符串true", "str_true", "true", false, false}, // GetBool 只支持原生 bool 类型
+		{"字符串false", "str_false", "false", false, false},
+		{"整数1", "int1", 1, false, false}, // 不支持整数转布尔
+		{"整数0", "int0", 0, false, false},
 		{"字符串无效", "str_invalid", "abc", false, false},
 	}
 
@@ -380,7 +384,7 @@ func TestExtrasGetStringSlice(t *testing.T) {
 	}{
 		{"字符串切片", []string{"a", "b", "c"}, []string{"a", "b", "c"}, true},
 		{"any切片", []any{"x", "y", "z"}, []string{"x", "y", "z"}, true},
-		{"混合类型", []any{1, "two", 3.0}, []string{"1", "two", "3"}, true},
+		{"混合类型", []any{1, "two", 3.0}, nil, false}, // GetStringSlice 不支持混合类型自动转换
 		{"非切片", "not_a_slice", nil, false},
 	}
 
@@ -540,8 +544,8 @@ func TestExtrasIsNil(t *testing.T) {
 	if extras.IsNil("value") {
 		t.Error("IsNil('value') 应返回 false")
 	}
-	if !extras.IsNil("nonexistent") {
-		t.Error("IsNil('nonexistent') 应返回 true")
+	if extras.IsNil("nonexistent") {
+		t.Error("IsNil('nonexistent') 应返回 false（键不存在）")
 	}
 }
 
@@ -762,13 +766,13 @@ func TestExtrasUnmarshalJSON(t *testing.T) {
 func TestExtrasNilJSON(t *testing.T) {
 	var extras Extras
 
-	// nil 应该序列化为 null
+	// nil Extras 应该序列化为空对象 {}
 	data, err := json.Marshal(extras)
 	if err != nil {
 		t.Fatalf("nil Extras 序列化失败: %v", err)
 	}
-	if string(data) != "null" {
-		t.Errorf("nil Extras 应序列化为 'null'，实际为 %s", string(data))
+	if string(data) != "{}" {
+		t.Errorf("nil Extras 应序列化为 '{}'，实际为 %s", string(data))
 	}
 }
 

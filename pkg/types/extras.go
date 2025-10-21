@@ -74,16 +74,22 @@ func (e Extras) SetPath(path string, value any) error {
 		return nil
 	}
 
-	// 使用栈数组
+	// 预分配栈数组避免切片分配
 	const maxDepth = 16
 	keys := [maxDepth]string{}
 	keyCount := 0
 
+	// 手动分割路径（避免strings.Split的切片分配）
 	start := 0
 	for i := 0; i <= len(path); i++ {
 		if i == len(path) || path[i] == '.' {
-			if i > start && keyCount < maxDepth {
-				keys[keyCount] = path[start:i]
+			if i >= start && keyCount < maxDepth {
+				key := path[start:i]
+				// 跳过空键名（连续点号或首尾点号）
+				if len(key) == 0 {
+					return fmt.Errorf("path contains empty key")
+				}
+				keys[keyCount] = key
 				keyCount++
 			}
 			start = i + 1
