@@ -175,9 +175,7 @@ func (e Extras) DeleteMultiple(keys ...string) {
 	}
 
 	for _, key := range keys {
-		if _, exists := e[key]; exists {
-			delete(e, key)
-		}
+		delete(e, key)
 	}
 }
 
@@ -1137,42 +1135,6 @@ func quickEqual(a, b any) bool {
 
 // ==================== 辅助转换函数优化 ====================
 
-//go:inline
-func convertToUint64(v any) uint64 {
-	switch val := v.(type) {
-	case uint64:
-		return val
-	case uint:
-		return uint64(val)
-	case uint32:
-		return uint64(val)
-	case uint16:
-		return uint64(val)
-	case uint8:
-		return uint64(val)
-	default:
-		return 0
-	}
-}
-
-//go:inline
-func toInt64(v any) int64 {
-	switch val := v.(type) {
-	case int64:
-		return val
-	case int:
-		return int64(val)
-	case int32:
-		return int64(val)
-	case int16:
-		return int64(val)
-	case int8:
-		return int64(val)
-	default:
-		return 0
-	}
-}
-
 // convertToInt64 使用更高效的类型判断顺序
 func convertToInt64(v any) (int64, bool) {
 	switch val := v.(type) {
@@ -1213,7 +1175,7 @@ func convertToInt64(v any) (int64, bool) {
 	return 0, false
 }
 
-// convertToInt 按频率排序case
+//go:inline
 func convertToInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case int:
@@ -1421,7 +1383,7 @@ func convertToInt32(v any) (int32, bool) {
 	return 0, false
 }
 
-// convertToUint 转换为 uint
+//go:inline
 func convertToUint(v any) (uint, bool) {
 	switch val := v.(type) {
 	case uint:
@@ -1645,7 +1607,7 @@ func convertToUint32(v any) (uint32, bool) {
 	return 0, false
 }
 
-// convertToUint64Typed 转换为 uint64（类型化版本）
+//go:inline
 func convertToUint64Typed(v any) (uint64, bool) {
 	switch val := v.(type) {
 	case uint64:
@@ -1729,7 +1691,7 @@ func convertToFloat32(v any) (float32, bool) {
 	return 0, false
 }
 
-// convertToFloat64 转换为 float64
+//go:inline
 func convertToFloat64(v any) (float64, bool) {
 	switch val := v.(type) {
 	case float64:
@@ -2478,31 +2440,45 @@ func (e Extras) Size() int {
 
 	size := 0
 	for k, v := range e {
-		// 键的大小
-		size += len(k)
+		// 键的大小（字符串头部 16 字节 + 数据）
+		size += 16 + len(k)
 
-		// 值的大小（粗略估算）
+		// 值的大小（按使用频率和精确大小排序）
 		switch val := v.(type) {
 		case string:
-			size += len(val)
+			// 字符串头部 16 字节 + 数据
+			size += 16 + len(val)
 		case []byte:
-			size += len(val)
-		case int, int8, int16, int32, int64:
+			// 切片头部 24 字节 + 数据
+			size += 24 + len(val)
+		case int64:
 			size += 8
-		case uint, uint8, uint16, uint32, uint64:
-			size += 8
-		case float32:
-			size += 4
+		case int:
+			size += 8 // 64位系统
 		case float64:
 			size += 8
-		case bool:
+		case int32, uint32, float32:
+			size += 4
+		case int16, uint16:
+			size += 2
+		case int8, uint8, bool:
 			size += 1
+		case uint64, uint:
+			size += 8
 		case []any:
-			size += len(val) * 8 // 粗略估算
+			// 切片头部 24 字节 + 每个元素接口（16字节）
+			size += 24 + len(val)*16
 		case map[string]any:
-			size += len(val) * 16 // 粗略估算
+			// map 头部 48 字节 + 每个键值对粗略估算（键16+值16+开销16）
+			size += 48 + len(val)*48
+		case Extras:
+			// map 头部 48 字节 + 递归估算
+			size += 48 + len(val)*48
+		case nil:
+			size += 8 // 指针大小
 		default:
-			size += 8 // 默认指针大小
+			// 接口值：类型指针 8 + 数据指针 8
+			size += 16
 		}
 	}
 	return size
