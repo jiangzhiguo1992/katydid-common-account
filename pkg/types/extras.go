@@ -730,8 +730,8 @@ func (e Extras) GetBytes(key string) ([]byte, bool) {
 //
 // 注意：存储大对象时会影响数据库性能，建议限制大小
 func (e Extras) Value() (driver.Value, error) {
-	// 空值优化：避免存储无意义的空 JSON
-	if e == nil || len(e) == 0 {
+	// 避免存储无意义的空 JSON
+	if len(e) == 0 {
 		return nil, nil
 	}
 
@@ -796,9 +796,6 @@ func (e *Extras) Scan(value any) error {
 // JSON 格式：标准的 JSON 对象
 // nil 值会序列化为 null
 func (e Extras) MarshalJSON() ([]byte, error) {
-	if e == nil {
-		return []byte("null"), nil
-	}
 	return json.Marshal(map[string]any(e))
 }
 
@@ -885,9 +882,6 @@ func (e Extras) Clear() {
 //
 // 注意：这是浅拷贝，嵌套的引用类型（slice、map）仍指向原对象
 func (e Extras) Clone() Extras {
-	if e == nil {
-		return nil
-	}
 	clone := make(Extras, len(e))
 	for k, v := range e {
 		clone[k] = v
