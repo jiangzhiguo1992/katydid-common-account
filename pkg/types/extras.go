@@ -2280,7 +2280,7 @@ func convertToUint(v any) (uint, bool) {
 			return uint(val), true
 		}
 	case int64:
-		if val >= 0 && val <= int64(math.MaxUint) {
+		if val >= 0 {
 			return uint(val), true
 		}
 	case float32:
@@ -2506,14 +2506,14 @@ func convertToUint64Typed(v any) (uint64, bool) {
 			return uint64(val), true
 		}
 	case float32:
-		if val >= 0 && val <= float32(math.MaxUint64) {
+		if val >= 0 {
 			u := uint64(val)
 			if float32(u) == val {
 				return u, true
 			}
 		}
 	case float64:
-		if val >= 0 && val <= float64(math.MaxUint64) {
+		if val >= 0 {
 			u := uint64(val)
 			if float64(u) == val {
 				return u, true
