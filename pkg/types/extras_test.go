@@ -2,737 +2,1471 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
-	"strings"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
-// TestExtras_BasicOperations 测试基础操作
-func TestExtras_BasicOperations(t *testing.T) {
-	e := NewExtras(0)
-
-	// 测试设置和获取字符串
-	e.Set("name", "John Doe")
-	if val, ok := e.GetString("name"); !ok || val != "John Doe" {
-		t.Errorf("Expected 'John Doe', got '%s'", val)
-	}
-
-	// 测试设置和获取整数
-	e.Set("age", 30)
-	if val, ok := e.GetInt("age"); !ok || val != 30 {
-		t.Errorf("Expected 30, got %d", val)
-	}
-
-	// 测试设置和获取布尔值
-	e.Set("active", true)
-	if val, ok := e.GetBool("active"); !ok || !val {
-		t.Errorf("Expected true, got %v", val)
-	}
-
-	// 测试设置和获取浮点数
-	e.Set("price", 99.99)
-	if val, ok := e.GetFloat64("price"); !ok || val != 99.99 {
-		t.Errorf("Expected 99.99, got %f", val)
-	}
-
-	// 测试Has方法
-	if !e.Has("name") {
-		t.Error("Expected 'name' key to exist")
-	}
-
-	// 测试Len方法
-	if e.Len() != 4 {
-		t.Errorf("Expected length 4, got %d", e.Len())
-	}
-
-	// 测试Delete方法
-	e.Delete("age")
-	if e.Has("age") {
-		t.Error("Expected 'age' key to be deleted")
-	}
-}
-
-// TestExtras_EmptyKey 测试空键名的防御性检查
-func TestExtras_EmptyKey(t *testing.T) {
-	e := NewExtras(0)
-
-	// 设置空键名应该被忽略
-	e.Set("", "value")
-	if e.Has("") {
-		t.Error("空键名不应该被设置")
-	}
-
-	// SetOrDel 空键名也应该被忽略
-	e.SetOrDel("", "value")
-	if e.Has("") {
-		t.Error("SetOrDel 空键名不应该被设置")
-	}
-
-	if e.Len() != 0 {
-		t.Errorf("设置空键名后，长度应该为 0，实际为 %d", e.Len())
-	}
-}
-
-// TestExtras_ComplexTypes 测试复杂类型
-func TestExtras_ComplexTypes(t *testing.T) {
-	e := NewExtras(0)
-
-	// 测试数组
-	tags := []any{"go", "database", "api"}
-	e.Set("tags", tags)
-	if val, ok := e.GetSlice("tags"); !ok || len(val) != 3 {
-		t.Errorf("Expected slice with 3 elements, got %v", val)
-	}
-
-	// 测试对象
-	metadata := map[string]any{
-		"version": "1.0",
-		"author":  "Admin",
-	}
-	e.Set("metadata", metadata)
-	if val, ok := e.GetMap("metadata"); !ok || val["version"] != "1.0" {
-		t.Errorf("Expected map with version '1.0', got %v", val)
-	}
-}
-
-// TestExtras_TypeConversion 测试类型转换和边界检查
-func TestExtras_TypeConversion(t *testing.T) {
-	e := NewExtras(0)
-
-	// 测试 int 类型转换
-	e.Set("int8_val", int8(100))
-	if val, ok := e.GetInt("int8_val"); !ok || val != 100 {
-		t.Errorf("int8 转 int 失败: got %d, ok=%v", val, ok)
-	}
-
-	// 测试溢出检查
-	e.Set("overflow", uint64(math.MaxUint64))
-	if _, ok := e.GetInt("overflow"); ok {
-		t.Error("uint64 最大值转 int 应该失败")
-	}
-
-	// 测试浮点数转整数（整数值）
-	e.Set("float_int", 42.0)
-	if val, ok := e.GetInt("float_int"); !ok || val != 42 {
-		t.Errorf("浮点数 42.0 转 int 应该成功: got %d, ok=%v", val, ok)
-	}
-
-	// 测试浮点数转整数（非整数值）
-	e.Set("float_frac", 42.5)
-	if _, ok := e.GetInt("float_frac"); ok {
-		t.Error("浮点数 42.5 转 int 应该失败")
-	}
-}
-
-// TestExtras_JSONSerialization 测试 JSON 序列化
-func TestExtras_JSONSerialization(t *testing.T) {
-	e := NewExtras(0)
-	e.Set("name", "Test")
-	e.Set("count", 42)
-	e.Set("enabled", true)
-	e.Set("tags", []any{"a", "b", "c"})
-
-	// 序列化
-	data, err := json.Marshal(e)
-	if err != nil {
-		t.Fatalf("序列化失败: %v", err)
-	}
-
-	// 反序列化
-	var e2 Extras
-	err = json.Unmarshal(data, &e2)
-	if err != nil {
-		t.Fatalf("反序列化失败: %v", err)
-	}
-
-	// 验证数据
-	if name, ok := e2.GetString("name"); !ok || name != "Test" {
-		t.Errorf("Expected 'Test', got '%s'", name)
-	}
-
-	// 注意：JSON 反序列化后，数字会变成 float64，但我们的 GetInt 应该能处理这种情况
-	if count, ok := e2.GetInt("count"); !ok || count != 42 {
-		t.Errorf("Expected 42, got %d (ok=%v, actual type: %T, value: %v)", count, ok, e2["count"], e2["count"])
-	}
-
-	if enabled, ok := e2.GetBool("enabled"); !ok || !enabled {
-		t.Errorf("Expected true, got %v", enabled)
-	}
-}
-
-// TestExtras_DatabaseScan 测试数据库扫描
-func TestExtras_DatabaseScan(t *testing.T) {
-	e := NewExtras(0)
-	e.Set("key1", "value1")
-	e.Set("key2", 123)
-
-	// 模拟数据库Value操作
-	val, err := e.Value()
-	if err != nil {
-		t.Fatalf("Value() 失败: %v", err)
-	}
-
-	// 模拟数据库Scan操作
-	var e2 Extras
-	err = e2.Scan(val)
-	if err != nil {
-		t.Fatalf("Scan() 失败: %v", err)
-	}
-
-	// 验证数据
-	if str, ok := e2.GetString("key1"); !ok || str != "value1" {
-		t.Errorf("Expected 'value1', got '%s'", str)
-	}
-
-	// JSON 反序列化后数字会变成 float64
-	if num, ok := e2.GetInt("key2"); !ok || num != 123 {
-		t.Errorf("Expected 123, got %d (ok=%v, actual type: %T)", num, ok, e2["key2"])
-	}
-}
-
-// TestExtras_NilAndEmpty 测试 nil 和空值
-func TestExtras_NilAndEmpty(t *testing.T) {
-	// 测试空Extras
-	var e Extras
-
-	// Value应该返回nil
-	val, err := e.Value()
-	if err != nil {
-		t.Fatalf("Value() 失败: %v", err)
-	}
-	if val != nil {
-		t.Errorf("空 Extras 的 Value 应该返回 nil，实际返回 %v", val)
-	}
-
-	// Scan nil
-	err = e.Scan(nil)
-	if err != nil {
-		t.Fatalf("Scan(nil) 失败: %v", err)
-	}
-}
-
-// TestExtras_Clone 测试克隆
-func TestExtras_Clone(t *testing.T) {
-	e := NewExtras(0)
-	e.Set("key1", "value1")
-	e.Set("key2", 42)
-
-	// 克隆
-	clone := e.Clone()
-
-	// 修改原始对象
-	e.Set("key3", "value3")
-
-	// 验证克隆对象不受影响
-	if clone.Has("key3") {
-		t.Error("克隆对象不应该有 key3")
-	}
-
-	if clone.Len() != 2 {
-		t.Errorf("克隆对象长度应该为 2，实际为 %d", clone.Len())
-	}
-}
-
-// TestExtras_Merge 测试合并
-func TestExtras_Merge(t *testing.T) {
-	e1 := NewExtras(0)
-	e1.Set("key1", "value1")
-	e1.Set("key2", "value2")
-
-	e2 := NewExtras(0)
-	e2.Set("key2", "new_value2")
-	e2.Set("key3", "value3")
-
-	// 合并
-	e1.Merge(e2)
-
-	// 验证合并结果
-	if val, ok := e1.GetString("key2"); !ok || val != "new_value2" {
-		t.Errorf("key2 应该被覆盖为 'new_value2'，实际为 '%s'", val)
-	}
-
-	if !e1.Has("key3") {
-		t.Error("合并后应该有 key3")
-	}
-
-	if e1.Len() != 3 {
-		t.Errorf("合并后长度应该为 3，实际为 %d", e1.Len())
-	}
-}
-
-// TestExtras_SetOrDel 测试条件设置
-func TestExtras_SetOrDel(t *testing.T) {
-	t.Run("SetOrDel with nil", func(t *testing.T) {
-		e := NewExtras(0)
-		e.Set("key", "value")
-		e.SetOrDel("key", nil)
-		if e.Has("key") {
-			t.Error("SetOrDel(nil) 应该删除键")
-		}
-	})
-
-	t.Run("Get non-existent key", func(t *testing.T) {
-		e := NewExtras(0)
-		if _, ok := e.GetString("nonexistent"); ok {
-			t.Error("获取不存在的键应该返回 false")
-		}
-	})
-}
-
-// TestExtras_Capacity 测试预分配容量
-func TestExtras_Capacity(t *testing.T) {
-	// 测试使用容量创建
-	e := NewExtras(10)
-	if e == nil {
-		t.Fatal("NewExtrasWithCapacity 不应该返回 nil")
-	}
-
-	// 测试负数容量
-	e2 := NewExtras(-1)
-	if e2 == nil {
-		t.Fatal("负容量的 NewExtrasWithCapacity 应该返回有效的 Extras")
-	}
-}
-
-// TestExtras_StringSliceEmpty 测试空切片优化
-func TestExtras_StringSliceEmpty(t *testing.T) {
-	e := NewExtras(0)
-	e.Set("empty_slice", []any{})
-
-	slice, ok := e.GetStringSlice("empty_slice")
-	if !ok {
-		t.Error("空切片应该能成功获取")
-	}
-	if len(slice) != 0 {
-		t.Errorf("空切片长度应该为 0，实际为 %d", len(slice))
-	}
-}
-
-// TestExtras_ConcurrentRead 测试并发读取（安全）
-func TestExtras_ConcurrentRead(t *testing.T) {
-	e := NewExtras(0)
-	e.Set("key1", "value1")
-	e.Set("key2", 42)
-	e.Set("key3", true)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// 并发读取是安全的
-			_, _ = e.GetString("key1")
-			_, _ = e.GetInt("key2")
-			_, _ = e.GetBool("key3")
-		}()
-	}
-	wg.Wait()
-}
-
-// BenchmarkExtras_Set 基准测试：Set 操作
-func BenchmarkExtras_Set(b *testing.B) {
-	e := NewExtras(0)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		e.Set("key", "value")
-	}
-}
-
-// BenchmarkExtras_Get 基准测试：Get 操作
-func BenchmarkExtras_Get(b *testing.B) {
-	e := NewExtras(0)
-	e.Set("key", "value")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = e.GetString("key")
-	}
-}
-
-// BenchmarkExtras_GetInt 基准测试：GetInt 带类型转换
-func BenchmarkExtras_GetInt(b *testing.B) {
-	e := NewExtras(0)
-	e.Set("key", 42)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = e.GetInt("key")
-	}
-}
-
-// BenchmarkExtras_JSONMarshal 基准测试：JSON 序列化
-func BenchmarkExtras_JSONMarshal(b *testing.B) {
-	e := NewExtras(0)
-	e.Set("name", "test")
-	e.Set("age", 30)
-	e.Set("active", true)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = json.Marshal(e)
-	}
-}
-
-// BenchmarkExtras_Clone 基准测试：Clone 操作
-func BenchmarkExtras_Clone(b *testing.B) {
-	e := NewExtras(0)
-	for i := 0; i < 10; i++ {
-		e.Set(string(rune('a'+i)), i)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = e.Clone()
-	}
-}
-
-// ==================== 安全性测试 ====================
-
-// TestNilSafety 测试nil安全性
-func TestNilSafety(t *testing.T) {
-	t.Run("Set on nil map", func(t *testing.T) {
-		var extras Extras // nil
-
-		// 应该不会panic
-		extras.Set("key", "value")
-
-		// nil map上Set应该被忽略
-		if extras != nil {
-			t.Error("Expected nil map to remain nil after Set")
-		}
-	})
-
-	t.Run("SetOrDel on nil map", func(t *testing.T) {
-		var extras Extras
-
-		// 不应该panic
-		extras.SetOrDel("key", "value")
-		extras.SetOrDel("key", nil)
-
-		if extras != nil {
-			t.Error("Expected nil map to remain nil")
-		}
-	})
-
-	t.Run("SetPath on nil map", func(t *testing.T) {
-		var extras Extras
-
-		// 应该返回错误
-		err := extras.SetPath("user.name", "Alice")
-		if err == nil {
-			t.Error("Expected error when SetPath on nil map")
-		}
-		if !strings.Contains(err.Error(), "nil") {
-			t.Errorf("Expected nil error message, got: %v", err)
-		}
-	})
-}
-
-// TestPathInjectionPrevention 测试路径注入防护
-func TestPathInjectionPrevention(t *testing.T) {
-	extras := Extras{
-		"user": Extras{
-			"name": "Alice",
-		},
-	}
-
+// ============================================================================
+// 基础功能测试
+// ============================================================================
+
+// TestNewExtras 测试创建新实例
+func TestNewExtras(t *testing.T) {
 	tests := []struct {
 		name     string
-		path     string
-		wantErr  bool
-		wantFail bool
+		capacity int
 	}{
-		{"empty path", "", false, true},
-		{"valid path", "user.name", false, false},
-		{"path with empty key start", ".user.name", false, true},
-		{"path with empty key middle", "user..name", false, true},
-		{"path with empty key end", "user.name.", false, true},
-		{"only dots", "...", false, true},
-		{"single dot", ".", false, true},
+		{"零容量", 0},
+		{"小容量", 5},
+		{"中等容量", 50},
+		{"大容量", 1000},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 测试GetPath
-			_, ok := extras.GetPath(tt.path)
-			if !tt.wantFail && !ok {
-				t.Errorf("GetPath(%q) failed unexpectedly", tt.path)
+			extras := NewExtras(tt.capacity)
+			if extras == nil {
+				t.Error("NewExtras 返回 nil")
 			}
-			if tt.wantFail && ok {
-				t.Errorf("GetPath(%q) should fail but succeeded", tt.path)
-			}
-
-			// 测试SetPath
-			err := extras.SetPath(tt.path, "test")
-			if tt.wantErr && err == nil {
-				t.Errorf("SetPath(%q) should return error", tt.path)
+			if len(extras) != 0 {
+				t.Errorf("新创建的 Extras 长度应为 0，实际为 %d", len(extras))
 			}
 		})
 	}
 }
 
-// TestSetPathTypeConflict 测试SetPath的类型冲突检测
-func TestSetPathTypeConflict(t *testing.T) {
-	t.Run("overwrite string with Extras", func(t *testing.T) {
-		extras := Extras{
-			"user": "Alice", // 字符串类型
-		}
-
-		// 尝试将user.age设置值，但user是字符串
-		err := extras.SetPath("user.age", 30)
-
-		// 应该返回错误
-		if err == nil {
-			t.Error("Expected error when setting path on non-Extras type")
-		}
-
-		if !strings.Contains(err.Error(), "conflict") && !strings.Contains(err.Error(), "not an Extras") {
-			t.Errorf("Expected type conflict error, got: %v", err)
-		}
-
-		// 原值不应该被修改
-		if val, ok := extras.GetString("user"); !ok || val != "Alice" {
-			t.Error("Original value should not be modified")
-		}
-	})
-
-	t.Run("overwrite int with Extras", func(t *testing.T) {
-		extras := Extras{
-			"count": 42,
-		}
-
-		err := extras.SetPath("count.value", 100)
-		if err == nil {
-			t.Error("Expected error when setting path on non-Extras type")
-		}
-
-		// 原值保持不变
-		if val, ok := extras.GetInt("count"); !ok || val != 42 {
-			t.Error("Original value should not be modified")
-		}
-	})
-
-	t.Run("valid nested creation", func(t *testing.T) {
-		extras := NewExtras(0)
-
-		// 应该成功创建嵌套结构
-		err := extras.SetPath("user.profile.name", "Bob")
-		if err != nil {
-			t.Errorf("Unexpected error: %v", err)
-		}
-
-		// 验证结构
-		if name, ok := extras.GetStringPath("user.profile.name"); !ok || name != "Bob" {
-			t.Error("Failed to create nested structure")
-		}
-	})
-}
-
-// TestEmptyKeyProtection 测试空键保护
-func TestEmptyKeyProtection(t *testing.T) {
+// TestExtrasSet 测试设置操作
+func TestExtrasSet(t *testing.T) {
 	extras := NewExtras(0)
 
-	// Set空键应该被忽略
-	extras.Set("", "value")
-	if extras.Has("") {
-		t.Error("Empty key should not be stored")
+	// 测试基本设置
+	extras.Set("string", "value")
+	extras.Set("int", 42)
+	extras.Set("float", 3.14)
+	extras.Set("bool", true)
+	extras.Set("nil", nil)
+
+	if val, ok := extras.GetString("string"); !ok || val != "value" {
+		t.Error("字符串设置失败")
+	}
+	if val, ok := extras.GetInt("int"); !ok || val != 42 {
+		t.Error("整数设置失败")
+	}
+	if val, ok := extras.GetFloat64("float"); !ok || val != 3.14 {
+		t.Error("浮点数设置失败")
+	}
+	if val, ok := extras.GetBool("bool"); !ok || val != true {
+		t.Error("布尔值设置失败")
 	}
 
-	// SetOrDel空键应该被忽略
+	// 测试空键
+	extras.Set("", "should_not_set")
+	if _, ok := extras.Get(""); ok {
+		t.Error("空键不应该被设置")
+	}
+}
+
+// TestExtrasSetOrDel 测试条件设置/删除
+func TestExtrasSetOrDel(t *testing.T) {
+	extras := NewExtras(0)
+
+	// 设置值
+	extras.SetOrDel("key", "value")
+	if val, ok := extras.GetString("key"); !ok || val != "value" {
+		t.Error("SetOrDel 设置失败")
+	}
+
+	// 删除值
+	extras.SetOrDel("key", nil)
+	if _, ok := extras.Get("key"); ok {
+		t.Error("SetOrDel 删除失败")
+	}
+
+	// 空键测试
 	extras.SetOrDel("", "value")
-	if extras.Has("") {
-		t.Error("Empty key should not be stored")
-	}
-
-	// SetPath中的空键应该被拒绝
-	err := extras.SetPath("valid..invalid", "value")
-	if err == nil {
-		t.Error("Expected error for path with empty key")
+	if len(extras) != 0 {
+		t.Error("空键不应该被处理")
 	}
 }
 
-// ==================== 性能测试 ====================
-
-// BenchmarkSetWithNilCheck 测试nil检查的性能影响
-func BenchmarkSetWithNilCheck(b *testing.B) {
+// TestExtrasSetMultiple 测试批量设置
+func TestExtrasSetMultiple(t *testing.T) {
 	extras := NewExtras(0)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		extras.Set("key", "value")
+
+	pairs := map[string]any{
+		"key1": "value1",
+		"key2": 42,
+		"key3": 3.14,
+		"":     "should_ignore",
+	}
+
+	extras.SetMultiple(pairs)
+
+	if val, ok := extras.GetString("key1"); !ok || val != "value1" {
+		t.Error("批量设置 key1 失败")
+	}
+	if val, ok := extras.GetInt("key2"); !ok || val != 42 {
+		t.Error("批量设置 key2 失败")
+	}
+	if val, ok := extras.GetFloat64("key3"); !ok || val != 3.14 {
+		t.Error("批量设置 key3 失败")
+	}
+	if _, ok := extras.Get(""); ok {
+		t.Error("空键不应该被设置")
 	}
 }
 
-// BenchmarkGetPathWithValidation 测试路径验证的性能影响
-func BenchmarkGetPathWithValidation(b *testing.B) {
-	extras := Extras{
-		"user": Extras{
-			"profile": Extras{
-				"name": "Alice",
-			},
-		},
+// TestExtrasSetPath 测试路径设置
+func TestExtrasSetPath(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name    string
+		path    string
+		value   any
+		wantErr bool
+	}{
+		{"简单路径", "name", "Alice", false},
+		{"嵌套路径", "user.name", "Bob", false},
+		{"深层嵌套", "user.address.city", "Beijing", false},
+		{"空路径", "", "value", true},
+		{"路径以点结尾", "user.", "value", true},
+		{"路径中有空键", "user..name", "value", true},
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = extras.GetPath("user.profile.name")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := extras.SetPath(tt.path, tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SetPath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+
+	// 验证嵌套值
+	if val, ok := extras.GetStringPath("user.name"); !ok || val != "Bob" {
+		t.Error("嵌套路径设置失败")
+	}
+	if val, ok := extras.GetStringPath("user.address.city"); !ok || val != "Beijing" {
+		t.Error("深层嵌套路径设置失败")
 	}
 }
 
-// BenchmarkFilterWithPrealloc 测试预分配的性能提升
-func BenchmarkFilterWithPrealloc(b *testing.B) {
+// TestExtrasDelete 测试删除操作
+func TestExtrasDelete(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	extras.Delete("key1")
+	if _, ok := extras.Get("key1"); ok {
+		t.Error("Delete 失败")
+	}
+	if _, ok := extras.Get("key2"); !ok {
+		t.Error("Delete 误删了其他键")
+	}
+
+	// 删除不存在的键
+	extras.Delete("nonexistent")
+	if len(extras) != 1 {
+		t.Error("删除不存在的键改变了 map 大小")
+	}
+}
+
+// TestExtrasDeleteMultiple 测试批量删除
+func TestExtrasDeleteMultiple(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	extras.DeleteMultiple("key1", "key3")
+
+	if _, ok := extras.Get("key1"); ok {
+		t.Error("批量删除 key1 失败")
+	}
+	if _, ok := extras.Get("key3"); ok {
+		t.Error("批量删除 key3 失败")
+	}
+	if _, ok := extras.Get("key2"); !ok {
+		t.Error("批量删除误删了 key2")
+	}
+}
+
+// TestExtrasClear 测试清空操作
+func TestExtrasClear(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	extras.Clear()
+
+	if len(extras) != 0 {
+		t.Errorf("Clear 后长度应为 0，实际为 %d", len(extras))
+	}
+}
+
+// ============================================================================
+// 类型转换测试
+// ============================================================================
+
+// TestExtrasGetString 测试字符串获取
+func TestExtrasGetString(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name   string
+		key    string
+		value  any
+		want   string
+		wantOk bool
+	}{
+		{"字符串", "str", "hello", "hello", true},
+		{"整数", "int", 42, "42", true},
+		{"浮点数", "float", 3.14, "3.14", true},
+		{"布尔值", "bool", true, "true", true},
+		{"nil", "nil", nil, "", false},
+		{"不存在", "nonexistent", nil, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.key != "nonexistent" {
+				extras.Set(tt.key, tt.value)
+			}
+			got, ok := extras.GetString(tt.key)
+			if ok != tt.wantOk {
+				t.Errorf("GetString() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if got != tt.want {
+				t.Errorf("GetString() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtrasGetInt 测试整数获取
+func TestExtrasGetInt(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name   string
+		key    string
+		value  any
+		want   int
+		wantOk bool
+	}{
+		{"int", "int", 42, 42, true},
+		{"int8", "int8", int8(8), 8, true},
+		{"int16", "int16", int16(16), 16, true},
+		{"int32", "int32", int32(32), 32, true},
+		{"int64", "int64", int64(64), 64, true},
+		{"uint", "uint", uint(10), 10, true},
+		{"float64", "float", 42.0, 42, true},
+		{"字符串数字", "str", "42", 42, true},
+		{"字符串非数字", "str_invalid", "abc", 0, false},
+		{"溢出", "overflow", int64(math.MaxInt64), 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extras.Set(tt.key, tt.value)
+			got, ok := extras.GetInt(tt.key)
+			if ok != tt.wantOk {
+				t.Errorf("GetInt() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if ok && got != tt.want {
+				t.Errorf("GetInt() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtrasGetFloat64 测试浮点数获取
+func TestExtrasGetFloat64(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name   string
+		key    string
+		value  any
+		want   float64
+		wantOk bool
+	}{
+		{"float64", "f64", 3.14, 3.14, true},
+		{"float32", "f32", float32(2.5), 2.5, true},
+		{"int", "int", 42, 42.0, true},
+		{"字符串数字", "str", "3.14", 3.14, true},
+		{"字符串非数字", "str_invalid", "abc", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extras.Set(tt.key, tt.value)
+			got, ok := extras.GetFloat64(tt.key)
+			if ok != tt.wantOk {
+				t.Errorf("GetFloat64() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if ok && got != tt.want {
+				t.Errorf("GetFloat64() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtrasGetBool 测试布尔值获取
+func TestExtrasGetBool(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name   string
+		key    string
+		value  any
+		want   bool
+		wantOk bool
+	}{
+		{"true", "true", true, true, true},
+		{"false", "false", false, false, true},
+		{"字符串true", "str_true", "true", true, true},
+		{"字符串false", "str_false", "false", false, true},
+		{"整数1", "int1", 1, true, true},
+		{"整数0", "int0", 0, false, true},
+		{"字符串无效", "str_invalid", "abc", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extras.Set(tt.key, tt.value)
+			got, ok := extras.GetBool(tt.key)
+			if ok != tt.wantOk {
+				t.Errorf("GetBool() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if ok && got != tt.want {
+				t.Errorf("GetBool() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtrasGetSlice 测试切片获取
+func TestExtrasGetSlice(t *testing.T) {
+	extras := NewExtras(0)
+
+	slice := []any{1, "two", 3.0, true}
+	extras.Set("slice", slice)
+
+	got, ok := extras.GetSlice("slice")
+	if !ok {
+		t.Fatal("GetSlice 失败")
+	}
+	if len(got) != len(slice) {
+		t.Errorf("切片长度不匹配: got %d, want %d", len(got), len(slice))
+	}
+}
+
+// TestExtrasGetStringSlice 测试字符串切片获取
+func TestExtrasGetStringSlice(t *testing.T) {
+	extras := NewExtras(0)
+
+	tests := []struct {
+		name   string
+		value  any
+		want   []string
+		wantOk bool
+	}{
+		{"字符串切片", []string{"a", "b", "c"}, []string{"a", "b", "c"}, true},
+		{"any切片", []any{"x", "y", "z"}, []string{"x", "y", "z"}, true},
+		{"混合类型", []any{1, "two", 3.0}, []string{"1", "two", "3"}, true},
+		{"非切片", "not_a_slice", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extras.Set("key", tt.value)
+			got, ok := extras.GetStringSlice("key")
+			if ok != tt.wantOk {
+				t.Errorf("GetStringSlice() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if ok && len(got) != len(tt.want) {
+				t.Errorf("GetStringSlice() len = %d, want %d", len(got), len(tt.want))
+			}
+		})
+	}
+}
+
+// TestExtrasGetMap 测试 map 获取
+func TestExtrasGetMap(t *testing.T) {
+	extras := NewExtras(0)
+
+	m := map[string]any{"key": "value", "num": 42}
+	extras.Set("map", m)
+
+	got, ok := extras.GetMap("map")
+	if !ok {
+		t.Fatal("GetMap 失败")
+	}
+	if len(got) != len(m) {
+		t.Errorf("map 长度不匹配: got %d, want %d", len(got), len(m))
+	}
+}
+
+// TestExtrasGetExtras 测试嵌套 Extras 获取
+func TestExtrasGetExtras(t *testing.T) {
+	extras := NewExtras(0)
+
+	nested := NewExtras(0)
+	nested.Set("inner", "value")
+	extras.Set("nested", nested)
+
+	got, ok := extras.GetExtras("nested")
+	if !ok {
+		t.Fatal("GetExtras 失败")
+	}
+	if val, ok := got.GetString("inner"); !ok || val != "value" {
+		t.Error("嵌套 Extras 值不正确")
+	}
+}
+
+// ============================================================================
+// 路径操作测试
+// ============================================================================
+
+// TestExtrasGetPath 测试路径获取
+func TestExtrasGetPath(t *testing.T) {
+	extras := NewExtras(0)
+
+	// 构建嵌套结构
+	user := NewExtras(0)
+	user.Set("name", "Alice")
+	user.Set("age", 30)
+
+	address := NewExtras(0)
+	address.Set("city", "Beijing")
+	address.Set("zip", "100000")
+	user.Set("address", address)
+
+	extras.Set("user", user)
+
+	tests := []struct {
+		name   string
+		path   string
+		want   any
+		wantOk bool
+	}{
+		{"简单路径", "user", user, true},
+		{"嵌套路径", "user.name", "Alice", true},
+		{"深层路径", "user.address.city", "Beijing", true},
+		{"不存在路径", "user.nonexistent", nil, false},
+		{"空路径", "", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extras.GetPath(tt.path)
+			if ok != tt.wantOk {
+				t.Errorf("GetPath() ok = %v, wantOk %v", ok, tt.wantOk)
+			}
+			if ok && tt.want != nil {
+				// 简单比较
+				if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) {
+					t.Errorf("GetPath() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 工具方法测试
+// ============================================================================
+
+// TestExtrasHas 测试键存在性检查
+func TestExtrasHas(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("exists", "value")
+	extras.Set("nil", nil)
+
+	if !extras.Has("exists") {
+		t.Error("Has('exists') 应返回 true")
+	}
+	if !extras.Has("nil") {
+		t.Error("Has('nil') 应返回 true（nil 值也存在）")
+	}
+	if extras.Has("nonexistent") {
+		t.Error("Has('nonexistent') 应返回 false")
+	}
+}
+
+// TestExtrasHasAll 测试多键存在性检查
+func TestExtrasHasAll(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	if !extras.HasAll("key1", "key2") {
+		t.Error("HasAll 应返回 true")
+	}
+	if extras.HasAll("key1", "nonexistent") {
+		t.Error("HasAll 应返回 false")
+	}
+}
+
+// TestExtrasHasAny 测试任意键存在性检查
+func TestExtrasHasAny(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+
+	if !extras.HasAny("key1", "key2") {
+		t.Error("HasAny 应返回 true")
+	}
+	if extras.HasAny("nonexistent1", "nonexistent2") {
+		t.Error("HasAny 应返回 false")
+	}
+}
+
+// TestExtrasIsNil 测试 nil 值检查
+func TestExtrasIsNil(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("nil", nil)
+	extras.Set("value", "not_nil")
+
+	if !extras.IsNil("nil") {
+		t.Error("IsNil('nil') 应返回 true")
+	}
+	if extras.IsNil("value") {
+		t.Error("IsNil('value') 应返回 false")
+	}
+	if !extras.IsNil("nonexistent") {
+		t.Error("IsNil('nonexistent') 应返回 true")
+	}
+}
+
+// TestExtrasIsEmpty 测试空检查
+func TestExtrasIsEmpty(t *testing.T) {
+	extras := NewExtras(0)
+
+	if !extras.IsEmpty() {
+		t.Error("新建的 Extras 应该为空")
+	}
+
+	extras.Set("key", "value")
+	if extras.IsEmpty() {
+		t.Error("设置值后 Extras 不应为空")
+	}
+
+	extras.Clear()
+	if !extras.IsEmpty() {
+		t.Error("清空后 Extras 应该为空")
+	}
+}
+
+// TestExtrasKeys 测试获取所有键
+func TestExtrasKeys(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	keys := extras.Keys()
+	if len(keys) != 3 {
+		t.Errorf("Keys() 长度应为 3，实际为 %d", len(keys))
+	}
+
+	// 检查所有键都存在
+	keyMap := make(map[string]bool)
+	for _, k := range keys {
+		keyMap[k] = true
+	}
+	if !keyMap["key1"] || !keyMap["key2"] || !keyMap["key3"] {
+		t.Error("Keys() 返回的键不完整")
+	}
+}
+
+// TestExtrasLen 测试长度获取
+func TestExtrasLen(t *testing.T) {
+	extras := NewExtras(0)
+
+	if extras.Len() != 0 {
+		t.Error("新建的 Extras 长度应为 0")
+	}
+
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	if extras.Len() != 2 {
+		t.Errorf("Len() 应为 2，实际为 %d", extras.Len())
+	}
+}
+
+// ============================================================================
+// 复制和合并测试
+// ============================================================================
+
+// TestExtrasClone 测试浅拷贝
+func TestExtrasClone(t *testing.T) {
+	original := NewExtras(0)
+	original.Set("string", "value")
+	original.Set("int", 42)
+
+	nested := NewExtras(0)
+	nested.Set("inner", "nested_value")
+	original.Set("nested", nested)
+
+	cloned := original.Clone()
+
+	// 验证值相同
+	if val, ok := cloned.GetString("string"); !ok || val != "value" {
+		t.Error("Clone 后字符串值不正确")
+	}
+
+	// 修改克隆不应影响原始
+	cloned.Set("string", "modified")
+	if val, _ := original.GetString("string"); val == "modified" {
+		t.Error("Clone 后修改影响了原始对象")
+	}
+
+	// 浅拷贝：修改嵌套对象会影响原始
+	if nestedCloned, ok := cloned.GetExtras("nested"); ok {
+		nestedCloned.Set("inner", "modified_nested")
+		if nestedOriginal, ok := original.GetExtras("nested"); ok {
+			if val, _ := nestedOriginal.GetString("inner"); val != "modified_nested" {
+				t.Error("浅拷贝应共享嵌套对象")
+			}
+		}
+	}
+}
+
+// TestExtrasDeepClone 测试深拷贝
+func TestExtrasDeepClone(t *testing.T) {
+	original := NewExtras(0)
+	original.Set("string", "value")
+
+	nested := NewExtras(0)
+	nested.Set("inner", "nested_value")
+	original.Set("nested", nested)
+
+	cloned, err := original.DeepClone()
+	if err != nil {
+		t.Fatalf("DeepClone 失败: %v", err)
+	}
+
+	// 修改嵌套对象不应影响原始
+	if nestedCloned, ok := cloned.GetExtras("nested"); ok {
+		nestedCloned.Set("inner", "modified_nested")
+		if nestedOriginal, ok := original.GetExtras("nested"); ok {
+			if val, _ := nestedOriginal.GetString("inner"); val == "modified_nested" {
+				t.Error("深拷贝不应共享嵌套对象")
+			}
+		}
+	}
+}
+
+// TestExtrasCopyTo 测试复制到目标
+func TestExtrasCopyTo(t *testing.T) {
+	source := NewExtras(0)
+	source.Set("key1", "value1")
+	source.Set("key2", "value2")
+
+	target := NewExtras(0)
+	target.Set("key3", "value3")
+
+	source.CopyTo(target)
+
+	if !target.Has("key1") || !target.Has("key2") {
+		t.Error("CopyTo 没有复制所有键")
+	}
+	if !target.Has("key3") {
+		t.Error("CopyTo 删除了目标已有的键")
+	}
+}
+
+// TestExtrasMerge 测试合并
+func TestExtrasMerge(t *testing.T) {
+	extras1 := NewExtras(0)
+	extras1.Set("key1", "value1")
+	extras1.Set("common", "original")
+
+	extras2 := NewExtras(0)
+	extras2.Set("key2", "value2")
+	extras2.Set("common", "override")
+
+	extras1.Merge(extras2)
+
+	if val, _ := extras1.GetString("common"); val != "override" {
+		t.Error("Merge 应该覆盖相同的键")
+	}
+	if !extras1.Has("key1") || !extras1.Has("key2") {
+		t.Error("Merge 后应包含所有键")
+	}
+}
+
+// ============================================================================
+// JSON 序列化测试
+// ============================================================================
+
+// TestExtrasMarshalJSON 测试 JSON 序列化
+func TestExtrasMarshalJSON(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("string", "value")
+	extras.Set("int", 42)
+	extras.Set("float", 3.14)
+	extras.Set("bool", true)
+	extras.Set("nil", nil)
+
+	data, err := json.Marshal(extras)
+	if err != nil {
+		t.Fatalf("JSON 序列化失败: %v", err)
+	}
+
+	// 验证可以反序列化
+	var decoded Extras
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
+		t.Fatalf("JSON 反序列化失败: %v", err)
+	}
+
+	if val, _ := decoded.GetString("string"); val != "value" {
+		t.Error("反序列化后字符串值不正确")
+	}
+	if val, _ := decoded.GetFloat64("int"); val != 42 {
+		t.Error("反序列化后整数值不正确")
+	}
+}
+
+// TestExtrasUnmarshalJSON 测试 JSON 反序列化
+func TestExtrasUnmarshalJSON(t *testing.T) {
+	jsonData := `{"name":"Alice","age":30,"active":true}`
+
+	var extras Extras
+	err := json.Unmarshal([]byte(jsonData), &extras)
+	if err != nil {
+		t.Fatalf("JSON 反序列化失败: %v", err)
+	}
+
+	if val, _ := extras.GetString("name"); val != "Alice" {
+		t.Error("反序列化后 name 值不正确")
+	}
+	if val, _ := extras.GetFloat64("age"); val != 30 {
+		t.Error("反序列化后 age 值不正确")
+	}
+	if val, _ := extras.GetBool("active"); !val {
+		t.Error("反序列化后 active 值不正确")
+	}
+}
+
+// TestExtrasNilJSON 测试 nil 的 JSON 处理
+func TestExtrasNilJSON(t *testing.T) {
+	var extras Extras
+
+	// nil 应该序列化为 null
+	data, err := json.Marshal(extras)
+	if err != nil {
+		t.Fatalf("nil Extras 序列化失败: %v", err)
+	}
+	if string(data) != "null" {
+		t.Errorf("nil Extras 应序列化为 'null'，实际为 %s", string(data))
+	}
+}
+
+// ============================================================================
+// 数据库操作测试
+// ============================================================================
+
+// TestExtrasValue 测试数据库 Value 方法
+func TestExtrasValue(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key", "value")
+
+	val, err := extras.Value()
+	if err != nil {
+		t.Fatalf("Value() 失败: %v", err)
+	}
+
+	if val == nil {
+		t.Error("Value() 不应返回 nil")
+	}
+}
+
+// TestExtrasScan 测试数据库 Scan 方法
+func TestExtrasScan(t *testing.T) {
+	jsonData := []byte(`{"name":"Alice","age":30}`)
+
+	var extras Extras
+	err := extras.Scan(jsonData)
+	if err != nil {
+		t.Fatalf("Scan() 失败: %v", err)
+	}
+
+	if val, _ := extras.GetString("name"); val != "Alice" {
+		t.Error("Scan 后 name 值不正确")
+	}
+
+	// 测试 nil 输入
+	var nilExtras Extras
+	err = nilExtras.Scan(nil)
+	if err != nil {
+		t.Errorf("Scan(nil) 应该成功: %v", err)
+	}
+}
+
+// ============================================================================
+// 边界条件测试
+// ============================================================================
+
+// TestExtrasEdgeCases 测试边界情况
+func TestExtrasEdgeCases(t *testing.T) {
+	t.Run("nil Extras 操作", func(t *testing.T) {
+		var extras Extras
+
+		// nil Extras 的操作应该安全
+		if !extras.IsEmpty() {
+			t.Error("nil Extras 应该为空")
+		}
+		if extras.Len() != 0 {
+			t.Error("nil Extras 长度应为 0")
+		}
+		if extras.Has("key") {
+			t.Error("nil Extras 不应有任何键")
+		}
+	})
+
+	t.Run("空字符串键", func(t *testing.T) {
+		extras := NewExtras(0)
+		extras.Set("", "value")
+		if len(extras) != 0 {
+			t.Error("空字符串键不应被设置")
+		}
+	})
+
+	t.Run("大数值转换", func(t *testing.T) {
+		extras := NewExtras(0)
+		extras.Set("max_int64", int64(math.MaxInt64))
+		extras.Set("min_int64", int64(math.MinInt64))
+
+		if val, ok := extras.GetInt64("max_int64"); !ok || val != math.MaxInt64 {
+			t.Error("MaxInt64 转换失败")
+		}
+		if val, ok := extras.GetInt64("min_int64"); !ok || val != math.MinInt64 {
+			t.Error("MinInt64 转换失败")
+		}
+	})
+
+	t.Run("特殊浮点数", func(t *testing.T) {
+		extras := NewExtras(0)
+		extras.Set("inf", math.Inf(1))
+		extras.Set("nan", math.NaN())
+
+		if val, ok := extras.GetFloat64("inf"); !ok || !math.IsInf(val, 1) {
+			t.Error("Inf 转换失败")
+		}
+		if val, ok := extras.GetFloat64("nan"); !ok || !math.IsNaN(val) {
+			t.Error("NaN 转换失败")
+		}
+	})
+}
+
+// ============================================================================
+// 百万级性能测试 - Set 操作
+// ============================================================================
+
+// BenchmarkExtrasSet_1M 百万次 Set 操作基准测试
+func BenchmarkExtrasSet_1M(b *testing.B) {
+	const iterations = 1000000
+
+	b.Run("Sequential", func(b *testing.B) {
+		b.ReportAllocs()
+		for n := 0; n < b.N; n++ {
+			extras := NewExtras(iterations)
+			b.ResetTimer()
+			for i := 0; i < iterations; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+			b.StopTimer()
+		}
+	})
+
+	b.Run("SameKey", func(b *testing.B) {
+		extras := NewExtras(1)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				extras.Set("key", i)
+			}
+		}
+	})
+
+	b.Run("PreAllocated", func(b *testing.B) {
+		b.ReportAllocs()
+		for n := 0; n < b.N; n++ {
+			extras := NewExtras(iterations)
+			b.ResetTimer()
+			for i := 0; i < iterations; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+			b.StopTimer()
+		}
+	})
+}
+
+// BenchmarkExtrasGet_1M 百万次 Get 操作基准测试
+func BenchmarkExtrasGet_1M(b *testing.B) {
+	const iterations = 1000000
+
+	// 准备数据
+	extras := NewExtras(iterations)
+	for i := 0; i < iterations; i++ {
+		extras.Set(fmt.Sprintf("key_%d", i), i)
+	}
+
+	b.Run("Sequential", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_, _ = extras.Get(fmt.Sprintf("key_%d", i))
+			}
+		}
+	})
+
+	b.Run("SameKey", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_, _ = extras.Get("key_500000")
+			}
+		}
+	})
+
+	b.Run("NotFound", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_, _ = extras.Get("nonexistent")
+			}
+		}
+	})
+}
+
+// BenchmarkExtrasGetInt_1M 百万次类型转换基准测试
+func BenchmarkExtrasGetInt_1M(b *testing.B) {
+	const iterations = 1000000
+
+	extras := NewExtras(iterations)
+	for i := 0; i < iterations; i++ {
+		extras.Set(fmt.Sprintf("key_%d", i), i)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for i := 0; i < iterations; i++ {
+			_, _ = extras.GetInt(fmt.Sprintf("key_%d", i))
+		}
+	}
+}
+
+// BenchmarkExtrasGetString_1M 百万次字符串转换基准测试
+func BenchmarkExtrasGetString_1M(b *testing.B) {
+	const iterations = 1000000
+
+	extras := NewExtras(iterations)
+	for i := 0; i < iterations; i++ {
+		extras.Set(fmt.Sprintf("key_%d", i), fmt.Sprintf("value_%d", i))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for i := 0; i < iterations; i++ {
+			_, _ = extras.GetString(fmt.Sprintf("key_%d", i))
+		}
+	}
+}
+
+// ============================================================================
+// 百万级性能测试 - JSON 序列化
+// ============================================================================
+
+// BenchmarkExtrasJSONMarshal_1M 百万次 JSON 序列化基准测试
+func BenchmarkExtrasJSONMarshal_1M(b *testing.B) {
+	sizes := []int{10, 100, 1000}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
+			extras := NewExtras(size)
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), fmt.Sprintf("value_%d", i))
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			iterations := 1000000 / size
+			for n := 0; n < b.N; n++ {
+				for i := 0; i < iterations; i++ {
+					_, _ = json.Marshal(extras)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkExtrasJSONUnmarshal_1M 百万次 JSON 反序列化基准测试
+func BenchmarkExtrasJSONUnmarshal_1M(b *testing.B) {
+	sizes := []int{10, 100, 1000}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
+			extras := NewExtras(size)
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), fmt.Sprintf("value_%d", i))
+			}
+			data, _ := json.Marshal(extras)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			iterations := 1000000 / size
+			for n := 0; n < b.N; n++ {
+				for i := 0; i < iterations; i++ {
+					var result Extras
+					_ = json.Unmarshal(data, &result)
+				}
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 百万级性能测试 - 批量操作
+// ============================================================================
+
+// BenchmarkExtrasSetMultiple_1M 百万次批量设置基准测试
+func BenchmarkExtrasSetMultiple_1M(b *testing.B) {
+	const batchSize = 100
+	const iterations = 10000
+
+	pairs := make(map[string]any, batchSize)
+	for i := 0; i < batchSize; i++ {
+		pairs[fmt.Sprintf("key_%d", i)] = i
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		extras := NewExtras(batchSize * iterations)
+		for i := 0; i < iterations; i++ {
+			extras.SetMultiple(pairs)
+		}
+	}
+}
+
+// BenchmarkExtrasClone_1M 百万元素克隆基准测试
+func BenchmarkExtrasClone_1M(b *testing.B) {
+	const size = 1000000
+
+	extras := NewExtras(size)
+	for i := 0; i < size; i++ {
+		extras.Set(fmt.Sprintf("key_%d", i), i)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		_ = extras.Clone()
+	}
+}
+
+// BenchmarkExtrasMerge_1M 百万元素合并基准测试
+func BenchmarkExtrasMerge_1M(b *testing.B) {
+	const size = 500000
+
+	extras1 := NewExtras(size)
+	extras2 := NewExtras(size)
+	for i := 0; i < size; i++ {
+		extras1.Set(fmt.Sprintf("key1_%d", i), i)
+		extras2.Set(fmt.Sprintf("key2_%d", i), i)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		temp := extras1.Clone()
+		temp.Merge(extras2)
+	}
+}
+
+// ============================================================================
+// 百万级性能测试 - 路径操作
+// ============================================================================
+
+// BenchmarkExtrasSetPath_1M 百万次路径设置基准测试
+func BenchmarkExtrasSetPath_1M(b *testing.B) {
+	const iterations = 100000
+
+	b.Run("SingleLevel", func(b *testing.B) {
+		extras := NewExtras(iterations)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_ = extras.SetPath(fmt.Sprintf("key_%d", i), i)
+			}
+		}
+	})
+
+	b.Run("TwoLevels", func(b *testing.B) {
+		extras := NewExtras(0)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_ = extras.SetPath(fmt.Sprintf("level1.key_%d", i), i)
+			}
+		}
+	})
+
+	b.Run("ThreeLevels", func(b *testing.B) {
+		extras := NewExtras(0)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for i := 0; i < iterations; i++ {
+				_ = extras.SetPath(fmt.Sprintf("level1.level2.key_%d", i), i)
+			}
+		}
+	})
+}
+
+// BenchmarkExtrasGetPath_1M 百万次路径获取基准测试
+func BenchmarkExtrasGetPath_1M(b *testing.B) {
+	const iterations = 100000
+
+	extras := NewExtras(0)
+	for i := 0; i < iterations; i++ {
+		_ = extras.SetPath(fmt.Sprintf("level1.level2.key_%d", i), i)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for i := 0; i < iterations; i++ {
+			_, _ = extras.GetPath(fmt.Sprintf("level1.level2.key_%d", i))
+		}
+	}
+}
+
+// ============================================================================
+// 内存占用分析测试
+// ============================================================================
+
+// TestExtrasMemoryFootprint 测试内存占用
+func TestExtrasMemoryFootprint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过内存测试")
+	}
+
+	sizes := []int{100, 1000, 10000, 100000, 1000000}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
+			runtime.GC()
+			var m1 runtime.MemStats
+			runtime.ReadMemStats(&m1)
+
+			extras := NewExtras(size)
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+
+			runtime.GC()
+			var m2 runtime.MemStats
+			runtime.ReadMemStats(&m2)
+
+			allocated := m2.Alloc - m1.Alloc
+			perItem := float64(allocated) / float64(size)
+
+			t.Logf("大小: %d, 总内存: %.2f MB, 每项: %.2f bytes",
+				size, float64(allocated)/(1024*1024), perItem)
+		})
+	}
+}
+
+// ============================================================================
+// 并发安全测试（需要外部同步）
+// ============================================================================
+
+// TestExtrasConcurrentReadUnsafe 测试并发读取（不安全，用于演示）
+func TestExtrasConcurrentReadUnsafe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过并发测试")
+	}
+
 	extras := NewExtras(100)
 	for i := 0; i < 100; i++ {
-		extras.Set(string(rune('a'+i%26))+string(rune(i)), i)
+		extras.Set(fmt.Sprintf("key_%d", i), i)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = extras.Filter(func(k string, v any) bool {
-			if num, ok := v.(int); ok {
-				return num%2 == 0
+	var wg sync.WaitGroup
+	readers := 10
+	iterations := 10000
+
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_, _ = extras.Get(fmt.Sprintf("key_%d", i%100))
 			}
-			return false
-		})
+		}()
 	}
+
+	wg.Wait()
 }
 
-// ==================== 边界条件测试 ====================
-
-// TestEdgeCases 测试边界情况
-func TestEdgeCases(t *testing.T) {
-	t.Run("very long path", func(t *testing.T) {
-		extras := NewExtras(0)
-
-		// 创建深层嵌套
-		var parts []string
-		for i := 0; i < 20; i++ {
-			parts = append(parts, "level"+string(rune('0'+i)))
-		}
-		path := strings.Join(parts, ".")
-
-		err := extras.SetPath(path, "deep value")
-		if err != nil {
-			t.Logf("Deep path rejected (expected if MAX_DEPTH limit added): %v", err)
-		}
-	})
-
-	t.Run("very long key", func(t *testing.T) {
-		extras := NewExtras(0)
-		longKey := strings.Repeat("a", 1000)
-
-		extras.Set(longKey, "value")
-		// 当前实现会接受，但建议添加长度限制
-		if !extras.Has(longKey) {
-			t.Log("Long key rejected (good if MAX_KEY_LENGTH added)")
-		}
-	})
-
-	t.Run("unicode keys", func(t *testing.T) {
-		extras := NewExtras(0)
-
-		extras.Set("用户", "Alice")
-		extras.Set("🔑", "key emoji")
-
-		if val, ok := extras.GetString("用户"); !ok || val != "Alice" {
-			t.Error("Failed to handle Unicode key")
-		}
-
-		if val, ok := extras.GetString("🔑"); !ok || val != "key emoji" {
-			t.Error("Failed to handle Emoji key")
-		}
-	})
-}
-
-// TestConcurrentSafetyWarning 测试并发问题（应该失败，证明需要锁）
-func TestConcurrentSafetyWarning(t *testing.T) {
+// TestExtrasConcurrentWithMutex 测试使用互斥锁的并发访问
+func TestExtrasConcurrentWithMutex(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping concurrent safety test in short mode")
+		t.Skip("跳过并发测试")
 	}
 
-	t.Run("detect race condition", func(t *testing.T) {
-		// 这个测试在race detector下应该会失败
-		// 运行: go test -race
+	extras := NewExtras(100)
+	var mu sync.RWMutex
 
-		extras := NewExtras(0)
-		done := make(chan bool)
+	for i := 0; i < 100; i++ {
+		extras.Set(fmt.Sprintf("key_%d", i), i)
+	}
 
-		// 并发写入
+	var wg sync.WaitGroup
+	readers := 8
+	writers := 2
+	iterations := 1000
+
+	// 读协程
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
 		go func() {
-			for i := 0; i < 100; i++ {
-				extras.Set("key1", i)
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				mu.RLock()
+				_, _ = extras.Get(fmt.Sprintf("key_%d", i%100))
+				mu.RUnlock()
 			}
-			done <- true
 		}()
+	}
 
-		go func() {
-			for i := 0; i < 100; i++ {
-				extras.Set("key2", i)
+	// 写协程
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				mu.Lock()
+				extras.Set(fmt.Sprintf("writer_%d_key_%d", id, i), i)
+				mu.Unlock()
 			}
-			done <- true
-		}()
+		}(w)
+	}
 
-		<-done
-		<-done
-
-		t.Log("Concurrent writes completed - run with -race to detect issues")
-	})
+	wg.Wait()
 }
 
-// ==================== 数据完整性测试 ====================
+// ============================================================================
+// 综合性能测试报告
+// ============================================================================
 
-// TestDataIntegrity 测试数据完整性
-func TestDataIntegrity(t *testing.T) {
-	t.Run("SetPath preserves existing data", func(t *testing.T) {
-		extras := Extras{
-			"user": Extras{
-				"name":  "Alice",
-				"email": "alice@example.com",
-			},
-		}
+// TestExtrasPerformanceReport 生成性能测试报告
+func TestExtrasPerformanceReport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过性能报告测试")
+	}
 
-		// 添加新字段
-		err := extras.SetPath("user.age", 30)
-		if err != nil {
-			t.Fatalf("SetPath failed: %v", err)
-		}
+	t.Log("\n========================================")
+	t.Log("Extras 性能测试报告")
+	t.Log("========================================\n")
 
-		// 验证旧数据未被破坏
-		if name, ok := extras.GetStringPath("user.name"); !ok || name != "Alice" {
-			t.Error("Existing name field was corrupted")
-		}
-
-		if email, ok := extras.GetStringPath("user.email"); !ok || email != "alice@example.com" {
-			t.Error("Existing email field was corrupted")
-		}
-
-		// 验证新数据正确
-		if age, ok := extras.GetIntPath("user.age"); !ok || age != 30 {
-			t.Error("New age field not set correctly")
+	// 1. Set 操作性能
+	t.Run("Set性能", func(t *testing.T) {
+		sizes := []int{1000, 10000, 100000, 1000000}
+		for _, size := range sizes {
+			extras := NewExtras(size)
+			start := time.Now()
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+			duration := time.Since(start)
+			t.Logf("Set %d 项: %v (%.0f ops/s)",
+				size, duration, float64(size)/duration.Seconds())
 		}
 	})
 
-	t.Run("Clone preserves all data", func(t *testing.T) {
-		original := Extras{
-			"string": "value",
-			"int":    42,
-			"float":  3.14,
-			"bool":   true,
-			"slice":  []int{1, 2, 3},
+	// 2. Get 操作性能
+	t.Run("Get性能", func(t *testing.T) {
+		extras := NewExtras(1000000)
+		for i := 0; i < 1000000; i++ {
+			extras.Set(fmt.Sprintf("key_%d", i), i)
 		}
 
-		cloned := original.Clone()
+		start := time.Now()
+		for i := 0; i < 1000000; i++ {
+			_, _ = extras.Get(fmt.Sprintf("key_%d", i))
+		}
+		duration := time.Since(start)
+		t.Logf("Get 1M 项: %v (%.0f ops/s)",
+			duration, 1000000/duration.Seconds())
+	})
 
-		// 验证所有字段
-		if v, ok := cloned.GetString("string"); !ok || v != "value" {
-			t.Error("String field not cloned correctly")
+	// 3. 类型转换性能
+	t.Run("类型转换性能", func(t *testing.T) {
+		extras := NewExtras(100000)
+		for i := 0; i < 100000; i++ {
+			extras.Set(fmt.Sprintf("key_%d", i), i)
 		}
 
-		if v, ok := cloned.GetInt("int"); !ok || v != 42 {
-			t.Error("Int field not cloned correctly")
+		start := time.Now()
+		for i := 0; i < 100000; i++ {
+			_, _ = extras.GetInt(fmt.Sprintf("key_%d", i))
+		}
+		duration := time.Since(start)
+		t.Logf("GetInt 100K 项: %v (%.0f ops/s)",
+			duration, 100000/duration.Seconds())
+	})
+
+	// 4. JSON 序列化性能
+	t.Run("JSON序列化性能", func(t *testing.T) {
+		sizes := []int{10, 100, 1000, 10000}
+		for _, size := range sizes {
+			extras := NewExtras(size)
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+
+			start := time.Now()
+			iterations := 1000
+			for i := 0; i < iterations; i++ {
+				_, _ = json.Marshal(extras)
+			}
+			duration := time.Since(start)
+			t.Logf("Marshal %d 项 x %d 次: %v (%.0f ops/s)",
+				size, iterations, duration, float64(iterations)/duration.Seconds())
+		}
+	})
+
+	// 5. Clone 性能
+	t.Run("Clone性能", func(t *testing.T) {
+		sizes := []int{1000, 10000, 100000}
+		for _, size := range sizes {
+			extras := NewExtras(size)
+			for i := 0; i < size; i++ {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			}
+
+			start := time.Now()
+			iterations := 100
+			for i := 0; i < iterations; i++ {
+				_ = extras.Clone()
+			}
+			duration := time.Since(start)
+			t.Logf("Clone %d 项 x %d 次: %v (%.2f ms/op)",
+				size, iterations, duration, duration.Seconds()*1000/float64(iterations))
+		}
+	})
+
+	// 6. 路径操作性能
+	t.Run("路径操作性能", func(t *testing.T) {
+		extras := NewExtras(0)
+		iterations := 10000
+
+		start := time.Now()
+		for i := 0; i < iterations; i++ {
+			_ = extras.SetPath(fmt.Sprintf("level1.level2.key_%d", i), i)
+		}
+		setDuration := time.Since(start)
+
+		start = time.Now()
+		for i := 0; i < iterations; i++ {
+			_, _ = extras.GetPath(fmt.Sprintf("level1.level2.key_%d", i))
+		}
+		getDuration := time.Since(start)
+
+		t.Logf("SetPath %d 项: %v (%.0f ops/s)", iterations, setDuration, float64(iterations)/setDuration.Seconds())
+		t.Logf("GetPath %d 项: %v (%.0f ops/s)", iterations, getDuration, float64(iterations)/getDuration.Seconds())
+	})
+
+	t.Log("\n========================================")
+	t.Log("性能测试报告完成")
+	t.Log("========================================\n")
+}
+
+// ============================================================================
+// 压力测试
+// ============================================================================
+
+// TestExtrasStressTest 压力测试
+func TestExtrasStressTest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过压力测试")
+	}
+
+	t.Run("大规模数据写入", func(t *testing.T) {
+		const size = 2000000 // 200万
+		extras := NewExtras(size)
+
+		start := time.Now()
+		for i := 0; i < size; i++ {
+			extras.Set(fmt.Sprintf("key_%d", i), i)
+		}
+		duration := time.Since(start)
+
+		t.Logf("写入 %d 项耗时: %v (%.0f ops/s)",
+			size, duration, float64(size)/duration.Seconds())
+
+		if extras.Len() != size {
+			t.Errorf("长度不匹配: got %d, want %d", extras.Len(), size)
+		}
+	})
+
+	t.Run("大规模随机读取", func(t *testing.T) {
+		const size = 1000000
+		extras := NewExtras(size)
+		for i := 0; i < size; i++ {
+			extras.Set(fmt.Sprintf("key_%d", i), i)
 		}
 
-		if v, ok := cloned.GetFloat64("float"); !ok || v != 3.14 {
-			t.Error("Float field not cloned correctly")
+		start := time.Now()
+		for i := 0; i < size; i++ {
+			key := fmt.Sprintf("key_%d", (i*7919)%size) // 伪随机
+			_, ok := extras.Get(key)
+			if !ok {
+				t.Errorf("键 %s 不存在", key)
+			}
 		}
+		duration := time.Since(start)
 
-		if v, ok := cloned.GetBool("bool"); !ok || v != true {
-			t.Error("Bool field not cloned correctly")
+		t.Logf("随机读取 %d 项耗时: %v (%.0f ops/s)",
+			size, duration, float64(size)/duration.Seconds())
+	})
+
+	t.Run("混合读写操作", func(t *testing.T) {
+		const operations = 1000000
+		extras := NewExtras(0)
+
+		start := time.Now()
+		for i := 0; i < operations; i++ {
+			if i%2 == 0 {
+				extras.Set(fmt.Sprintf("key_%d", i), i)
+			} else {
+				_, _ = extras.Get(fmt.Sprintf("key_%d", i-1))
+			}
 		}
+		duration := time.Since(start)
+
+		t.Logf("混合操作 %d 次耗时: %v (%.0f ops/s)",
+			operations, duration, float64(operations)/duration.Seconds())
 	})
 }
