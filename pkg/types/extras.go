@@ -125,7 +125,7 @@ func (e Extras) GetMultiple(keys ...string) map[string]any {
 		return make(map[string]any)
 	}
 
-	// 优化：更精确的容量预估
+	// 更精确的容量预估
 	estimatedSize := len(keys)
 	if estimatedSize > len(e) {
 		estimatedSize = len(e)
@@ -208,28 +208,6 @@ func (e Extras) GetInt(key string) (int, bool) {
 	return convertToInt(value)
 }
 
-// GetInts 批量获取整数
-func (e Extras) GetInts(keys ...string) map[string]int {
-	if len(keys) == 0 {
-		return make(map[string]int)
-	}
-
-	estimatedSize := len(keys)
-	if estimatedSize > len(e) {
-		estimatedSize = len(e)
-	}
-	result := make(map[string]int, estimatedSize)
-
-	for _, key := range keys {
-		if v, ok := e[key]; ok {
-			if i, ok := convertToInt(v); ok {
-				result[key] = i
-			}
-		}
-	}
-	return result
-}
-
 // GetIntSlice 获取int切片
 func (e Extras) GetIntSlice(key string) ([]int, bool) {
 	v, ok := e[key]
@@ -244,7 +222,7 @@ func (e Extras) GetIntSlice(key string) ([]int, bool) {
 		if len(val) == 0 {
 			return []int{}, true
 		}
-		// 优化：精确预分配
+		// 精确预分配
 		ints := make([]int, len(val))
 		for i, item := range val {
 			if num, ok := convertToInt(item); ok {
@@ -729,7 +707,7 @@ func (e Extras) GetExtrasSlice(key string) ([]Extras, bool) {
 		if len(val) == 0 {
 			return []Extras{}, true
 		}
-		// 优化：精确预分配
+		// 精确预分配
 		extras := make([]Extras, len(val))
 		for i, item := range val {
 			switch mapVal := item.(type) {
@@ -753,7 +731,7 @@ func (e Extras) GetBytes(key string) ([]byte, bool) {
 		case []byte:
 			return val, true
 		case string:
-			// 优化：使用unsafe零拷贝转换（只读场景）
+			// 使用unsafe零拷贝转换（只读场景）
 			return stringToBytes(val), true
 		}
 	}
@@ -794,6 +772,8 @@ func (e *Extras) Scan(value any) error {
 	}
 
 	var bytes []byte
+	var needsCopy bool
+
 	switch v := value.(type) {
 	case []byte:
 		if len(v) == 0 {
@@ -801,15 +781,24 @@ func (e *Extras) Scan(value any) error {
 			return nil
 		}
 		bytes = v
+		needsCopy = true // 数据库驱动可能会重用[]byte
 	case string:
 		if len(v) == 0 {
 			*e = nil
 			return nil
 		}
-		// 零拷贝转换（JSON解析会复制数据，所以安全）
+		// 零拷贝转换（JSON解析会复制数据）
 		bytes = stringToBytes(v)
+		needsCopy = false
 	default:
 		return fmt.Errorf("failed to scan Extras: unsupported database type %T, expected []byte or string", value)
+	}
+
+	// 如果需要拷贝，先拷贝再解析
+	if needsCopy {
+		temp := make([]byte, len(bytes))
+		copy(temp, bytes)
+		bytes = temp
 	}
 
 	result := make(Extras)
@@ -821,16 +810,32 @@ func (e *Extras) Scan(value any) error {
 	return nil
 }
 
+// MarshalJSON 实现 json.Marshaler 接口
+//
 //go:inline
 func (e Extras) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]any(e))
+	if len(e) == 0 {
+		return []byte("{}"), nil
+	}
+	// 直接转换，避免创建新map
+	return json.Marshal((*map[string]any)(&e))
 }
 
 // UnmarshalJSON 实现 json.Unmarshaler 接口
 func (e *Extras) UnmarshalJSON(data []byte) error {
-	// 检查 null（避免字符串转换）
-	if len(data) == 4 && data[0] == 'n' && data[1] == 'u' && data[2] == 'l' && data[3] == 'l' {
+	// 快速检测null（避免字符串比较）
+	if len(data) == 4 &&
+		data[0] == 'n' &&
+		data[1] == 'u' &&
+		data[2] == 'l' &&
+		data[3] == 'l' {
 		*e = nil
+		return nil
+	}
+
+	// 快速检测空对象
+	if len(data) == 2 && data[0] == '{' && data[1] == '}' {
+		*e = make(Extras)
 		return nil
 	}
 
@@ -883,7 +888,7 @@ func (e Extras) Keys() []string {
 
 // KeysBuffer 将键写入提供的缓冲区（零分配版本，适合高频调用场景）
 func (e Extras) KeysBuffer(buf []string) []string {
-	// 优化：重用切片内存
+	// 重用切片内存
 	buf = buf[:0]
 	if cap(buf) < len(e) {
 		buf = make([]string, 0, len(e))
@@ -968,12 +973,6 @@ func (e Extras) MergeIf(other Extras, condition func(key string, value any) bool
 
 // Diff 比较两个Extras的差异
 func (e Extras) Diff(other Extras) (added, changed, removed Extras) {
-	// 优化：基于实际大小预估
-	maxSize := len(e)
-	if len(other) > maxSize {
-		maxSize = len(other)
-	}
-
 	added = make(Extras)
 	changed = make(Extras)
 	removed = make(Extras)
@@ -1005,7 +1004,7 @@ func quickEqual(a, b any) bool {
 		return true
 	}
 
-	// 类型不同肯定不相等
+	// 类型不同肯定不相等，按使用频率排序类型检查
 	switch va := a.(type) {
 	case string:
 		vb, ok := b.(string)
@@ -1018,12 +1017,26 @@ func quickEqual(a, b any) bool {
 		return ok && va == vb
 	case float64:
 		vb, ok := b.(float64)
-		return ok && va == vb
+		return ok && math.Float64bits(va) == math.Float64bits(vb) // 精确比较
 	case bool:
 		vb, ok := b.(bool)
 		return ok && va == vb
+	case nil:
+		return b == nil
+	case uint:
+		vb, ok := b.(uint)
+		return ok && va == vb
+	case uint64:
+		vb, ok := b.(uint64)
+		return ok && va == vb
+	case int32:
+		vb, ok := b.(int32)
+		return ok && va == vb
+	case float32:
+		vb, ok := b.(float32)
+		return ok && math.Float32bits(va) == math.Float32bits(vb)
 	default:
-		// 复杂类型回退到字符串比较
+		// 复杂类型回退到字符串比较（使用Sprintf会有性能损失）
 		return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 	}
 }
@@ -1066,7 +1079,7 @@ func toInt64(v any) int64 {
 	}
 }
 
-// 优化：convertToInt64 使用更高效的类型判断顺序
+// convertToInt64 使用更高效的类型判断顺序
 func convertToInt64(v any) (int64, bool) {
 	switch val := v.(type) {
 	case int64:
@@ -1111,7 +1124,7 @@ func convertToInt64(v any) (int64, bool) {
 	return 0, false
 }
 
-// 优化：convertToInt 按频率排序case
+// convertToInt 按频率排序case
 func convertToInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case int:
@@ -1666,15 +1679,15 @@ func convertToFloat64(v any) (float64, bool) {
 
 // GetIntFromString 支持字符串到整数的转换
 func (e Extras) GetIntFromString(key string) (int, bool) {
-	v, ok := e.Get(key)
+	v, ok := e[key]
 	if !ok {
 		return 0, false
 	}
 
 	// 字符串解析
 	if str, ok := v.(string); ok {
-		if i, err := strconv.Atoi(str); err == nil {
-			return i, true
+		if i, err := strconv.ParseInt(str, 10, 0); err == nil {
+			return int(i), true
 		}
 	}
 
@@ -1683,7 +1696,7 @@ func (e Extras) GetIntFromString(key string) (int, bool) {
 
 // GetInt64FromString 支持字符串到int64的转换
 func (e Extras) GetInt64FromString(key string) (int64, bool) {
-	v, ok := e.Get(key)
+	v, ok := e[key]
 	if !ok {
 		return 0, false
 	}
@@ -1699,7 +1712,7 @@ func (e Extras) GetInt64FromString(key string) (int64, bool) {
 
 // GetFloat64FromString 支持字符串到float64的转换
 func (e Extras) GetFloat64FromString(key string) (float64, bool) {
-	v, ok := e.Get(key)
+	v, ok := e[key]
 	if !ok {
 		return 0, false
 	}
@@ -1715,19 +1728,62 @@ func (e Extras) GetFloat64FromString(key string) (float64, bool) {
 
 // GetBoolFromString 支持字符串和数值到布尔的转换
 func (e Extras) GetBoolFromString(key string) (bool, bool) {
-	v, ok := e.Get(key)
+	v, ok := e[key]
 	if !ok {
 		return false, false
 	}
 
 	// 字符串转换
 	if str, ok := v.(string); ok {
-		// 优化：使用map查找表，O(1)复杂度
-		switch str {
-		case "true", "True", "TRUE", "1", "yes", "Yes", "YES", "on", "On", "ON":
-			return true, true
-		case "false", "False", "FALSE", "0", "no", "No", "NO", "", "off", "Off", "OFF":
+		// 先检查长度过滤不可能的值
+		switch len(str) {
+		case 0:
 			return false, true
+		case 1:
+			// '1', '0', 't', 'f', 'T', 'F'
+			switch str[0] {
+			case '1', 't', 'T', 'y', 'Y':
+				return true, true
+			case '0', 'f', 'F', 'n', 'N':
+				return false, true
+			}
+		case 2:
+			// "on", "On", "ON", "no", "No", "NO"
+			if (str[0] == 'o' || str[0] == 'O') && (str[1] == 'n' || str[1] == 'N') {
+				return true, true
+			}
+			if (str[0] == 'n' || str[0] == 'N') && (str[1] == 'o' || str[1] == 'O') {
+				return false, true
+			}
+		case 3:
+			// "yes", "Yes", "YES", "off", "Off", "OFF"
+			if (str[0] == 'y' || str[0] == 'Y') &&
+				(str[1] == 'e' || str[1] == 'E') &&
+				(str[2] == 's' || str[2] == 'S') {
+				return true, true
+			}
+			if (str[0] == 'o' || str[0] == 'O') &&
+				(str[1] == 'f' || str[1] == 'F') &&
+				(str[2] == 'f' || str[2] == 'F') {
+				return false, true
+			}
+		case 4:
+			// "true", "True", "TRUE"
+			if (str[0] == 't' || str[0] == 'T') &&
+				(str[1] == 'r' || str[1] == 'R') &&
+				(str[2] == 'u' || str[2] == 'U') &&
+				(str[3] == 'e' || str[3] == 'E') {
+				return true, true
+			}
+		case 5:
+			// "false", "False", "FALSE"
+			if (str[0] == 'f' || str[0] == 'F') &&
+				(str[1] == 'a' || str[1] == 'A') &&
+				(str[2] == 'l' || str[2] == 'L') &&
+				(str[3] == 's' || str[3] == 'S') &&
+				(str[4] == 'e' || str[4] == 'E') {
+				return false, true
+			}
 		}
 		return false, false
 	}
@@ -1796,8 +1852,7 @@ func (e Extras) GetPath(path string) (any, bool) {
 	}
 
 	// 无点号直接查询
-	dotIdx := strings.IndexByte(path, '.')
-	if dotIdx == -1 {
+	if strings.IndexByte(path, '.') == -1 {
 		return e.Get(path)
 	}
 
