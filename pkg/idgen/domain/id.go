@@ -39,7 +39,7 @@ func NewID(val int64) ID {
 // 说明：支持多种进制格式（十进制、十六进制0x、二进制0b）
 func ParseID(s string) (ID, error) {
 	// 验证1：防止空字符串
-	if s == "" {
+	if len(s) == 0 {
 		return 0, fmt.Errorf("ID string cannot be empty")
 	}
 
@@ -130,7 +130,7 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	// 尝试从字符串解析（优先）
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
-		if str == "" {
+		if len(str) == 0 {
 			return fmt.Errorf("ID string cannot be empty")
 		}
 		val, err := strconv.ParseInt(str, 10, 64)

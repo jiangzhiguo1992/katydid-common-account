@@ -275,7 +275,7 @@ func (r *Registry) GetMaxGenerators() int {
 // validateKey 验证键的有效性
 func validateKey(key string) error {
 	// 规则1：不能为空
-	if key == "" {
+	if len(key) == 0 {
 		return fmt.Errorf("%w: key cannot be empty", core.ErrInvalidKey)
 	}
 

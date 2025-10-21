@@ -67,9 +67,10 @@ func (s IDSet) IsEmpty() bool {
 
 // Clear 清空集合中的所有元素
 func (s IDSet) Clear() {
-	for id := range s {
-		delete(s, id)
-	}
+	//for id := range s {
+	//	delete(s, id)
+	//}
+	clear(s)
 }
 
 // ToSlice 转换为ID切片
