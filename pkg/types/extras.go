@@ -1684,11 +1684,19 @@ func (e Extras) GetIntFromString(key string) (int, bool) {
 		return 0, false
 	}
 
-	// 字符串解析
+	// 先字符串解析
 	if str, ok := v.(string); ok {
-		if i, err := strconv.ParseInt(str, 10, 0); err == nil {
-			return int(i), true
+		if len(str) == 0 {
+			return 0, false
 		}
+		if i, err := strconv.Atoi(str); err == nil {
+			return i, true
+		}
+	}
+
+	// 再尝试直接类型转换
+	if i, ok := convertToInt(v); ok {
+		return i, true
 	}
 
 	return 0, false
@@ -1701,10 +1709,19 @@ func (e Extras) GetInt64FromString(key string) (int64, bool) {
 		return 0, false
 	}
 
+	// 先字符串解析
 	if str, ok := v.(string); ok {
+		if len(str) == 0 {
+			return 0, false
+		}
 		if i, err := strconv.ParseInt(str, 10, 64); err == nil {
 			return i, true
 		}
+	}
+
+	// 再尝试直接类型转换
+	if i, ok := convertToInt64(v); ok {
+		return i, true
 	}
 
 	return 0, false
@@ -1717,10 +1734,19 @@ func (e Extras) GetFloat64FromString(key string) (float64, bool) {
 		return 0, false
 	}
 
+	// 先字符串解析
 	if str, ok := v.(string); ok {
+		if len(str) == 0 {
+			return 0, false
+		}
 		if f, err := strconv.ParseFloat(str, 64); err == nil {
 			return f, true
 		}
+	}
+
+	// 再尝试直接类型转换
+	if f, ok := convertToFloat64(v); ok {
+		return f, true
 	}
 
 	return 0, false
@@ -1788,7 +1814,12 @@ func (e Extras) GetBoolFromString(key string) (bool, bool) {
 		return false, false
 	}
 
-	// 数值转换
+	// 再尝试直接类型转换
+	if b, ok := v.(bool); ok {
+		return b, true
+	}
+
+	// 再数值转换
 	if i, ok := convertToInt(v); ok {
 		return i != 0, true
 	}
@@ -1845,38 +1876,30 @@ func (e Extras) GetExtrasOr(key string, defaultValue Extras) Extras {
 }
 
 // GetPath 支持点分隔路径查询
-// 示例: "user.address.city" → "Beijing"
 func (e Extras) GetPath(path string) (any, bool) {
 	if len(path) == 0 {
 		return nil, false
 	}
 
 	// 无点号直接查询
-	if strings.IndexByte(path, '.') == -1 {
+	if !strings.Contains(path, ".") {
 		return e.Get(path)
 	}
 
-	// 手动分割避免创建string切片
+	// 使用 strings.Cut 优化路径解析
 	current := any(e)
-	start := 0
+	remaining := path
 
 	for {
-		end := strings.IndexByte(path[start:], '.')
 		var key string
-
-		if end == -1 {
-			// 最后一段
-			key = path[start:]
-		} else {
-			key = path[start : start+end]
-			start += end + 1
-		}
+		var found bool
+		key, remaining, found = strings.Cut(remaining, ".")
 
 		if len(key) == 0 {
 			return nil, false
 		}
 
-		// 尝试转换为map
+		// 尝试转换为 map
 		var m map[string]any
 		switch v := current.(type) {
 		case Extras:
@@ -1892,8 +1915,8 @@ func (e Extras) GetPath(path string) (any, bool) {
 			return nil, false
 		}
 
-		if end == -1 {
-			// 最后一段，返回结果
+		// 如果没有更多路径段，返回结果
+		if !found || len(remaining) == 0 {
 			return val, true
 		}
 
@@ -1970,34 +1993,29 @@ func (e Extras) SetPath(path string, value any) error {
 		return fmt.Errorf("path cannot be empty")
 	}
 
-	// 快速路径
-	dotIdx := strings.IndexByte(path, '.')
-	if dotIdx == -1 {
+	// 无点号
+	if !strings.Contains(path, ".") {
 		e.Set(path, value)
 		return nil
 	}
 
-	// 手动分割路径
+	// 使用 strings.Cut 逐段解析
 	current := e
-	start := 0
+	remaining := path
 
 	for {
-		end := strings.IndexByte(path[start:], '.')
 		var key string
+		var found bool
+		key, remaining, found = strings.Cut(remaining, ".")
 
-		if end == -1 {
-			// 最后一段
-			key = path[start:]
-			if len(key) == 0 {
-				return fmt.Errorf("path contains empty key")
-			}
-			current.Set(key, value)
-			return nil
+		if len(key) == 0 {
+			return fmt.Errorf("path contains empty key")
 		}
 
-		key = path[start : start+end]
-		if len(key) == 0 {
-			return fmt.Errorf("path contains empty key at position %d", start)
+		// 如果是最后一段
+		if !found || len(remaining) == 0 {
+			current.Set(key, value)
+			return nil
 		}
 
 		// 获取或创建中间节点
@@ -2012,8 +2030,6 @@ func (e Extras) SetPath(path string, value any) error {
 			current.Set(key, newMap)
 			current = newMap
 		}
-
-		start += end + 1
 	}
 }
 
@@ -2021,7 +2037,7 @@ func (e Extras) SetPath(path string, value any) error {
 func (e Extras) Range(fn func(key string, value any) bool) {
 	for k, v := range e {
 		if !fn(k, v) {
-			break
+			return
 		}
 	}
 }
@@ -2030,18 +2046,18 @@ func (e Extras) Range(fn func(key string, value any) bool) {
 func (e Extras) RangeKeys(fn func(key string) bool) {
 	for k := range e {
 		if !fn(k) {
-			break
+			return
 		}
 	}
 }
 
 // Filter 筛选符合条件的键值对
 func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
-	result := NewExtras(0)
-
 	if len(e) == 0 {
-		return result
+		return NewExtras(0)
 	}
+
+	result := make(Extras)
 
 	for k, v := range e {
 		if predicate(k, v) {
@@ -2053,6 +2069,10 @@ func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
 
 // Map 转换所有值
 func (e Extras) Map(transform func(key string, value any) any) Extras {
+	if len(e) == 0 {
+		return NewExtras(0)
+	}
+
 	result := make(Extras, len(e))
 	for k, v := range e {
 		result[k] = transform(k, v)
@@ -2062,7 +2082,323 @@ func (e Extras) Map(transform func(key string, value any) any) Extras {
 
 // ForEach 对每个键值对执行操作
 func (e Extras) ForEach(fn func(key string, value any)) {
+	if len(e) == 0 {
+		return
+	}
 	for k, v := range e {
 		fn(k, v)
 	}
+}
+
+// ToJSON 高性能 JSON 序列化（避免重复编码）
+func (e Extras) ToJSON() ([]byte, error) {
+	if len(e) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(e)
+}
+
+// ToJSONString 返回 JSON 字符串（零拷贝优化）
+func (e Extras) ToJSONString() (string, error) {
+	data, err := e.ToJSON()
+	if err != nil {
+		return "", err
+	}
+	// 零拷贝转换
+	return bytesToString(data), nil
+}
+
+// FromJSON 从 JSON 解析（复用现有实例）
+func (e *Extras) FromJSON(data []byte) error {
+	if len(data) == 0 || (len(data) == 2 && data[0] == '{' && data[1] == '}') {
+		*e = make(Extras)
+		return nil
+	}
+
+	// 直接解析到现有 map
+	temp := make(map[string]any)
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	*e = Extras(temp)
+	return nil
+}
+
+// FromJSONString 从 JSON 字符串解析
+func (e *Extras) FromJSONString(s string) error {
+	if len(s) == 0 || s == "{}" {
+		*e = make(Extras)
+		return nil
+	}
+	// 零拷贝转换（JSON 解析会复制数据）
+	return e.FromJSON(stringToBytes(s))
+}
+
+// CompactJSON 紧凑 JSON 序列化（无缩进）
+func (e Extras) CompactJSON() ([]byte, error) {
+	if len(e) == 0 {
+		return []byte("{}"), nil
+	}
+
+	data, err := json.Marshal(e)
+	if err != nil {
+		return nil, err
+	}
+
+	// JSON 默认就是紧凑格式
+	return data, nil
+}
+
+// PrettyJSON 格式化 JSON 序列化（带缩进）
+func (e Extras) PrettyJSON() ([]byte, error) {
+	if len(e) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.MarshalIndent(e, "", "  ")
+}
+
+// Equal 比较两个 Extras 是否相等（优化版本）
+func (e Extras) Equal(other Extras) bool {
+	// 快速路径：长度不同
+	if len(e) != len(other) {
+		return false
+	}
+
+	// 空 map 相等
+	if len(e) == 0 {
+		return true
+	}
+
+	// 逐个比较键值对
+	for k, v := range e {
+		otherV, exists := other[k]
+		if !exists {
+			return false
+		}
+		if !quickEqual(v, otherV) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// CopyTo 将数据拷贝到另一个 Extras（浅拷贝）
+func (e Extras) CopyTo(target Extras) {
+	if len(e) == 0 {
+		return
+	}
+	for k, v := range e {
+		target[k] = v
+	}
+}
+
+// MergeFrom 从另一个 Extras 合并数据（别名，语义更清晰）
+func (e Extras) MergeFrom(other Extras) {
+	e.Merge(other)
+}
+
+// Extract 提取指定键的子集
+func (e Extras) Extract(keys ...string) Extras {
+	if len(keys) == 0 {
+		return NewExtras(0)
+	}
+
+	// 预分配合适的容量
+	capacity := len(keys)
+	if capacity > len(e) {
+		capacity = len(e)
+	}
+	result := make(Extras, capacity)
+
+	for _, key := range keys {
+		if v, ok := e[key]; ok {
+			result[key] = v
+		}
+	}
+	return result
+}
+
+// Omit 排除指定键，返回剩余数据
+func (e Extras) Omit(keys ...string) Extras {
+	if len(keys) == 0 {
+		return e.Clone()
+	}
+
+	// 创建排除键的 map（用于快速查找）
+	exclude := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		exclude[k] = struct{}{}
+	}
+
+	// 预分配（最坏情况：不排除任何键）
+	result := make(Extras, len(e)-len(keys))
+	for k, v := range e {
+		if _, shouldExclude := exclude[k]; !shouldExclude {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// Compact 移除所有 nil 值
+func (e Extras) Compact() {
+	for k, v := range e {
+		if v == nil {
+			delete(e, k)
+		}
+	}
+}
+
+// CompactCopy 返回移除 nil 值后的副本
+func (e Extras) CompactCopy() Extras {
+	result := make(Extras, len(e))
+	for k, v := range e {
+		if v != nil {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// IsNil 检查键是否存在且为 nil
+//
+//go:inline
+func (e Extras) IsNil(key string) bool {
+	v, ok := e[key]
+	return ok && v == nil
+}
+
+// SetIfAbsent 仅在键不存在时设置
+func (e Extras) SetIfAbsent(key string, value any) bool {
+	if len(key) == 0 {
+		return false
+	}
+	if _, exists := e[key]; !exists {
+		e[key] = value
+		return true
+	}
+	return false
+}
+
+// Update 更新现有键的值（键不存在则不操作）
+func (e Extras) Update(key string, value any) bool {
+	if _, exists := e[key]; exists {
+		e[key] = value
+		return true
+	}
+	return false
+}
+
+// Swap 交换两个键的值
+func (e Extras) Swap(key1, key2 string) bool {
+	v1, ok1 := e[key1]
+	v2, ok2 := e[key2]
+
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	e[key1] = v2
+	e[key2] = v1
+	return true
+}
+
+// Increment 对整数值进行原子递增
+func (e Extras) Increment(key string, delta int) (int, bool) {
+	v, ok := e[key]
+	if !ok {
+		e[key] = delta
+		return delta, true
+	}
+
+	if i, ok := convertToInt(v); ok {
+		newVal := i + delta
+		e[key] = newVal
+		return newVal, true
+	}
+
+	return 0, false
+}
+
+// Decrement 对整数值进行原子递减
+func (e Extras) Decrement(key string, delta int) (int, bool) {
+	return e.Increment(key, -delta)
+}
+
+// Append 向切片追加元素
+func (e Extras) Append(key string, values ...any) error {
+	existing, ok := e[key]
+	if !ok {
+		e[key] = values
+		return nil
+	}
+
+	// 尝试转换为切片
+	switch slice := existing.(type) {
+	case []any:
+		e[key] = append(slice, values...)
+		return nil
+	default:
+		return fmt.Errorf("key '%s' is not a slice type", key)
+	}
+}
+
+// Contains 检查切片是否包含指定值
+func (e Extras) Contains(key string, target any) bool {
+	v, ok := e[key]
+	if !ok {
+		return false
+	}
+
+	slice, ok := v.([]any)
+	if !ok {
+		return false
+	}
+
+	for _, item := range slice {
+		if quickEqual(item, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// Size 返回所有值的估算内存占用（字节）
+func (e Extras) Size() int {
+	if len(e) == 0 {
+		return 0
+	}
+
+	size := 0
+	for k, v := range e {
+		// 键的大小
+		size += len(k)
+
+		// 值的大小（粗略估算）
+		switch val := v.(type) {
+		case string:
+			size += len(val)
+		case []byte:
+			size += len(val)
+		case int, int8, int16, int32, int64:
+			size += 8
+		case uint, uint8, uint16, uint32, uint64:
+			size += 8
+		case float32:
+			size += 4
+		case float64:
+			size += 8
+		case bool:
+			size += 1
+		case []any:
+			size += len(val) * 8 // 粗略估算
+		case map[string]any:
+			size += len(val) * 16 // 粗略估算
+		default:
+			size += 8 // 默认指针大小
+		}
+	}
+	return size
 }
