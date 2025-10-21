@@ -1799,17 +1799,14 @@ func (e Extras) GetBoolFromString(key string) (bool, bool) {
 
 	// 字符串转换（使用字节比较代替字符串比较）
 	if str, ok := v.(string); ok {
-		// 使用快速路径检测常见值
 		if len(str) == 0 {
 			return false, true
 		}
 
-		// 转为小写比较（一次转换）
-		lower := strings.ToLower(str)
-		switch lower {
-		case "1", "t", "true", "y", "yes", "on":
+		switch str {
+		case "1", "Y", "true", "on", "yes", "Yes", "On", "y", "TRUE", "YES", "ON", "True", "t", "T":
 			return true, true
-		case "0", "f", "false", "n", "no", "off", "":
+		case "0", "N", "false", "off", "No", "Off", "no", "n", "FALSE", "NO", "OFF", "False", "f", "F":
 			return false, true
 		}
 
@@ -2320,7 +2317,20 @@ func (e Extras) Compact() {
 
 // CompactCopy 返回移除 nil 值后的副本
 func (e Extras) CompactCopy() Extras {
-	result := make(Extras, len(e))
+	if len(e) == 0 {
+		return NewExtras(0)
+	}
+
+	// 统计非 nil 值数量
+	nonNilCount := 0
+	for _, v := range e {
+		if v != nil {
+			nonNilCount++
+		}
+	}
+
+	// 精确分配容量，避免浪费内存
+	result := make(Extras, nonNilCount)
 	for k, v := range e {
 		if v != nil {
 			result[k] = v
