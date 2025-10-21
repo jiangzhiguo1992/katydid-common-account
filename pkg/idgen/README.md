@@ -906,10 +906,6 @@ resp.ID = strconv.FormatInt(id, 10)
 
 ---
 
-## 贡献指南
-
-欢迎提交Issue和Pull Request！
-
 ### 开发环境
 
 ```bash
@@ -934,19 +930,15 @@ MIT License - 详见 [LICENSE](../../../LICENSE) 文件
 
 ---
 
-## 更新日志
+## 贡献
 
-### 当前版本特性
+欢迎提交 Issue 和 Pull Request！
 
-- ✅ Snowflake算法实现
-- ✅ 三种时钟回拨策略
-- ✅ 批量生成优化
-- ✅ 性能监控
-- ✅ 注册表管理
-- ✅ ID解析和验证
-- ✅ 领域类型封装
-- ✅ JSON序列化支持
-- ✅ 完善的错误处理
-- ✅ 详细的文档和示例
+## 联系方式
+
+- 项目地址：[GitHub](https://github.com/yourproject)
+- 问题反馈：[Issues](https://github.com/yourproject/issues)
 
 ---
+
+**最后更新时间**: 2025-10-19
