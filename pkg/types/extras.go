@@ -7,13 +7,13 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"unsafe"
 )
 
 // Extras 扩展字段类型，用于存储动态的键值对数据
 //
 // 设计说明：
+// - 主要用于Model里存放非索引字段
 // - 基于 map[string]any，支持存储任意类型的值
 // - 适用于需要灵活扩展字段的场景，避免频繁修改数据库表结构
 // - 支持数据库 JSON 存储和 Go 结构体序列化
@@ -39,47 +39,8 @@ import (
 type Extras map[string]any
 
 // NewExtras 创建一个新的扩展字段实例
-//
-// 使用场景：初始化空的 Extras 对象
-// 时间复杂度：O(1)
-// 内存分配：~48 字节（空 map 结构）
-//
-// 示例：
-//
-//	extras := NewExtras()
-//	extras.Set("key", "value")
-//
-// 注意：也可以直接使用 make(Extras) 或字面量初始化
-func NewExtras() Extras {
-	return make(Extras)
-}
-
-// NewExtrasWithCapacity 创建具有指定初始容量的扩展字段实例
-func NewExtrasWithCapacity(capacity int) Extras {
-	if capacity <= 0 {
-		return make(Extras)
-	}
-	// 优化：向上取整到2的幂次，减少哈希冲突
-	return make(Extras, nextPowerOfTwo(capacity))
-}
-
-// nextPowerOfTwo 计算大于等于n的最小2的幂次
-// 优化map性能，减少哈希冲突
-func nextPowerOfTwo(n int) int {
-	if n <= 0 {
-		return 8
-	}
-	if n > 1<<30 {
-		return n
-	}
-	n--
-	n |= n >> 1
-	n |= n >> 2
-	n |= n >> 4
-	n |= n >> 8
-	n |= n >> 16
-	n++
-	return n
+func NewExtras(capacity int) Extras {
+	return make(Extras, capacity)
 }
 
 //go:inline
@@ -103,7 +64,6 @@ func (e Extras) SetOrDel(key string, value any) {
 }
 
 // SetMultiple 批量设置键值对
-// 优化：减少多次函数调用和边界检查
 func (e Extras) SetMultiple(pairs map[string]any) {
 	if len(pairs) == 0 {
 		return
@@ -116,13 +76,22 @@ func (e Extras) SetMultiple(pairs map[string]any) {
 }
 
 // SetFromStruct 从结构体设置字段（使用JSON标签）
-// 优化：适合从配置对象批量导入
 func (e Extras) SetFromStruct(s interface{}) error {
 	data, err := json.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("failed to marshal struct: %w", err)
 	}
 
+	// 直接解析到现有map，避免创建临时map
+	if len(e) == 0 {
+		// 空map直接解析
+		if err := json.Unmarshal(data, &e); err != nil {
+			return fmt.Errorf("failed to unmarshal to map: %w", err)
+		}
+		return nil
+	}
+
+	// 非空map需要合并
 	temp := make(map[string]any)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return fmt.Errorf("failed to unmarshal to map: %w", err)
@@ -138,7 +107,6 @@ func (e Extras) Delete(key string) {
 }
 
 // DeleteMultiple 批量删除
-// 优化：单次遍历删除多个key
 func (e Extras) DeleteMultiple(keys ...string) {
 	for _, key := range keys {
 		delete(e, key)
@@ -152,9 +120,18 @@ func (e Extras) Get(key string) (any, bool) {
 }
 
 // GetMultiple 批量获取
-// 优化：减少多次函数调用开销
 func (e Extras) GetMultiple(keys ...string) map[string]any {
-	result := make(map[string]any, len(keys))
+	if len(keys) == 0 {
+		return make(map[string]any)
+	}
+
+	// 优化：更精确的容量预估
+	estimatedSize := len(keys)
+	if estimatedSize > len(e) {
+		estimatedSize = len(e)
+	}
+	result := make(map[string]any, estimatedSize)
+
 	for _, key := range keys {
 		if v, ok := e[key]; ok {
 			result[key] = v
@@ -174,9 +151,17 @@ func (e Extras) GetString(key string) (string, bool) {
 }
 
 // GetStrings 批量获取字符串
-// 优化：一次遍历获取多个字符串值
 func (e Extras) GetStrings(keys ...string) map[string]string {
-	result := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return make(map[string]string)
+	}
+
+	estimatedSize := len(keys)
+	if estimatedSize > len(e) {
+		estimatedSize = len(e)
+	}
+	result := make(map[string]string, estimatedSize)
+
 	for _, key := range keys {
 		if v, ok := e[key]; ok {
 			if str, ok := v.(string); ok {
@@ -187,29 +172,34 @@ func (e Extras) GetStrings(keys ...string) map[string]string {
 	return result
 }
 
+// GetStringSlice 批量获取字符串切片
 func (e Extras) GetStringSlice(key string) ([]string, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []string:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []string{}, true
-			}
-			strs := make([]string, 0, len(val))
-			for _, item := range val {
-				if str, ok := item.(string); ok {
-					strs = append(strs, str)
-				} else {
-					return nil, false
-				}
-			}
-			return strs, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []string:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []string{}, true
 		}
+		strs := make([]string, len(val))
+		for i, item := range val {
+			if str, ok := item.(string); ok {
+				strs[i] = str
+			} else {
+				return nil, false
+			}
+		}
+		return strs, true
 	}
 	return nil, false
 }
 
+//go:inline
 func (e Extras) GetInt(key string) (int, bool) {
 	value, exists := e[key]
 	if !exists {
@@ -220,7 +210,16 @@ func (e Extras) GetInt(key string) (int, bool) {
 
 // GetInts 批量获取整数
 func (e Extras) GetInts(keys ...string) map[string]int {
-	result := make(map[string]int, len(keys))
+	if len(keys) == 0 {
+		return make(map[string]int)
+	}
+
+	estimatedSize := len(keys)
+	if estimatedSize > len(e) {
+		estimatedSize = len(e)
+	}
+	result := make(map[string]int, estimatedSize)
+
 	for _, key := range keys {
 		if v, ok := e[key]; ok {
 			if i, ok := convertToInt(v); ok {
@@ -231,29 +230,35 @@ func (e Extras) GetInts(keys ...string) map[string]int {
 	return result
 }
 
+// GetIntSlice 获取int切片
 func (e Extras) GetIntSlice(key string) ([]int, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []int:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []int{}, true
-			}
-			ints := make([]int, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToInt(item); ok {
-					ints = append(ints, i)
-				} else {
-					return nil, false
-				}
-			}
-			return ints, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int{}, true
 		}
+		// 优化：精确预分配
+		ints := make([]int, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt(item); ok {
+				ints[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return ints, true
 	}
 	return nil, false
 }
 
+// GetInt8 获取int8
 func (e Extras) GetInt8(key string) (int8, bool) {
 	if v, ok := e[key]; ok {
 		return convertToInt8(v)
@@ -261,29 +266,34 @@ func (e Extras) GetInt8(key string) (int8, bool) {
 	return 0, false
 }
 
+// GetInt8Slice 获取int8切片
 func (e Extras) GetInt8Slice(key string) ([]int8, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []int8:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []int8{}, true
-			}
-			nums := make([]int8, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToInt8(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int8:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int8{}, true
 		}
+		nums := make([]int8, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt8(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetInt16 获取int16
 func (e Extras) GetInt16(key string) (int16, bool) {
 	if v, ok := e[key]; ok {
 		return convertToInt16(v)
@@ -291,29 +301,34 @@ func (e Extras) GetInt16(key string) (int16, bool) {
 	return 0, false
 }
 
+// GetInt16Slice 获取int16切片
 func (e Extras) GetInt16Slice(key string) ([]int16, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []int16:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []int16{}, true
-			}
-			nums := make([]int16, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToInt16(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int16:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int16{}, true
 		}
+		nums := make([]int16, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt16(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetInt32 获取int32
 func (e Extras) GetInt32(key string) (int32, bool) {
 	if v, ok := e[key]; ok {
 		return convertToInt32(v)
@@ -321,29 +336,34 @@ func (e Extras) GetInt32(key string) (int32, bool) {
 	return 0, false
 }
 
+// GetInt32Slice 获取int32切片
 func (e Extras) GetInt32Slice(key string) ([]int32, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []int32:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []int32{}, true
-			}
-			nums := make([]int32, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToInt32(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int32{}, true
 		}
+		nums := make([]int32, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt32(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+//go:inline
 func (e Extras) GetInt64(key string) (int64, bool) {
 	value, exists := e[key]
 	if !exists {
@@ -352,29 +372,34 @@ func (e Extras) GetInt64(key string) (int64, bool) {
 	return convertToInt64(value)
 }
 
+// GetInt64Slice 获取int64切片
 func (e Extras) GetInt64Slice(key string) ([]int64, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []int64:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []int64{}, true
-			}
-			nums := make([]int64, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToInt64(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int64{}, true
 		}
+		nums := make([]int64, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt64(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetUint 获取uint
 func (e Extras) GetUint(key string) (uint, bool) {
 	if v, ok := e[key]; ok {
 		return convertToUint(v)
@@ -382,29 +407,34 @@ func (e Extras) GetUint(key string) (uint, bool) {
 	return 0, false
 }
 
+// GetUintSlice 获取uint切片
 func (e Extras) GetUintSlice(key string) ([]uint, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []uint:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []uint{}, true
-			}
-			nums := make([]uint, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToUint(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint{}, true
 		}
+		nums := make([]uint, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetUint8 获取uint8
 func (e Extras) GetUint8(key string) (uint8, bool) {
 	if v, ok := e[key]; ok {
 		return convertToUint8(v)
@@ -412,29 +442,34 @@ func (e Extras) GetUint8(key string) (uint8, bool) {
 	return 0, false
 }
 
+// GetUint8Slice 获取uint8切片
 func (e Extras) GetUint8Slice(key string) ([]uint8, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []uint8:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []uint8{}, true
-			}
-			nums := make([]uint8, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToUint8(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint8:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint8{}, true
 		}
+		nums := make([]uint8, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint8(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetUint16 获取uint16
 func (e Extras) GetUint16(key string) (uint16, bool) {
 	if v, ok := e[key]; ok {
 		return convertToUint16(v)
@@ -442,29 +477,34 @@ func (e Extras) GetUint16(key string) (uint16, bool) {
 	return 0, false
 }
 
+// GetUint16Slice 获取uint16切片
 func (e Extras) GetUint16Slice(key string) ([]uint16, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []uint16:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []uint16{}, true
-			}
-			nums := make([]uint16, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToUint16(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint16:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint16{}, true
 		}
+		nums := make([]uint16, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint16(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetUint32 获取uint32
 func (e Extras) GetUint32(key string) (uint32, bool) {
 	if v, ok := e[key]; ok {
 		return convertToUint32(v)
@@ -472,29 +512,34 @@ func (e Extras) GetUint32(key string) (uint32, bool) {
 	return 0, false
 }
 
+// GetUint32Slice 获取uint32切片
 func (e Extras) GetUint32Slice(key string) ([]uint32, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []uint32:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []uint32{}, true
-			}
-			nums := make([]uint32, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToUint32(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint32{}, true
 		}
+		nums := make([]uint32, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint32(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+//go:inline
 func (e Extras) GetUint64(key string) (uint64, bool) {
 	if v, ok := e[key]; ok {
 		return convertToUint64Typed(v)
@@ -502,29 +547,34 @@ func (e Extras) GetUint64(key string) (uint64, bool) {
 	return 0, false
 }
 
+// GetUint64Slice 获取uint64切片
 func (e Extras) GetUint64Slice(key string) ([]uint64, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []uint64:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []uint64{}, true
-			}
-			nums := make([]uint64, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToUint64Typed(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint64{}, true
 		}
+		nums := make([]uint64, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint64Typed(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+// GetFloat32 获取float32
 func (e Extras) GetFloat32(key string) (float32, bool) {
 	if v, ok := e[key]; ok {
 		return convertToFloat32(v)
@@ -532,29 +582,34 @@ func (e Extras) GetFloat32(key string) (float32, bool) {
 	return 0, false
 }
 
+// GetFloat32Slice 获取float32切片
 func (e Extras) GetFloat32Slice(key string) ([]float32, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []float32:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []float32{}, true
-			}
-			nums := make([]float32, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToFloat32(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []float32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []float32{}, true
 		}
+		nums := make([]float32, len(val))
+		for i, item := range val {
+			num, ok := convertToFloat32(item)
+			if !ok {
+				return nil, false
+			}
+			nums[i] = num
+		}
+		return nums, true
 	}
 	return nil, false
 }
 
+//go:inline
 func (e Extras) GetFloat64(key string) (float64, bool) {
 	value, exists := e[key]
 	if !exists {
@@ -563,25 +618,29 @@ func (e Extras) GetFloat64(key string) (float64, bool) {
 	return convertToFloat64(value)
 }
 
+// GetFloat64Slice 获取float64切片
 func (e Extras) GetFloat64Slice(key string) ([]float64, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []float64:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []float64{}, true
-			}
-			nums := make([]float64, 0, len(val))
-			for _, item := range val {
-				if i, ok := convertToFloat64(item); ok {
-					nums = append(nums, i)
-				} else {
-					return nil, false
-				}
-			}
-			return nums, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []float64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []float64{}, true
 		}
+		nums := make([]float64, len(val))
+		for i, item := range val {
+			num, ok := convertToFloat64(item)
+			if !ok {
+				return nil, false
+			}
+			nums[i] = num
+		}
+		return nums, true
 	}
 	return nil, false
 }
@@ -596,30 +655,34 @@ func (e Extras) GetBool(key string) (bool, bool) {
 	return b, ok
 }
 
+// GetBoolSlice 获取bool切片
 func (e Extras) GetBoolSlice(key string) ([]bool, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []bool:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []bool{}, true
-			}
-			bools := make([]bool, 0, len(val))
-			for _, item := range val {
-				if b, ok := item.(bool); ok {
-					bools = append(bools, b)
-				} else {
-					return nil, false
-				}
-			}
-			return bools, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []bool:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []bool{}, true
 		}
+		bools := make([]bool, len(val))
+		for i, item := range val {
+			if b, ok := item.(bool); ok {
+				bools[i] = b
+			} else {
+				return nil, false
+			}
+		}
+		return bools, true
 	}
 	return nil, false
 }
 
-//go:inline
+// GetSlice 获取切片
 func (e Extras) GetSlice(key string) ([]any, bool) {
 	value, exists := e[key]
 	if !exists {
@@ -629,7 +692,7 @@ func (e Extras) GetSlice(key string) ([]any, bool) {
 	return slice, ok
 }
 
-//go:inline
+// GetMap 获取map
 func (e Extras) GetMap(key string) (map[string]any, bool) {
 	value, exists := e[key]
 	if !exists {
@@ -639,6 +702,7 @@ func (e Extras) GetMap(key string) (map[string]any, bool) {
 	return m, ok
 }
 
+//go:inline
 func (e Extras) GetExtras(key string) (Extras, bool) {
 	if v, ok := e[key]; ok {
 		switch val := v.(type) {
@@ -651,32 +715,38 @@ func (e Extras) GetExtras(key string) (Extras, bool) {
 	return nil, false
 }
 
+// GetExtrasSlice 获取extras切片
 func (e Extras) GetExtrasSlice(key string) ([]Extras, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []Extras:
-			return val, true
-		case []any:
-			if len(val) == 0 {
-				return []Extras{}, true
-			}
-			extras := make([]Extras, 0, len(val))
-			for _, item := range val {
-				switch mapVal := item.(type) {
-				case Extras:
-					extras = append(extras, mapVal)
-				case map[string]any:
-					extras = append(extras, Extras(mapVal))
-				default:
-					return nil, false
-				}
-			}
-			return extras, true
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []Extras:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []Extras{}, true
 		}
+		// 优化：精确预分配
+		extras := make([]Extras, len(val))
+		for i, item := range val {
+			switch mapVal := item.(type) {
+			case Extras:
+				extras[i] = mapVal
+			case map[string]any:
+				extras[i] = Extras(mapVal)
+			default:
+				return nil, false
+			}
+		}
+		return extras, true
 	}
 	return nil, false
 }
 
+// GetBytes 获取字节
 func (e Extras) GetBytes(key string) ([]byte, bool) {
 	if v, ok := e[key]; ok {
 		switch val := v.(type) {
@@ -709,10 +779,6 @@ func bytesToString(b []byte) string {
 
 // Value 实现 driver.Valuer 接口
 func (e Extras) Value() (driver.Value, error) {
-	if len(e) == 0 {
-		return nil, nil
-	}
-
 	data, err := json.Marshal(e)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal Extras to JSON: %w", err)
@@ -721,7 +787,6 @@ func (e Extras) Value() (driver.Value, error) {
 }
 
 // Scan 实现 sql.Scanner 接口
-// 优化：使用unsafe减少内存拷贝
 func (e *Extras) Scan(value any) error {
 	if value == nil {
 		*e = nil
@@ -741,7 +806,7 @@ func (e *Extras) Scan(value any) error {
 			*e = nil
 			return nil
 		}
-		// 优化：零拷贝转换（JSON解析会复制数据，所以安全）
+		// 零拷贝转换（JSON解析会复制数据，所以安全）
 		bytes = stringToBytes(v)
 	default:
 		return fmt.Errorf("failed to scan Extras: unsupported database type %T, expected []byte or string", value)
@@ -761,8 +826,10 @@ func (e Extras) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any(e))
 }
 
+// UnmarshalJSON 实现 json.Unmarshaler 接口
 func (e *Extras) UnmarshalJSON(data []byte) error {
-	if len(data) == 4 && bytesToString(data) == "null" {
+	// 检查 null（避免字符串转换）
+	if len(data) == 4 && data[0] == 'n' && data[1] == 'u' && data[2] == 'l' && data[3] == 'l' {
 		*e = nil
 		return nil
 	}
@@ -783,7 +850,6 @@ func (e Extras) Has(key string) bool {
 }
 
 // HasAll 检查是否包含所有指定的键
-// 优化：单次遍历检查多个键
 func (e Extras) HasAll(keys ...string) bool {
 	for _, key := range keys {
 		if _, exists := e[key]; !exists {
@@ -804,7 +870,6 @@ func (e Extras) HasAny(keys ...string) bool {
 }
 
 // Keys 返回所有的键
-// 优化：使用对象池减少内存分配
 func (e Extras) Keys() []string {
 	if len(e) == 0 {
 		return []string{}
@@ -816,9 +881,9 @@ func (e Extras) Keys() []string {
 	return keys
 }
 
-// KeysBuffer 将键写入提供的缓冲区
-// 零分配版本，适合高频调用场景
+// KeysBuffer 将键写入提供的缓冲区（零分配版本，适合高频调用场景）
 func (e Extras) KeysBuffer(buf []string) []string {
+	// 优化：重用切片内存
 	buf = buf[:0]
 	if cap(buf) < len(e) {
 		buf = make([]string, 0, len(e))
@@ -839,6 +904,7 @@ func (e Extras) IsEmpty() bool {
 	return len(e) == 0
 }
 
+//go:inline
 func (e Extras) Clear() {
 	//for k := range e {
 	//	delete(e, k)
@@ -850,7 +916,7 @@ func (e Extras) Clear() {
 // Clone 创建一个浅拷贝
 func (e Extras) Clone() Extras {
 	if len(e) == 0 {
-		return NewExtras()
+		return NewExtras(0)
 	}
 	clone := make(Extras, len(e))
 	for k, v := range e {
@@ -860,10 +926,9 @@ func (e Extras) Clone() Extras {
 }
 
 // DeepClone 深拷贝（通过JSON序列化实现）
-// 适合需要完全独立副本的场景
 func (e Extras) DeepClone() (Extras, error) {
 	if len(e) == 0 {
-		return NewExtras(), nil
+		return NewExtras(0), nil
 	}
 
 	data, err := json.Marshal(e)
@@ -871,7 +936,7 @@ func (e Extras) DeepClone() (Extras, error) {
 		return nil, fmt.Errorf("failed to marshal for deep clone: %w", err)
 	}
 
-	clone := make(Extras)
+	clone := make(Extras, len(e))
 	if err := json.Unmarshal(data, &clone); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal for deep clone: %w", err)
 	}
@@ -879,6 +944,7 @@ func (e Extras) DeepClone() (Extras, error) {
 	return clone, nil
 }
 
+// Merge 合并
 func (e Extras) Merge(other Extras) {
 	if len(other) == 0 {
 		return
@@ -901,17 +967,21 @@ func (e Extras) MergeIf(other Extras, condition func(key string, value any) bool
 }
 
 // Diff 比较两个Extras的差异
-// 返回：added（新增），changed（变更），removed（删除）
 func (e Extras) Diff(other Extras) (added, changed, removed Extras) {
-	added = NewExtras()
-	changed = NewExtras()
-	removed = NewExtras()
+	// 优化：基于实际大小预估
+	maxSize := len(e)
+	if len(other) > maxSize {
+		maxSize = len(other)
+	}
+
+	added = make(Extras)
+	changed = make(Extras)
+	removed = make(Extras)
 
 	// 检查新增和变更
 	for k, v := range other {
 		if oldV, exists := e[k]; exists {
-			// 简单值比较（深度比较需要反射，开销大）
-			if fmt.Sprintf("%v", oldV) != fmt.Sprintf("%v", v) {
+			if !quickEqual(oldV, v) {
 				changed[k] = v
 			}
 		} else {
@@ -929,64 +999,80 @@ func (e Extras) Diff(other Extras) (added, changed, removed Extras) {
 	return
 }
 
-// Patch 应用补丁（合并另一个Extras，nil值表示删除）
-func (e Extras) Patch(patch Extras) {
-	for k, v := range patch {
-		if v == nil {
-			delete(e, k)
-		} else {
-			e[k] = v
-		}
+// quickEqual 快速相等性检查（避免 fmt.Sprintf 的开销）
+func quickEqual(a, b any) bool {
+	if a == b {
+		return true
+	}
+
+	// 类型不同肯定不相等
+	switch va := a.(type) {
+	case string:
+		vb, ok := b.(string)
+		return ok && va == vb
+	case int:
+		vb, ok := b.(int)
+		return ok && va == vb
+	case int64:
+		vb, ok := b.(int64)
+		return ok && va == vb
+	case float64:
+		vb, ok := b.(float64)
+		return ok && va == vb
+	case bool:
+		vb, ok := b.(bool)
+		return ok && va == vb
+	default:
+		// 复杂类型回退到字符串比较
+		return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 	}
 }
 
-// ==================== 辅助转换函数 ====================
+// ==================== 辅助转换函数优化 ====================
 
 //go:inline
 func convertToUint64(v any) uint64 {
 	switch val := v.(type) {
+	case uint64:
+		return val
 	case uint:
-		return uint64(val)
-	case uint8:
-		return uint64(val)
-	case uint16:
 		return uint64(val)
 	case uint32:
 		return uint64(val)
-	case uint64:
-		return val
+	case uint16:
+		return uint64(val)
+	case uint8:
+		return uint64(val)
+	default:
+		return 0
 	}
-	return 0
 }
 
 //go:inline
 func toInt64(v any) int64 {
 	switch val := v.(type) {
+	case int64:
+		return val
 	case int:
-		return int64(val)
-	case int8:
-		return int64(val)
-	case int16:
 		return int64(val)
 	case int32:
 		return int64(val)
-	case int64:
-		return val
+	case int16:
+		return int64(val)
+	case int8:
+		return int64(val)
+	default:
+		return 0
 	}
-	return 0
 }
 
+// 优化：convertToInt64 使用更高效的类型判断顺序
 func convertToInt64(v any) (int64, bool) {
 	switch val := v.(type) {
 	case int64:
 		return val, true
 	case int:
 		return int64(val), true
-	case float64:
-		if val >= float64(math.MinInt64) && val <= float64(math.MaxInt64) && val == float64(int64(val)) {
-			return int64(val), true
-		}
-		return 0, false
 	case int32:
 		return int64(val), true
 	case int16:
@@ -994,27 +1080,38 @@ func convertToInt64(v any) (int64, bool) {
 	case int8:
 		return int64(val), true
 	case uint:
-		return int64(val), true
-	case uint8:
+		if uint64(val) <= math.MaxInt64 {
+			return int64(val), true
+		}
+	case uint32:
 		return int64(val), true
 	case uint16:
 		return int64(val), true
-	case uint32:
+	case uint8:
 		return int64(val), true
 	case uint64:
 		if val <= math.MaxInt64 {
 			return int64(val), true
 		}
-		return 0, false
-	case float32:
-		if val >= float32(math.MinInt64) && val <= float32(math.MaxInt64) && val == float32(int64(val)) {
-			return int64(val), true
+	case float64:
+		if val >= float64(math.MinInt64) && val <= float64(math.MaxInt64) {
+			i := int64(val)
+			if float64(i) == val {
+				return i, true
+			}
 		}
-		return 0, false
+	case float32:
+		if val >= float32(math.MinInt64) && val <= float32(math.MaxInt64) {
+			i := int64(val)
+			if float32(i) == val {
+				return i, true
+			}
+		}
 	}
 	return 0, false
 }
 
+// 优化：convertToInt 按频率排序case
 func convertToInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case int:
@@ -1023,12 +1120,6 @@ func convertToInt(v any) (int, bool) {
 		if val >= int64(math.MinInt) && val <= int64(math.MaxInt) {
 			return int(val), true
 		}
-		return 0, false
-	case float64:
-		if val >= float64(math.MinInt) && val <= float64(math.MaxInt) && val == float64(int(val)) {
-			return int(val), true
-		}
-		return 0, false
 	case int32:
 		return int(val), true
 	case int16:
@@ -1039,26 +1130,32 @@ func convertToInt(v any) (int, bool) {
 		if uint64(val) <= uint64(math.MaxInt) {
 			return int(val), true
 		}
-		return 0, false
-	case uint8:
-		return int(val), true
-	case uint16:
-		return int(val), true
 	case uint32:
-		if val <= uint32(math.MaxInt) {
+		if uint64(val) <= uint64(math.MaxInt32) {
 			return int(val), true
 		}
-		return 0, false
+	case uint16:
+		return int(val), true
+	case uint8:
+		return int(val), true
 	case uint64:
 		if val <= uint64(math.MaxInt) {
 			return int(val), true
 		}
-		return 0, false
-	case float32:
-		if val >= float32(math.MinInt) && val <= float32(math.MaxInt) && val == float32(int(val)) {
-			return int(val), true
+	case float64:
+		if val >= float64(math.MinInt) && val <= float64(math.MaxInt) {
+			i := int(val)
+			if float64(i) == val {
+				return i, true
+			}
 		}
-		return 0, false
+	case float32:
+		if val >= float32(math.MinInt) && val <= float32(math.MaxInt) {
+			i := int(val)
+			if float32(i) == val {
+				return i, true
+			}
+		}
 	}
 	return 0, false
 }
@@ -1084,18 +1181,39 @@ func convertToInt8(v any) (int8, bool) {
 		if val >= math.MinInt8 && val <= math.MaxInt8 {
 			return int8(val), true
 		}
-	case uint, uint8, uint16, uint32, uint64:
-		u64 := convertToUint64(val)
-		if u64 <= math.MaxInt8 {
-			return int8(u64), true
+	case uint8:
+		if val <= math.MaxInt8 {
+			return int8(val), true
+		}
+	case uint16:
+		if val <= math.MaxInt8 {
+			return int8(val), true
+		}
+	case uint32:
+		if val <= math.MaxInt8 {
+			return int8(val), true
+		}
+	case uint64:
+		if val <= math.MaxInt8 {
+			return int8(val), true
+		}
+	case uint:
+		if val <= math.MaxInt8 {
+			return int8(val), true
 		}
 	case float32:
-		if val >= math.MinInt8 && val <= math.MaxInt8 && val == float32(int8(val)) {
-			return int8(val), true
+		if val >= math.MinInt8 && val <= math.MaxInt8 {
+			i := int8(val)
+			if float32(i) == val {
+				return i, true
+			}
 		}
 	case float64:
-		if val >= math.MinInt8 && val <= math.MaxInt8 && val == float64(int8(val)) {
-			return int8(val), true
+		if val >= math.MinInt8 && val <= math.MaxInt8 {
+			i := int8(val)
+			if float64(i) == val {
+				return i, true
+			}
 		}
 	}
 	return 0, false
@@ -1122,18 +1240,35 @@ func convertToInt16(v any) (int16, bool) {
 		}
 	case uint8:
 		return int16(val), true
-	case uint, uint16, uint32, uint64:
-		u64 := convertToUint64(val)
-		if u64 <= math.MaxInt16 {
-			return int16(u64), true
+	case uint16:
+		if val <= math.MaxInt16 {
+			return int16(val), true
+		}
+	case uint32:
+		if val <= math.MaxInt16 {
+			return int16(val), true
+		}
+	case uint64:
+		if val <= math.MaxInt16 {
+			return int16(val), true
+		}
+	case uint:
+		if val <= math.MaxInt16 {
+			return int16(val), true
 		}
 	case float32:
-		if val >= math.MinInt16 && val <= math.MaxInt16 && val == float32(int16(val)) {
-			return int16(val), true
+		if val >= math.MinInt16 && val <= math.MaxInt16 {
+			i := int16(val)
+			if float32(i) == val {
+				return i, true
+			}
 		}
 	case float64:
-		if val >= math.MinInt16 && val <= math.MaxInt16 && val == float64(int16(val)) {
-			return int16(val), true
+		if val >= math.MinInt16 && val <= math.MaxInt16 {
+			i := int16(val)
+			if float64(i) == val {
+				return i, true
+			}
 		}
 	}
 	return 0, false
@@ -1160,18 +1295,31 @@ func convertToInt32(v any) (int32, bool) {
 		return int32(val), true
 	case uint16:
 		return int32(val), true
-	case uint, uint32, uint64:
-		u64 := convertToUint64(val)
-		if u64 <= math.MaxInt32 {
-			return int32(u64), true
+	case uint32:
+		if val <= math.MaxInt32 {
+			return int32(val), true
+		}
+	case uint64:
+		if val <= math.MaxInt32 {
+			return int32(val), true
+		}
+	case uint:
+		if val <= math.MaxInt32 {
+			return int32(val), true
 		}
 	case float32:
-		if val >= math.MinInt32 && val <= math.MaxInt32 && val == float32(int32(val)) {
-			return int32(val), true
+		if val >= math.MinInt32 && val <= math.MaxInt32 {
+			i := int32(val)
+			if float32(i) == val {
+				return i, true
+			}
 		}
 	case float64:
-		if val >= math.MinInt32 && val <= math.MaxInt32 && val == float64(int32(val)) {
-			return int32(val), true
+		if val >= math.MinInt32 && val <= math.MaxInt32 {
+			i := int32(val)
+			if float64(i) == val {
+				return i, true
+			}
 		}
 	}
 	return 0, false
@@ -1192,18 +1340,39 @@ func convertToUint(v any) (uint, bool) {
 		if val <= math.MaxUint {
 			return uint(val), true
 		}
-	case int, int8, int16, int32, int64:
-		i64 := toInt64(val)
-		if i64 >= 0 && i64 <= int64(math.MaxUint) {
-			return uint(i64), true
+	case int:
+		if val >= 0 {
+			return uint(val), true
+		}
+	case int8:
+		if val >= 0 {
+			return uint(val), true
+		}
+	case int16:
+		if val >= 0 {
+			return uint(val), true
+		}
+	case int32:
+		if val >= 0 {
+			return uint(val), true
+		}
+	case int64:
+		if val >= 0 && val <= int64(math.MaxUint) {
+			return uint(val), true
 		}
 	case float32:
-		if val >= 0 && val <= float32(math.MaxUint) && val == float32(uint(val)) {
-			return uint(val), true
+		if val >= 0 && val <= float32(math.MaxUint) {
+			u := uint(val)
+			if float32(u) == val {
+				return u, true
+			}
 		}
 	case float64:
-		if val >= 0 && val <= float64(math.MaxUint) && val == float64(uint(val)) {
-			return uint(val), true
+		if val >= 0 && val <= float64(math.MaxUint) {
+			u := uint(val)
+			if float64(u) == val {
+				return u, true
+			}
 		}
 	}
 	return 0, false
@@ -1230,18 +1399,39 @@ func convertToUint8(v any) (uint8, bool) {
 		if val <= math.MaxUint8 {
 			return uint8(val), true
 		}
-	case int, int8, int16, int32, int64:
-		i64 := toInt64(val)
-		if i64 >= 0 && i64 <= math.MaxUint8 {
-			return uint8(i64), true
+	case int:
+		if val >= 0 && val <= math.MaxUint8 {
+			return uint8(val), true
+		}
+	case int8:
+		if val >= 0 {
+			return uint8(val), true
+		}
+	case int16:
+		if val >= 0 && val <= math.MaxUint8 {
+			return uint8(val), true
+		}
+	case int32:
+		if val >= 0 && val <= math.MaxUint8 {
+			return uint8(val), true
+		}
+	case int64:
+		if val >= 0 && val <= math.MaxUint8 {
+			return uint8(val), true
 		}
 	case float32:
-		if val >= 0 && val <= math.MaxUint8 && val == float32(uint8(val)) {
-			return uint8(val), true
+		if val >= 0 && val <= math.MaxUint8 {
+			u := uint8(val)
+			if float32(u) == val {
+				return u, true
+			}
 		}
 	case float64:
-		if val >= 0 && val <= math.MaxUint8 && val == float64(uint8(val)) {
-			return uint8(val), true
+		if val >= 0 && val <= math.MaxUint8 {
+			u := uint8(val)
+			if float64(u) == val {
+				return u, true
+			}
 		}
 	}
 	return 0, false
@@ -1266,18 +1456,39 @@ func convertToUint16(v any) (uint16, bool) {
 		if val <= math.MaxUint16 {
 			return uint16(val), true
 		}
-	case int, int8, int16, int32, int64:
-		i64 := toInt64(val)
-		if i64 >= 0 && i64 <= math.MaxUint16 {
-			return uint16(i64), true
+	case int:
+		if val >= 0 && val <= math.MaxUint16 {
+			return uint16(val), true
+		}
+	case int8:
+		if val >= 0 {
+			return uint16(val), true
+		}
+	case int16:
+		if val >= 0 {
+			return uint16(val), true
+		}
+	case int32:
+		if val >= 0 && val <= math.MaxUint16 {
+			return uint16(val), true
+		}
+	case int64:
+		if val >= 0 && val <= math.MaxUint16 {
+			return uint16(val), true
 		}
 	case float32:
-		if val >= 0 && val <= math.MaxUint16 && val == float32(uint16(val)) {
-			return uint16(val), true
+		if val >= 0 && val <= math.MaxUint16 {
+			u := uint16(val)
+			if float32(u) == val {
+				return u, true
+			}
 		}
 	case float64:
-		if val >= 0 && val <= math.MaxUint16 && val == float64(uint16(val)) {
-			return uint16(val), true
+		if val >= 0 && val <= math.MaxUint16 {
+			u := uint16(val)
+			if float64(u) == val {
+				return u, true
+			}
 		}
 	}
 	return 0, false
@@ -1300,18 +1511,39 @@ func convertToUint32(v any) (uint32, bool) {
 		if val <= math.MaxUint32 {
 			return uint32(val), true
 		}
-	case int, int8, int16, int32, int64:
-		i64 := toInt64(val)
-		if i64 >= 0 && i64 <= math.MaxUint32 {
-			return uint32(i64), true
+	case int:
+		if val >= 0 && val <= math.MaxUint32 {
+			return uint32(val), true
+		}
+	case int8:
+		if val >= 0 {
+			return uint32(val), true
+		}
+	case int16:
+		if val >= 0 {
+			return uint32(val), true
+		}
+	case int32:
+		if val >= 0 {
+			return uint32(val), true
+		}
+	case int64:
+		if val >= 0 && val <= math.MaxUint32 {
+			return uint32(val), true
 		}
 	case float32:
-		if val >= 0 && val <= math.MaxUint32 && val == float32(uint32(val)) {
-			return uint32(val), true
+		if val >= 0 && val <= math.MaxUint32 {
+			u := uint32(val)
+			if float32(u) == val {
+				return u, true
+			}
 		}
 	case float64:
-		if val >= 0 && val <= math.MaxUint32 && val == float64(uint32(val)) {
-			return uint32(val), true
+		if val >= 0 && val <= math.MaxUint32 {
+			u := uint32(val)
+			if float64(u) == val {
+				return u, true
+			}
 		}
 	}
 	return 0, false
@@ -1330,18 +1562,39 @@ func convertToUint64Typed(v any) (uint64, bool) {
 		return uint64(val), true
 	case uint32:
 		return uint64(val), true
-	case int, int8, int16, int32, int64:
-		i64 := toInt64(val)
-		if i64 >= 0 {
-			return uint64(i64), true
+	case int:
+		if val >= 0 {
+			return uint64(val), true
+		}
+	case int8:
+		if val >= 0 {
+			return uint64(val), true
+		}
+	case int16:
+		if val >= 0 {
+			return uint64(val), true
+		}
+	case int32:
+		if val >= 0 {
+			return uint64(val), true
+		}
+	case int64:
+		if val >= 0 {
+			return uint64(val), true
 		}
 	case float32:
-		if val >= 0 && val <= float32(math.MaxUint64) && val == float32(uint64(val)) {
-			return uint64(val), true
+		if val >= 0 && val <= float32(math.MaxUint64) {
+			u := uint64(val)
+			if float32(u) == val {
+				return u, true
+			}
 		}
 	case float64:
-		if val >= 0 && val <= float64(math.MaxUint64) && val == float64(uint64(val)) {
-			return uint64(val), true
+		if val >= 0 && val <= float64(math.MaxUint64) {
+			u := uint64(val)
+			if float64(u) == val {
+				return u, true
+			}
 		}
 	}
 	return 0, false
@@ -1353,21 +1606,34 @@ func convertToFloat32(v any) (float32, bool) {
 	case float32:
 		return val, true
 	case float64:
-		// 检查是否在 float32 范围内
 		if val >= -math.MaxFloat32 && val <= math.MaxFloat32 {
 			return float32(val), true
 		}
-	case int, int8, int16, int32, int64:
-		return float32(toInt64(val)), true
-	case uint, uint8, uint16, uint32, uint64:
-		return float32(convertToUint64(val)), true
+	case int:
+		return float32(val), true
+	case int8:
+		return float32(val), true
+	case int16:
+		return float32(val), true
+	case int32:
+		return float32(val), true
+	case int64:
+		return float32(val), true
+	case uint:
+		return float32(val), true
+	case uint8:
+		return float32(val), true
+	case uint16:
+		return float32(val), true
+	case uint32:
+		return float32(val), true
+	case uint64:
+		return float32(val), true
 	}
 	return 0, false
 }
 
 // convertToFloat64 转换为 float64
-//
-// 优化：快速路径优先
 func convertToFloat64(v any) (float64, bool) {
 	switch val := v.(type) {
 	case float64:
@@ -1399,19 +1665,13 @@ func convertToFloat64(v any) (float64, bool) {
 }
 
 // GetIntFromString 支持字符串到整数的转换
-// 示例: "123" → 123
 func (e Extras) GetIntFromString(key string) (int, bool) {
 	v, ok := e.Get(key)
 	if !ok {
 		return 0, false
 	}
 
-	// 优先尝试原生类型
-	if i, ok := convertToInt(v); ok {
-		return i, true
-	}
-
-	// 回退到字符串解析
+	// 字符串解析
 	if str, ok := v.(string); ok {
 		if i, err := strconv.Atoi(str); err == nil {
 			return i, true
@@ -1426,10 +1686,6 @@ func (e Extras) GetInt64FromString(key string) (int64, bool) {
 	v, ok := e.Get(key)
 	if !ok {
 		return 0, false
-	}
-
-	if i, ok := convertToInt64(v); ok {
-		return i, true
 	}
 
 	if str, ok := v.(string); ok {
@@ -1448,10 +1704,6 @@ func (e Extras) GetFloat64FromString(key string) (float64, bool) {
 		return 0, false
 	}
 
-	if f, ok := convertToFloat64(v); ok {
-		return f, true
-	}
-
 	if str, ok := v.(string); ok {
 		if f, err := strconv.ParseFloat(str, 64); err == nil {
 			return f, true
@@ -1462,27 +1714,22 @@ func (e Extras) GetFloat64FromString(key string) (float64, bool) {
 }
 
 // GetBoolFromString 支持字符串和数值到布尔的转换
-// "true", "1", 1 → true
-// "false", "0", 0 → false
 func (e Extras) GetBoolFromString(key string) (bool, bool) {
 	v, ok := e.Get(key)
 	if !ok {
 		return false, false
 	}
 
-	// 原生bool类型
-	if b, ok := v.(bool); ok {
-		return b, true
-	}
-
 	// 字符串转换
 	if str, ok := v.(string); ok {
+		// 优化：使用map查找表，O(1)复杂度
 		switch str {
-		case "true", "True", "TRUE", "1", "yes", "Yes", "YES":
+		case "true", "True", "TRUE", "1", "yes", "Yes", "YES", "on", "On", "ON":
 			return true, true
-		case "false", "False", "FALSE", "0", "no", "No", "NO", "":
+		case "false", "False", "FALSE", "0", "no", "No", "NO", "", "off", "Off", "OFF":
 			return false, true
 		}
+		return false, false
 	}
 
 	// 数值转换
@@ -1548,19 +1795,33 @@ func (e Extras) GetPath(path string) (any, bool) {
 		return nil, false
 	}
 
-	keys := strings.Split(path, ".")
-
-	// 检查空键
-	for _, key := range keys {
-		if len(key) == 0 {
-			return nil, false // 拒绝
-		}
+	// 无点号直接查询
+	dotIdx := strings.IndexByte(path, '.')
+	if dotIdx == -1 {
+		return e.Get(path)
 	}
 
+	// 手动分割避免创建string切片
 	current := any(e)
+	start := 0
 
-	for _, key := range keys {
-		// 尝试转换为map[string]any
+	for {
+		end := strings.IndexByte(path[start:], '.')
+		var key string
+
+		if end == -1 {
+			// 最后一段
+			key = path[start:]
+		} else {
+			key = path[start : start+end]
+			start += end + 1
+		}
+
+		if len(key) == 0 {
+			return nil, false
+		}
+
+		// 尝试转换为map
 		var m map[string]any
 		switch v := current.(type) {
 		case Extras:
@@ -1575,10 +1836,14 @@ func (e Extras) GetPath(path string) (any, bool) {
 		if !exists {
 			return nil, false
 		}
+
+		if end == -1 {
+			// 最后一段，返回结果
+			return val, true
+		}
+
 		current = val
 	}
-
-	return current, true
 }
 
 // GetStringPath 获取字符串类型的路径值
@@ -1645,33 +1910,40 @@ func (e Extras) GetExtrasPath(path string) (Extras, bool) {
 }
 
 // SetPath 支持路径设置（自动创建中间节点）
-//
-// 错误情况：
-// - 路径为空字符串
-// - 路径包含空键（如 "a..b"）
-// - 中间节点存在但不是 Extras/map[string]any 类型
 func (e Extras) SetPath(path string, value any) error {
 	if len(path) == 0 {
 		return fmt.Errorf("path cannot be empty")
 	}
 
-	keys := strings.Split(path, ".")
-
-	// 检查空键
-	for _, key := range keys {
-		if len(key) == 0 {
-			return fmt.Errorf("path contains empty key: %s", path)
-		}
-	}
-
-	if len(keys) == 1 {
+	// 快速路径
+	dotIdx := strings.IndexByte(path, '.')
+	if dotIdx == -1 {
 		e.Set(path, value)
 		return nil
 	}
 
+	// 手动分割路径
 	current := e
-	for i := 0; i < len(keys)-1; i++ {
-		key := keys[i]
+	start := 0
+
+	for {
+		end := strings.IndexByte(path[start:], '.')
+		var key string
+
+		if end == -1 {
+			// 最后一段
+			key = path[start:]
+			if len(key) == 0 {
+				return fmt.Errorf("path contains empty key")
+			}
+			current.Set(key, value)
+			return nil
+		}
+
+		key = path[start : start+end]
+		if len(key) == 0 {
+			return fmt.Errorf("path contains empty key at position %d", start)
+		}
 
 		// 获取或创建中间节点
 		if existing, ok := current.GetExtras(key); ok {
@@ -1681,23 +1953,16 @@ func (e Extras) SetPath(path string, value any) error {
 			if _, exists := current[key]; exists {
 				return fmt.Errorf("path conflict at key '%s': existing value is not an Extras type", key)
 			}
-			newMap := NewExtras()
+			newMap := make(Extras)
 			current.Set(key, newMap)
 			current = newMap
 		}
-	}
 
-	// 设置最终值
-	current.Set(keys[len(keys)-1], value)
-	return nil
+		start += end + 1
+	}
 }
 
-// Range 遍历所有键值对（零分配）
-//
-// 返回false可提前终止遍历
-//
-// 警告：遍历期间不要修改map，否则会panic
-// 如需并发访问，请使用外部锁保护
+// Range 遍历所有键值对（零分配+线程不安全)
 func (e Extras) Range(fn func(key string, value any) bool) {
 	for k, v := range e {
 		if !fn(k, v) {
@@ -1706,9 +1971,7 @@ func (e Extras) Range(fn func(key string, value any) bool) {
 	}
 }
 
-// RangeKeys 仅遍历键（零分配）
-//
-// 警告：遍历期间不要修改map
+// RangeKeys 仅遍历键（零分配+线程不安全)
 func (e Extras) RangeKeys(fn func(key string) bool) {
 	for k := range e {
 		if !fn(k) {
@@ -1719,7 +1982,12 @@ func (e Extras) RangeKeys(fn func(key string) bool) {
 
 // Filter 筛选符合条件的键值对
 func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
-	result := NewExtras()
+	result := NewExtras(0)
+
+	if len(e) == 0 {
+		return result
+	}
+
 	for k, v := range e {
 		if predicate(k, v) {
 			result[k] = v
@@ -1730,7 +1998,7 @@ func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
 
 // Map 转换所有值
 func (e Extras) Map(transform func(key string, value any) any) Extras {
-	result := NewExtrasWithCapacity(len(e))
+	result := make(Extras, len(e))
 	for k, v := range e {
 		result[k] = transform(k, v)
 	}
