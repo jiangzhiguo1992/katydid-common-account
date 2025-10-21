@@ -51,6 +51,8 @@ func NewExtras(capacity int) Extras {
 // 设置操作
 // ============================================================================
 
+// Set 设置指定键的值
+//
 //go:inline
 func (e Extras) Set(key string, value any) {
 	if len(key) == 0 {
@@ -59,7 +61,7 @@ func (e Extras) Set(key string, value any) {
 	e[key] = value
 }
 
-// SetPath 支持路径设置
+// SetPath 支持路径设置，使用点号分隔的路径设置嵌套值
 func (e Extras) SetPath(path string, value any) error {
 	if len(path) == 0 {
 		return fmt.Errorf("path cannot be empty")
@@ -122,6 +124,8 @@ func (e Extras) SetPath(path string, value any) error {
 	return nil
 }
 
+// SetOrDel 设置或删除键值对
+//
 //go:inline
 func (e Extras) SetOrDel(key string, value any) {
 	if len(key) == 0 {
@@ -134,6 +138,8 @@ func (e Extras) SetOrDel(key string, value any) {
 	e[key] = value
 }
 
+// SetMultiple 批量设置多个键值对
+//
 //go:inline
 func (e Extras) SetMultiple(pairs map[string]any) {
 	if len(pairs) == 0 {
@@ -146,6 +152,8 @@ func (e Extras) SetMultiple(pairs map[string]any) {
 	}
 }
 
+// SetFromStruct 从结构体设置值
+//
 //go:inline
 func (e Extras) SetFromStruct(s interface{}) error {
 	if s == nil {
@@ -210,11 +218,15 @@ func (e Extras) SetFromStruct(s interface{}) error {
 // 删除操作
 // ============================================================================
 
+// Delete 删除指定键
+//
 //go:inline
 func (e Extras) Delete(key string) {
 	delete(e, key)
 }
 
+// DeleteMultiple 批量删除多个键
+//
 //go:inline
 func (e Extras) DeleteMultiple(keys ...string) {
 	if len(keys) == 0 {
@@ -226,6 +238,8 @@ func (e Extras) DeleteMultiple(keys ...string) {
 	}
 }
 
+// Clear 清空所有键值对
+//
 //go:inline
 func (e Extras) Clear() {
 	//for k := range e {
@@ -239,12 +253,16 @@ func (e Extras) Clear() {
 // 获取操作
 // ============================================================================
 
+// Get 获取指定键的值
+//
 //go:inline
 func (e Extras) Get(key string) (any, bool) {
 	value, exists := e[key]
 	return value, exists
 }
 
+// GetMultiple 批量获取多个键的值
+//
 //go:inline
 func (e Extras) GetMultiple(keys ...string) map[string]any {
 	if len(keys) == 0 {
@@ -266,6 +284,8 @@ func (e Extras) GetMultiple(keys ...string) map[string]any {
 	return result
 }
 
+// GetString 获取字符串类型的值
+//
 //go:inline
 func (e Extras) GetString(key string) (string, bool) {
 	value, exists := e[key]
@@ -276,6 +296,8 @@ func (e Extras) GetString(key string) (string, bool) {
 	return str, ok
 }
 
+// GetStringOr 获取字符串值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetStringOr(key, defaultValue string) string {
 	if v, ok := e.GetString(key); ok {
@@ -333,6 +355,8 @@ func (e Extras) GetStringSlice(key string) ([]string, bool) {
 	return nil, false
 }
 
+// GetInt 获取Int值
+//
 //go:inline
 func (e Extras) GetInt(key string) (int, bool) {
 	value, exists := e[key]
@@ -342,6 +366,8 @@ func (e Extras) GetInt(key string) (int, bool) {
 	return convertToInt(value)
 }
 
+// GetIntOr 获取Int值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetIntOr(key string, defaultValue int) int {
 	if v, ok := e.GetInt(key); ok {
@@ -507,6 +533,8 @@ func (e Extras) GetInt32Slice(key string) ([]int32, bool) {
 	return nil, false
 }
 
+// GetInt64 获取Int64值
+//
 //go:inline
 func (e Extras) GetInt64(key string) (int64, bool) {
 	value, exists := e[key]
@@ -516,6 +544,8 @@ func (e Extras) GetInt64(key string) (int64, bool) {
 	return convertToInt64(value)
 }
 
+// GetInt64Or 获取Int64值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetInt64Or(key string, defaultValue int64) int64 {
 	if v, ok := e.GetInt64(key); ok {
@@ -723,6 +753,8 @@ func (e Extras) GetUint32Slice(key string) ([]uint32, bool) {
 	return nil, false
 }
 
+// GetUint64 获取uint64值
+//
 //go:inline
 func (e Extras) GetUint64(key string) (uint64, bool) {
 	if v, ok := e[key]; ok {
@@ -731,6 +763,8 @@ func (e Extras) GetUint64(key string) (uint64, bool) {
 	return 0, false
 }
 
+// GetUint64Or 获取uint64值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetUint64Or(key string, defaultValue uint64) uint64 {
 	if v, ok := e.GetUint64(key); ok {
@@ -809,6 +843,8 @@ func (e Extras) GetFloat32Slice(key string) ([]float32, bool) {
 	return nil, false
 }
 
+// GetFloat64 获取float64值
+//
 //go:inline
 func (e Extras) GetFloat64(key string) (float64, bool) {
 	value, exists := e[key]
@@ -818,6 +854,8 @@ func (e Extras) GetFloat64(key string) (float64, bool) {
 	return convertToFloat64(value)
 }
 
+// GetFloat64Or 获取float64值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetFloat64Or(key string, defaultValue float64) float64 {
 	if v, ok := e.GetFloat64(key); ok {
@@ -853,6 +891,8 @@ func (e Extras) GetFloat64Slice(key string) ([]float64, bool) {
 	return nil, false
 }
 
+// GetBool 获取bool值
+//
 //go:inline
 func (e Extras) GetBool(key string) (bool, bool) {
 	value, exists := e[key]
@@ -863,6 +903,8 @@ func (e Extras) GetBool(key string) (bool, bool) {
 	return b, ok
 }
 
+// GetBoolOr 获取bool值，失败时返回默认值
+//
 //go:inline
 func (e Extras) GetBoolOr(key string, defaultValue bool) bool {
 	if v, ok := e.GetBool(key); ok {
@@ -908,6 +950,8 @@ func (e Extras) GetSlice(key string) ([]any, bool) {
 	return slice, ok
 }
 
+// GetMap 获取Map
+//
 //go:inline
 func (e Extras) GetMap(key string) (map[string]any, bool) {
 	value, exists := e[key]
@@ -918,6 +962,8 @@ func (e Extras) GetMap(key string) (map[string]any, bool) {
 	return m, ok
 }
 
+// GetExtras 获取Extras
+//
 //go:inline
 func (e Extras) GetExtras(key string) (Extras, bool) {
 	if v, ok := e[key]; ok {
@@ -976,7 +1022,7 @@ func (e Extras) GetBytes(key string) ([]byte, bool) {
 	return nil, false
 }
 
-// GetPath 支持点分隔路径查询
+// GetPath 支持点分隔路径查询，用于获取嵌套结构中的值
 func (e Extras) GetPath(path string) (any, bool) {
 	if len(path) == 0 {
 		return nil, false
@@ -1111,6 +1157,8 @@ func (e Extras) GetExtrasPath(path string) (Extras, bool) {
 // 检查方法
 // ============================================================================
 
+// Has 检查指定键是否存在
+//
 //go:inline
 func (e Extras) Has(key string) bool {
 	_, exists := e[key]
@@ -1145,12 +1193,16 @@ func (e Extras) HasAny(keys ...string) bool {
 	return false
 }
 
+// IsNil 检查指定键的值是否为 nil
+//
 //go:inline
 func (e Extras) IsNil(key string) bool {
 	v, ok := e[key]
 	return ok && v == nil
 }
 
+// IsEmpty 检查 Extras 是否为空
+//
 //go:inline
 func (e Extras) IsEmpty() bool {
 	return len(e) == 0
@@ -1313,7 +1365,7 @@ func (e Extras) CopyTo(target Extras) {
 // 合并和比较
 // ============================================================================
 
-// Merge 合并
+// Merge 合并另一个 Extras 的数据到当前对象
 func (e Extras) Merge(other Extras) {
 	if len(other) == 0 {
 		return
@@ -1343,6 +1395,11 @@ func (e Extras) MergeIf(other Extras, condition func(key string, value any) bool
 }
 
 // Diff 比较两个Extras的差异
+//
+// 返回值：
+//   - added: 在 other 中新增的键值对
+//   - changed: 在 other 中值发生变化的键值对
+//   - removed: 在当前对象中存在但 other 中不存在的键值对
 func (e Extras) Diff(other Extras) (added, changed, removed Extras) {
 	// 根据实际大小预分配
 	addedSize := len(other) - len(e)
@@ -1484,7 +1541,7 @@ func (e Extras) Filter(predicate func(key string, value any) bool) Extras {
 	return result
 }
 
-// Compact 移除所有 nil 值
+// Compact 移除所有 nil 值（原地操作）
 func (e Extras) Compact() {
 	// Go 1.21+ 支持在遍历中安全删除
 	for k, v := range e {
@@ -1522,7 +1579,7 @@ func (e Extras) CompactCopy() Extras {
 // 条件操作
 // ============================================================================
 
-// SetIfAbsent 仅在键不存在时设置
+// SetIfAbsent 仅在键不存在时设置值
 func (e Extras) SetIfAbsent(key string, value any) bool {
 	if len(key) == 0 {
 		return false
@@ -1655,7 +1712,7 @@ func (e Extras) Map(transform func(key string, value any) any) Extras {
 	return result
 }
 
-// ForEach 对每个键值对执行操作
+// ForEach 对每个键值对执行操作，无法提前终止遍历（如需终止请使用 Range）
 func (e Extras) ForEach(fn func(key string, value any)) {
 	if len(e) == 0 {
 		return
@@ -1793,16 +1850,16 @@ func (e *Extras) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Value 实现 driver.Valuer 接口
+// Value 实现 driver.Valuer 接口，用于数据库存储
 func (e Extras) Value() (driver.Value, error) {
 	data, err := json.Marshal(e)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Extras to JSON: %w", err)
+		return nil, fmt.Errorf("failed to marshal Extras to JSON for database storage: %w", err)
 	}
 	return data, nil
 }
 
-// Scan 实现 sql.Scanner 接口
+// Scan 实现 sql.Scanner 接口，用于数据库读取
 func (e *Extras) Scan(value any) error {
 	if value == nil {
 		*e = nil
@@ -1830,7 +1887,7 @@ func (e *Extras) Scan(value any) error {
 
 	result := make(Extras)
 	if err := json.Unmarshal(bytes, &result); err != nil {
-		return fmt.Errorf("failed to unmarshal Extras from JSON: %w", err)
+		return fmt.Errorf("failed to unmarshal Extras from JSON for database scan:: %w", err)
 	}
 
 	*e = result
@@ -1943,7 +2000,7 @@ func quickEqual(a, b any) bool {
 // 类型转换函数
 // ============================================================================
 
-// convertToInt64 使用更高效的类型判断顺序
+// convertToInt64 将任意类型转换为 int64
 func convertToInt64(v any) (int64, bool) {
 	switch val := v.(type) {
 	case int64:
