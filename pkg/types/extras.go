@@ -2095,6 +2095,10 @@ func (e Extras) MarshalJSON() ([]byte, error) {
 //
 //go:inline
 func (e *Extras) UnmarshalJSON(data []byte) error {
+	if data == nil || len(data) == 0 {
+		return fmt.Errorf("empty JSON data")
+	}
+
 	// 快速检测null（避免字符串比较）
 	if len(data) == 4 &&
 		data[0] == 'n' &&

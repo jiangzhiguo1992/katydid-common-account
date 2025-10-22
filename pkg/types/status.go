@@ -254,6 +254,43 @@ func (s Status) HasAll(flags ...Status) bool {
 	}
 }
 
+// ActiveFlags 获取所有已设置的状态位
+func (s Status) ActiveFlags() []Status {
+	var flags []Status
+
+	for i := 0; i <= maxValidBit; i++ {
+		flag := Status(1 << i)
+		if s&flag != 0 {
+			flags = append(flags, flag)
+		}
+	}
+
+	return flags
+}
+
+// Diff 比较两个状态的差异
+//
+// 参数 other 是旧状态，s 是新状态
+// 返回：新增的状态位和移除的状态位
+func (s Status) Diff(other Status) (added Status, removed Status) {
+	added = s &^ other   // s 中有但 other 中没有的（新增）
+	removed = other &^ s // other 中有但 s 中没有的（移除）
+	return
+}
+
+// BitCount 计算已设置的位数量（popcount）
+//
+// 使用：Brian Kernighan 算法，O(k) k=置位数量
+func (s Status) BitCount() int {
+	count := 0
+	v := uint64(s)
+	for v != 0 {
+		count++
+		v &= v - 1
+	}
+	return count
+}
+
 // ============================================================================
 // 业务状态检查方法
 // ============================================================================
@@ -305,71 +342,6 @@ func (s Status) CanVisible() bool {
 // 业务规则：可见且已通过验证的内容才算完全可用
 func (s Status) CanActive() bool {
 	return s.CanVisible() && !s.IsReview()
-}
-
-// ============================================================================
-// 辅助信息方法
-// ============================================================================
-
-// Diff 比较两个状态的差异
-//
-// 参数 other 是旧状态，s 是新状态
-// 返回：新增的状态位和移除的状态位
-func (s Status) Diff(other Status) (added Status, removed Status) {
-	added = s &^ other   // s 中有但 other 中没有的（新增）
-	removed = other &^ s // other 中有但 s 中没有的（移除）
-	return
-}
-
-// HighestPriorityStatus 获取优先级最高的状态位
-// TODO:GG 还可以获取string
-func (s Status) HighestPriorityStatus() Status {
-	allFlags := []Status{
-		StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted,
-		StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled,
-		StatusSysHidden, StatusAdmHidden, StatusUserHidden,
-		StatusSysReview, StatusAdmReview, StatusUserReview,
-	}
-
-	for _, flag := range allFlags {
-		if s&flag != 0 {
-			return flag
-		}
-	}
-	return StatusNone
-}
-
-// ActiveFlags 获取所有已设置的状态位
-func (s Status) ActiveFlags() []Status {
-	var flags []Status
-
-	allFlags := []Status{
-		StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted,
-		StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled,
-		StatusSysHidden, StatusAdmHidden, StatusUserHidden,
-		StatusSysReview, StatusAdmReview, StatusUserReview,
-	}
-
-	for _, flag := range allFlags {
-		if s&flag != 0 {
-			flags = append(flags, flag)
-		}
-	}
-
-	return flags
-}
-
-// BitCount 计算已设置的位数量（popcount）
-//
-// 使用：Brian Kernighan 算法，O(k) k=置位数量
-func (s Status) BitCount() int {
-	count := 0
-	v := uint64(s)
-	for v != 0 {
-		count++
-		v &= v - 1
-	}
-	return count
 }
 
 // ============================================================================
@@ -450,6 +422,9 @@ func (s Status) MarshalJSON() ([]byte, error) {
 // 支持的 JSON 格式：数字类型
 // 示例：{"status": 5} 或 {"status": 0}
 func (s *Status) UnmarshalJSON(data []byte) error {
+	if data == nil || len(data) == 0 {
+		return fmt.Errorf("empty JSON data")
+	}
 	var num int64
 	if err := json.Unmarshal(data, &num); err != nil {
 		return fmt.Errorf("failed to unmarshal Status from JSON: invalid format, expected integer number: %w", err)
