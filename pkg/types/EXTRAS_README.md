@@ -558,7 +558,9 @@ contains := extras.Contains("tags", "go")
 
 // 获取长度
 length := extras.Len()
-size := extras.Size()  // 等同于 Len()
+
+// 获取大小(字节)
+size := extras.Size()
 ```
 
 ### 8. 迭代器

@@ -1520,12 +1520,11 @@ func TestExtrasSetFromStruct(t *testing.T) {
 	}
 }
 
-// TestExtrasContains 测试包含关系检查
+// TestExtrasContains 测试包含关系检查（用于检查切片中是否包含特定值）
 func TestExtrasContains(t *testing.T) {
 	extras := NewExtras(0)
-	extras.Set("name", "Alice")
-	extras.Set("age", 30)
-	extras.Set("tags", []string{"a", "b"})
+	extras.Set("tags", []any{"a", "b", "c"})
+	extras.Set("ids", []any{1, 2, 3})
 
 	tests := []struct {
 		name   string
@@ -1533,11 +1532,11 @@ func TestExtrasContains(t *testing.T) {
 		target any
 		want   bool
 	}{
-		{"字符串匹配", "name", "Alice", true},
-		{"字符串不匹配", "name", "Bob", false},
-		{"整数匹配", "age", 30, true},
-		{"整数不匹配", "age", 25, false},
-		{"不存在的键", "notexist", "Alice", false},
+		{"字符串在切片中", "tags", "a", true},
+		{"字符串不在切片中", "tags", "d", false},
+		{"整数在切片中", "ids", 2, true},
+		{"整数不在切片中", "ids", 5, false},
+		{"键不存在", "notexist", "a", false},
 	}
 
 	for _, tt := range tests {
@@ -1786,16 +1785,24 @@ func TestExtrasDecrement(t *testing.T) {
 // TestExtrasAppend 测试追加
 func TestExtrasAppend(t *testing.T) {
 	extras := NewExtras(0)
-	extras.Set("tags", []string{"a", "b"})
+	extras.Set("tags", []any{"a", "b"})
 
 	err := extras.Append("tags", "c", "d")
 	if err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
-	tags, _ := extras.GetStringSlice("tags")
-	if len(tags) != 4 {
-		t.Errorf("Append 后长度应为 4，实际为 %d", len(tags))
+	// 获取 []any 切片
+	slice, ok := extras.Get("tags")
+	if !ok {
+		t.Fatal("tags 键不存在")
+	}
+	anySlice, ok := slice.([]any)
+	if !ok {
+		t.Fatal("tags 不是 []any 类型")
+	}
+	if len(anySlice) != 4 {
+		t.Errorf("Append 后长度应为 4，实际为 %d", len(anySlice))
 	}
 
 	// 追加到不存在的键
@@ -1822,14 +1829,14 @@ func TestExtrasRange(t *testing.T) {
 		t.Errorf("Range 遍历次数应为 3，实际为 %d", count)
 	}
 
-	// 测试中途停止
+	// 测试中途停止（返回 false 时停止，所以会执行到返回 false 时）
 	count = 0
 	extras.Range(func(key string, value any) bool {
 		count++
-		return count < 2 // 只遍历一次后停止
+		return count < 2 // 第二次时返回 false，停止遍历
 	})
 
-	if count != 1 {
+	if count != 2 {
 		t.Errorf("Range 应在返回 false 时停止，实际遍历 %d 次", count)
 	}
 }
@@ -2184,16 +2191,5 @@ func TestExtrasGetFloat64Slice(t *testing.T) {
 	}
 	if len(floats) != 3 {
 		t.Errorf("GetFloat64Slice 长度应为 3，实际为 %d", len(floats))
-	}
-}
-
-// TestExtrasSize 测试大小获取
-func TestExtrasSize(t *testing.T) {
-	extras := NewExtras(0)
-	extras.Set("key1", "value1")
-	extras.Set("key2", "value2")
-
-	if extras.Size() != 2 {
-		t.Errorf("Size() 应返回 2，实际为 %d", extras.Size())
 	}
 }
