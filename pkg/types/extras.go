@@ -2015,7 +2015,7 @@ func (e Extras) ToJSONString() (string, error) {
 		return "", err
 	}
 
-	// 零拷贝转换
+	// 零拷贝转换 (只读)
 	return bytesToString(data), nil
 }
 
