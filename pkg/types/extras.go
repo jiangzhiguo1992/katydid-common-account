@@ -764,7 +764,7 @@ func (e Extras) GetUint32Slice(key string) ([]uint32, bool) {
 //go:inline
 func (e Extras) GetUint64(key string) (uint64, bool) {
 	if v, ok := e[key]; ok {
-		return convertToUint64Typed(v)
+		return convertToUint64(v)
 	}
 	return 0, false
 }
@@ -795,7 +795,7 @@ func (e Extras) GetUint64Slice(key string) ([]uint64, bool) {
 		}
 		nums := make([]uint64, len(val))
 		for i, item := range val {
-			if num, ok := convertToUint64Typed(item); ok {
+			if num, ok := convertToUint64(item); ok {
 				nums[i] = num
 			} else {
 				return nil, false
@@ -1115,6 +1115,33 @@ func (e Extras) GetIntPath(path string) (int, bool) {
 	return convertToInt(v)
 }
 
+// GetInt8Path 获取int8类型的路径值
+func (e Extras) GetInt8Path(path string) (int8, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToInt8(v)
+}
+
+// GetInt16Path 获取int16类型的路径值
+func (e Extras) GetInt16Path(path string) (int16, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToInt16(v)
+}
+
+// GetInt32Path 获取int32类型的路径值
+func (e Extras) GetInt32Path(path string) (int32, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToInt32(v)
+}
+
 // GetInt64Path 获取int64类型的路径值
 func (e Extras) GetInt64Path(path string) (int64, bool) {
 	v, ok := e.GetPath(path)
@@ -1122,6 +1149,60 @@ func (e Extras) GetInt64Path(path string) (int64, bool) {
 		return 0, false
 	}
 	return convertToInt64(v)
+}
+
+// GetUintPath 获取uint类型的路径值
+func (e Extras) GetUintPath(path string) (uint, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToUint(v)
+}
+
+// GetUint8Path 获取uint8类型的路径值
+func (e Extras) GetUint8Path(path string) (uint8, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToUint8(v)
+}
+
+// GetUint16Path 获取uint16类型的路径值
+func (e Extras) GetUint16Path(path string) (uint16, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToUint16(v)
+}
+
+// GetUint32Path 获取uint32类型的路径值
+func (e Extras) GetUint32Path(path string) (uint32, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToUint32(v)
+}
+
+// GetUint64Path 获取uint64类型的路径值
+func (e Extras) GetUint64Path(path string) (uint64, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToUint64(v)
+}
+
+// GetFloat32Path 获取float32类型的路径值
+func (e Extras) GetFloat32Path(path string) (float32, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return 0, false
+	}
+	return convertToFloat32(v)
 }
 
 // GetFloat64Path 获取float64类型的路径值
@@ -1141,6 +1222,27 @@ func (e Extras) GetBoolPath(path string) (bool, bool) {
 	}
 	b, ok := v.(bool)
 	return b, ok
+}
+
+// GetSlicePath 获取嵌套Slice类型的路径值
+func (e Extras) GetSlicePath(path string) ([]any, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return nil, false
+	}
+	slice, ok := v.([]any)
+	return slice, ok
+}
+
+// GetMapPath 获取嵌套Map类型的路径值
+func (e Extras) GetMapPath(path string) (map[string]any, bool) {
+	v, ok := e.GetPath(path)
+	if !ok {
+		return nil, false
+	}
+
+	m, ok := v.(map[string]any)
+	return m, ok
 }
 
 // GetExtrasPath 获取嵌套Extras类型的路径值
@@ -2479,7 +2581,7 @@ func convertToUint32(v any) (uint32, bool) {
 }
 
 //go:inline
-func convertToUint64Typed(v any) (uint64, bool) {
+func convertToUint64(v any) (uint64, bool) {
 	switch val := v.(type) {
 	case uint64:
 		return val, true
