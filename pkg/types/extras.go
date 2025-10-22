@@ -145,8 +145,6 @@ func (e Extras) SetOrDel(key string, value any) {
 }
 
 // SetMultiple 批量设置多个键值对
-//
-//go:inline
 func (e Extras) SetMultiple(pairs map[string]any) {
 	if len(pairs) == 0 {
 		return
@@ -159,8 +157,6 @@ func (e Extras) SetMultiple(pairs map[string]any) {
 }
 
 // SetFromStruct 从结构体设置值
-//
-//go:inline
 func (e Extras) SetFromStruct(s interface{}) error {
 	if s == nil {
 		return fmt.Errorf("cannot set from nil struct")
@@ -260,772 +256,9 @@ func (e Extras) Clear() {
 // ============================================================================
 
 // Get 获取指定键的值
-//
-//go:inline
 func (e Extras) Get(key string) (any, bool) {
 	value, exists := e[key]
 	return value, exists
-}
-
-// GetMultiple 批量获取多个键的值
-//
-//go:inline
-func (e Extras) GetMultiple(keys ...string) map[string]any {
-	if len(keys) == 0 {
-		return make(map[string]any)
-	}
-
-	// 精确容量预估
-	estimatedSize := len(keys)
-	if estimatedSize > len(e) {
-		estimatedSize = len(e)
-	}
-	result := make(map[string]any, estimatedSize)
-
-	for _, key := range keys {
-		if v, ok := e[key]; ok {
-			result[key] = v
-		}
-	}
-	return result
-}
-
-// GetString 获取字符串类型的值
-//
-//go:inline
-func (e Extras) GetString(key string) (string, bool) {
-	value, exists := e[key]
-	if !exists {
-		return "", false
-	}
-	str, ok := value.(string)
-	return str, ok
-}
-
-// GetStringOr 获取字符串值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetStringOr(key, defaultValue string) string {
-	if v, ok := e.GetString(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetStrings 批量获取字符串
-func (e Extras) GetStrings(keys ...string) map[string]string {
-	if len(keys) == 0 {
-		return make(map[string]string)
-	}
-
-	estimatedSize := len(keys)
-	if estimatedSize > len(e) {
-		estimatedSize = len(e)
-	}
-	result := make(map[string]string, estimatedSize)
-
-	for _, key := range keys {
-		if v, ok := e[key]; ok {
-			if str, ok := v.(string); ok {
-				result[key] = str
-			}
-		}
-	}
-	return result
-}
-
-// GetStringSlice 批量获取字符串切片
-func (e Extras) GetStringSlice(key string) ([]string, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []string:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []string{}, true
-		}
-		strs := make([]string, len(val))
-		for i := 0; i < len(val); i++ {
-			if str, ok := val[i].(string); ok {
-				strs[i] = str
-			} else {
-				return nil, false
-			}
-		}
-		return strs, true
-	}
-	return nil, false
-}
-
-// GetInt 获取Int值
-//
-//go:inline
-func (e Extras) GetInt(key string) (int, bool) {
-	value, exists := e[key]
-	if !exists {
-		return 0, false
-	}
-	return convertToInt(value)
-}
-
-// GetIntOr 获取Int值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetIntOr(key string, defaultValue int) int {
-	if v, ok := e.GetInt(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetIntSlice 获取int切片
-func (e Extras) GetIntSlice(key string) ([]int, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []int:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []int{}, true
-		}
-		// 精确预分配
-		ints := make([]int, len(val))
-		for i := 0; i < len(val); i++ {
-			if num, ok := convertToInt(val[i]); ok {
-				ints[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return ints, true
-	}
-	return nil, false
-}
-
-// GetInt8 获取int8
-func (e Extras) GetInt8(key string) (int8, bool) {
-	if v, ok := e[key]; ok {
-		return convertToInt8(v)
-	}
-	return 0, false
-}
-
-// GetInt8Or 获取int8，失败时返回默认值
-func (e Extras) GetInt8Or(key string, defaultValue int8) int8 {
-	if v, ok := e.GetInt8(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetInt8Slice 获取int8切片
-func (e Extras) GetInt8Slice(key string) ([]int8, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []int8:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []int8{}, true
-		}
-		nums := make([]int8, len(val))
-		for i, item := range val {
-			if num, ok := convertToInt8(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetInt16 获取int16
-func (e Extras) GetInt16(key string) (int16, bool) {
-	if v, ok := e[key]; ok {
-		return convertToInt16(v)
-	}
-	return 0, false
-}
-
-// GetInt16Or 获取int16，失败时返回默认值
-func (e Extras) GetInt16Or(key string, defaultValue int16) int16 {
-	if v, ok := e.GetInt16(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetInt16Slice 获取int16切片
-func (e Extras) GetInt16Slice(key string) ([]int16, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []int16:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []int16{}, true
-		}
-		nums := make([]int16, len(val))
-		for i, item := range val {
-			if num, ok := convertToInt16(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetInt32 获取int32
-func (e Extras) GetInt32(key string) (int32, bool) {
-	if v, ok := e[key]; ok {
-		return convertToInt32(v)
-	}
-	return 0, false
-}
-
-// GetInt32Or 获取int32，失败时返回默认值
-func (e Extras) GetInt32Or(key string, defaultValue int32) int32 {
-	if v, ok := e.GetInt32(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetInt32Slice 获取int32切片
-func (e Extras) GetInt32Slice(key string) ([]int32, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []int32:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []int32{}, true
-		}
-		nums := make([]int32, len(val))
-		for i, item := range val {
-			if num, ok := convertToInt32(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetInt64 获取Int64值
-//
-//go:inline
-func (e Extras) GetInt64(key string) (int64, bool) {
-	value, exists := e[key]
-	if !exists {
-		return 0, false
-	}
-	return convertToInt64(value)
-}
-
-// GetInt64Or 获取Int64值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetInt64Or(key string, defaultValue int64) int64 {
-	if v, ok := e.GetInt64(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetInt64Slice 获取int64切片
-func (e Extras) GetInt64Slice(key string) ([]int64, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []int64:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []int64{}, true
-		}
-		nums := make([]int64, len(val))
-		for i := 0; i < len(val); i++ {
-			if num, ok := convertToInt64(val[i]); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetUint 获取uint
-func (e Extras) GetUint(key string) (uint, bool) {
-	if v, ok := e[key]; ok {
-		return convertToUint(v)
-	}
-	return 0, false
-}
-
-// GetUintOr 获取uint，失败时返回默认值
-func (e Extras) GetUintOr(key string, defaultValue uint) uint {
-	if v, ok := e.GetUint(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetUintSlice 获取uint切片
-func (e Extras) GetUintSlice(key string) ([]uint, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []uint:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []uint{}, true
-		}
-		nums := make([]uint, len(val))
-		for i, item := range val {
-			if num, ok := convertToUint(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetUint8 获取uint8
-func (e Extras) GetUint8(key string) (uint8, bool) {
-	if v, ok := e[key]; ok {
-		return convertToUint8(v)
-	}
-	return 0, false
-}
-
-// GetUint8Or 获取uint8，失败时返回默认值
-func (e Extras) GetUint8Or(key string, defaultValue uint8) uint8 {
-	if v, ok := e.GetUint8(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetUint8Slice 获取uint8切片
-func (e Extras) GetUint8Slice(key string) ([]uint8, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []uint8:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []uint8{}, true
-		}
-		nums := make([]uint8, len(val))
-		for i, item := range val {
-			if num, ok := convertToUint8(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetUint16 获取uint16
-func (e Extras) GetUint16(key string) (uint16, bool) {
-	if v, ok := e[key]; ok {
-		return convertToUint16(v)
-	}
-	return 0, false
-}
-
-// GetUint16Or 获取uint16，失败时返回默认值
-func (e Extras) GetUint16Or(key string, defaultValue uint16) uint16 {
-	if v, ok := e.GetUint16(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetUint16Slice 获取uint16切片
-func (e Extras) GetUint16Slice(key string) ([]uint16, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []uint16:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []uint16{}, true
-		}
-		nums := make([]uint16, len(val))
-		for i, item := range val {
-			if num, ok := convertToUint16(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetUint32 获取uint32
-func (e Extras) GetUint32(key string) (uint32, bool) {
-	if v, ok := e[key]; ok {
-		return convertToUint32(v)
-	}
-	return 0, false
-}
-
-// GetUint32Or 获取uint32，失败时返回默认值
-func (e Extras) GetUint32Or(key string, defaultValue uint32) uint32 {
-	if v, ok := e.GetUint32(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetUint32Slice 获取uint32切片
-func (e Extras) GetUint32Slice(key string) ([]uint32, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []uint32:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []uint32{}, true
-		}
-		nums := make([]uint32, len(val))
-		for i, item := range val {
-			if num, ok := convertToUint32(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetUint64 获取uint64值
-//
-//go:inline
-func (e Extras) GetUint64(key string) (uint64, bool) {
-	if v, ok := e[key]; ok {
-		return convertToUint64(v)
-	}
-	return 0, false
-}
-
-// GetUint64Or 获取uint64值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetUint64Or(key string, defaultValue uint64) uint64 {
-	if v, ok := e.GetUint64(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetUint64Slice 获取uint64切片
-func (e Extras) GetUint64Slice(key string) ([]uint64, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []uint64:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []uint64{}, true
-		}
-		nums := make([]uint64, len(val))
-		for i, item := range val {
-			if num, ok := convertToUint64(item); ok {
-				nums[i] = num
-			} else {
-				return nil, false
-			}
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetFloat32 获取float32
-func (e Extras) GetFloat32(key string) (float32, bool) {
-	if v, ok := e[key]; ok {
-		return convertToFloat32(v)
-	}
-	return 0, false
-}
-
-// GetFloat32Or 获取float32，失败时返回默认值
-func (e Extras) GetFloat32Or(key string, defaultValue float32) float32 {
-	if v, ok := e.GetFloat32(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetFloat32Slice 获取float32切片
-func (e Extras) GetFloat32Slice(key string) ([]float32, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []float32:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []float32{}, true
-		}
-		nums := make([]float32, len(val))
-		for i, item := range val {
-			num, ok := convertToFloat32(item)
-			if !ok {
-				return nil, false
-			}
-			nums[i] = num
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetFloat64 获取float64值
-//
-//go:inline
-func (e Extras) GetFloat64(key string) (float64, bool) {
-	value, exists := e[key]
-	if !exists {
-		return 0, false
-	}
-	return convertToFloat64(value)
-}
-
-// GetFloat64Or 获取float64值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetFloat64Or(key string, defaultValue float64) float64 {
-	if v, ok := e.GetFloat64(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetFloat64Slice 获取float64切片
-func (e Extras) GetFloat64Slice(key string) ([]float64, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []float64:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []float64{}, true
-		}
-		nums := make([]float64, len(val))
-		for i := 0; i < len(val); i++ {
-			num, ok := convertToFloat64(val[i])
-			if !ok {
-				return nil, false
-			}
-			nums[i] = num
-		}
-		return nums, true
-	}
-	return nil, false
-}
-
-// GetBool 获取bool值
-//
-//go:inline
-func (e Extras) GetBool(key string) (bool, bool) {
-	value, exists := e[key]
-	if !exists {
-		return false, false
-	}
-	b, ok := value.(bool)
-	return b, ok
-}
-
-// GetBoolOr 获取bool值，失败时返回默认值
-//
-//go:inline
-func (e Extras) GetBoolOr(key string, defaultValue bool) bool {
-	if v, ok := e.GetBool(key); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetBoolSlice 获取bool切片
-func (e Extras) GetBoolSlice(key string) ([]bool, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []bool:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []bool{}, true
-		}
-		bools := make([]bool, len(val))
-		for i, item := range val {
-			if b, ok := item.(bool); ok {
-				bools[i] = b
-			} else {
-				return nil, false
-			}
-		}
-		return bools, true
-	}
-	return nil, false
-}
-
-// GetSlice 获取切片
-func (e Extras) GetSlice(key string) ([]any, bool) {
-	value, exists := e[key]
-	if !exists {
-		return nil, false
-	}
-	slice, ok := value.([]any)
-	return slice, ok
-}
-
-// GetMap 获取Map
-//
-//go:inline
-func (e Extras) GetMap(key string) (map[string]any, bool) {
-	value, exists := e[key]
-	if !exists {
-		return nil, false
-	}
-	m, ok := value.(map[string]any)
-	return m, ok
-}
-
-// GetExtras 获取Extras
-//
-//go:inline
-func (e Extras) GetExtras(key string) (Extras, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case Extras:
-			return val, true
-		case map[string]any:
-			return Extras(val), true
-		}
-	}
-	return nil, false
-}
-
-// GetExtrasSlice 获取extras切片
-func (e Extras) GetExtrasSlice(key string) ([]Extras, bool) {
-	v, ok := e[key]
-	if !ok {
-		return nil, false
-	}
-
-	switch val := v.(type) {
-	case []Extras:
-		return val, true
-	case []any:
-		if len(val) == 0 {
-			return []Extras{}, true
-		}
-		// 精确预分配
-		extras := make([]Extras, len(val))
-		for i, item := range val {
-			switch mapVal := item.(type) {
-			case Extras:
-				extras[i] = mapVal
-			case map[string]any:
-				extras[i] = Extras(mapVal)
-			default:
-				return nil, false
-			}
-		}
-		return extras, true
-	}
-	return nil, false
-}
-
-// GetBytes 获取字节
-func (e Extras) GetBytes(key string) ([]byte, bool) {
-	if v, ok := e[key]; ok {
-		switch val := v.(type) {
-		case []byte:
-			return val, true
-		case string:
-			// 使用unsafe零拷贝转换（只读场景）
-			return stringToBytes(val), true
-		}
-	}
-	return nil, false
 }
 
 // GetPath 支持点分隔路径查询，用于获取嵌套结构中的值
@@ -1096,6 +329,51 @@ func (e Extras) GetPath(path string) (any, bool) {
 	return nil, false
 }
 
+// GetMultiple 批量获取多个键的值
+//
+//go:inline
+func (e Extras) GetMultiple(keys ...string) map[string]any {
+	if len(keys) == 0 {
+		return make(map[string]any)
+	}
+
+	// 精确容量预估
+	estimatedSize := len(keys)
+	if estimatedSize > len(e) {
+		estimatedSize = len(e)
+	}
+	result := make(map[string]any, estimatedSize)
+
+	for _, key := range keys {
+		if v, ok := e[key]; ok {
+			result[key] = v
+		}
+	}
+	return result
+}
+
+// GetString 获取字符串类型的值
+//
+//go:inline
+func (e Extras) GetString(key string) (string, bool) {
+	value, exists := e[key]
+	if !exists {
+		return "", false
+	}
+	str, ok := value.(string)
+	return str, ok
+}
+
+// GetStringOr 获取字符串值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetStringOr(key, defaultValue string) string {
+	if v, ok := e.GetString(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetStringPath 获取字符串类型的路径值
 func (e Extras) GetStringPath(path string) (string, bool) {
 	v, ok := e.GetPath(path)
@@ -1104,6 +382,76 @@ func (e Extras) GetStringPath(path string) (string, bool) {
 	}
 	str, ok := v.(string)
 	return str, ok
+}
+
+// GetStringSlice 批量获取字符串切片
+func (e Extras) GetStringSlice(key string) ([]string, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []string:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []string{}, true
+		}
+		strs := make([]string, len(val))
+		for i := 0; i < len(val); i++ {
+			if str, ok := val[i].(string); ok {
+				strs[i] = str
+			} else {
+				return nil, false
+			}
+		}
+		return strs, true
+	}
+	return nil, false
+}
+
+// GetStrings 批量获取字符串
+func (e Extras) GetStrings(keys ...string) map[string]string {
+	if len(keys) == 0 {
+		return make(map[string]string)
+	}
+
+	estimatedSize := len(keys)
+	if estimatedSize > len(e) {
+		estimatedSize = len(e)
+	}
+	result := make(map[string]string, estimatedSize)
+
+	for _, key := range keys {
+		if v, ok := e[key]; ok {
+			if str, ok := v.(string); ok {
+				result[key] = str
+			}
+		}
+	}
+	return result
+}
+
+// GetInt 获取Int值
+//
+//go:inline
+func (e Extras) GetInt(key string) (int, bool) {
+	value, exists := e[key]
+	if !exists {
+		return 0, false
+	}
+	return convertToInt(value)
+}
+
+// GetIntOr 获取Int值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetIntOr(key string, defaultValue int) int {
+	if v, ok := e.GetInt(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetIntPath 获取整数类型的路径值
@@ -1115,6 +463,50 @@ func (e Extras) GetIntPath(path string) (int, bool) {
 	return convertToInt(v)
 }
 
+// GetIntSlice 获取int切片
+func (e Extras) GetIntSlice(key string) ([]int, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int{}, true
+		}
+		// 精确预分配
+		ints := make([]int, len(val))
+		for i := 0; i < len(val); i++ {
+			if num, ok := convertToInt(val[i]); ok {
+				ints[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return ints, true
+	}
+	return nil, false
+}
+
+// GetInt8 获取int8
+func (e Extras) GetInt8(key string) (int8, bool) {
+	if v, ok := e[key]; ok {
+		return convertToInt8(v)
+	}
+	return 0, false
+}
+
+// GetInt8Or 获取int8，失败时返回默认值
+func (e Extras) GetInt8Or(key string, defaultValue int8) int8 {
+	if v, ok := e.GetInt8(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetInt8Path 获取int8类型的路径值
 func (e Extras) GetInt8Path(path string) (int8, bool) {
 	v, ok := e.GetPath(path)
@@ -1122,6 +514,49 @@ func (e Extras) GetInt8Path(path string) (int8, bool) {
 		return 0, false
 	}
 	return convertToInt8(v)
+}
+
+// GetInt8Slice 获取int8切片
+func (e Extras) GetInt8Slice(key string) ([]int8, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int8:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int8{}, true
+		}
+		nums := make([]int8, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt8(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetInt16 获取int16
+func (e Extras) GetInt16(key string) (int16, bool) {
+	if v, ok := e[key]; ok {
+		return convertToInt16(v)
+	}
+	return 0, false
+}
+
+// GetInt16Or 获取int16，失败时返回默认值
+func (e Extras) GetInt16Or(key string, defaultValue int16) int16 {
+	if v, ok := e.GetInt16(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetInt16Path 获取int16类型的路径值
@@ -1133,6 +568,49 @@ func (e Extras) GetInt16Path(path string) (int16, bool) {
 	return convertToInt16(v)
 }
 
+// GetInt16Slice 获取int16切片
+func (e Extras) GetInt16Slice(key string) ([]int16, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int16:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int16{}, true
+		}
+		nums := make([]int16, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt16(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetInt32 获取int32
+func (e Extras) GetInt32(key string) (int32, bool) {
+	if v, ok := e[key]; ok {
+		return convertToInt32(v)
+	}
+	return 0, false
+}
+
+// GetInt32Or 获取int32，失败时返回默认值
+func (e Extras) GetInt32Or(key string, defaultValue int32) int32 {
+	if v, ok := e.GetInt32(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetInt32Path 获取int32类型的路径值
 func (e Extras) GetInt32Path(path string) (int32, bool) {
 	v, ok := e.GetPath(path)
@@ -1140,6 +618,54 @@ func (e Extras) GetInt32Path(path string) (int32, bool) {
 		return 0, false
 	}
 	return convertToInt32(v)
+}
+
+// GetInt32Slice 获取int32切片
+func (e Extras) GetInt32Slice(key string) ([]int32, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int32{}, true
+		}
+		nums := make([]int32, len(val))
+		for i, item := range val {
+			if num, ok := convertToInt32(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetInt64 获取Int64值
+//
+//go:inline
+func (e Extras) GetInt64(key string) (int64, bool) {
+	value, exists := e[key]
+	if !exists {
+		return 0, false
+	}
+	return convertToInt64(value)
+}
+
+// GetInt64Or 获取Int64值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetInt64Or(key string, defaultValue int64) int64 {
+	if v, ok := e.GetInt64(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetInt64Path 获取int64类型的路径值
@@ -1151,6 +677,49 @@ func (e Extras) GetInt64Path(path string) (int64, bool) {
 	return convertToInt64(v)
 }
 
+// GetInt64Slice 获取int64切片
+func (e Extras) GetInt64Slice(key string) ([]int64, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []int64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []int64{}, true
+		}
+		nums := make([]int64, len(val))
+		for i := 0; i < len(val); i++ {
+			if num, ok := convertToInt64(val[i]); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetUint 获取uint
+func (e Extras) GetUint(key string) (uint, bool) {
+	if v, ok := e[key]; ok {
+		return convertToUint(v)
+	}
+	return 0, false
+}
+
+// GetUintOr 获取uint，失败时返回默认值
+func (e Extras) GetUintOr(key string, defaultValue uint) uint {
+	if v, ok := e.GetUint(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetUintPath 获取uint类型的路径值
 func (e Extras) GetUintPath(path string) (uint, bool) {
 	v, ok := e.GetPath(path)
@@ -1158,6 +727,49 @@ func (e Extras) GetUintPath(path string) (uint, bool) {
 		return 0, false
 	}
 	return convertToUint(v)
+}
+
+// GetUintSlice 获取uint切片
+func (e Extras) GetUintSlice(key string) ([]uint, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint{}, true
+		}
+		nums := make([]uint, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetUint8 获取uint8
+func (e Extras) GetUint8(key string) (uint8, bool) {
+	if v, ok := e[key]; ok {
+		return convertToUint8(v)
+	}
+	return 0, false
+}
+
+// GetUint8Or 获取uint8，失败时返回默认值
+func (e Extras) GetUint8Or(key string, defaultValue uint8) uint8 {
+	if v, ok := e.GetUint8(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetUint8Path 获取uint8类型的路径值
@@ -1169,6 +781,49 @@ func (e Extras) GetUint8Path(path string) (uint8, bool) {
 	return convertToUint8(v)
 }
 
+// GetUint8Slice 获取uint8切片
+func (e Extras) GetUint8Slice(key string) ([]uint8, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint8:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint8{}, true
+		}
+		nums := make([]uint8, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint8(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetUint16 获取uint16
+func (e Extras) GetUint16(key string) (uint16, bool) {
+	if v, ok := e[key]; ok {
+		return convertToUint16(v)
+	}
+	return 0, false
+}
+
+// GetUint16Or 获取uint16，失败时返回默认值
+func (e Extras) GetUint16Or(key string, defaultValue uint16) uint16 {
+	if v, ok := e.GetUint16(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetUint16Path 获取uint16类型的路径值
 func (e Extras) GetUint16Path(path string) (uint16, bool) {
 	v, ok := e.GetPath(path)
@@ -1176,6 +831,49 @@ func (e Extras) GetUint16Path(path string) (uint16, bool) {
 		return 0, false
 	}
 	return convertToUint16(v)
+}
+
+// GetUint16Slice 获取uint16切片
+func (e Extras) GetUint16Slice(key string) ([]uint16, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint16:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint16{}, true
+		}
+		nums := make([]uint16, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint16(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetUint32 获取uint32
+func (e Extras) GetUint32(key string) (uint32, bool) {
+	if v, ok := e[key]; ok {
+		return convertToUint32(v)
+	}
+	return 0, false
+}
+
+// GetUint32Or 获取uint32，失败时返回默认值
+func (e Extras) GetUint32Or(key string, defaultValue uint32) uint32 {
+	if v, ok := e.GetUint32(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetUint32Path 获取uint32类型的路径值
@@ -1187,6 +885,53 @@ func (e Extras) GetUint32Path(path string) (uint32, bool) {
 	return convertToUint32(v)
 }
 
+// GetUint32Slice 获取uint32切片
+func (e Extras) GetUint32Slice(key string) ([]uint32, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint32{}, true
+		}
+		nums := make([]uint32, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint32(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetUint64 获取uint64值
+//
+//go:inline
+func (e Extras) GetUint64(key string) (uint64, bool) {
+	if v, ok := e[key]; ok {
+		return convertToUint64(v)
+	}
+	return 0, false
+}
+
+// GetUint64Or 获取uint64值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetUint64Or(key string, defaultValue uint64) uint64 {
+	if v, ok := e.GetUint64(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetUint64Path 获取uint64类型的路径值
 func (e Extras) GetUint64Path(path string) (uint64, bool) {
 	v, ok := e.GetPath(path)
@@ -1194,6 +939,49 @@ func (e Extras) GetUint64Path(path string) (uint64, bool) {
 		return 0, false
 	}
 	return convertToUint64(v)
+}
+
+// GetUint64Slice 获取uint64切片
+func (e Extras) GetUint64Slice(key string) ([]uint64, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []uint64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []uint64{}, true
+		}
+		nums := make([]uint64, len(val))
+		for i, item := range val {
+			if num, ok := convertToUint64(item); ok {
+				nums[i] = num
+			} else {
+				return nil, false
+			}
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetFloat32 获取float32
+func (e Extras) GetFloat32(key string) (float32, bool) {
+	if v, ok := e[key]; ok {
+		return convertToFloat32(v)
+	}
+	return 0, false
+}
+
+// GetFloat32Or 获取float32，失败时返回默认值
+func (e Extras) GetFloat32Or(key string, defaultValue float32) float32 {
+	if v, ok := e.GetFloat32(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetFloat32Path 获取float32类型的路径值
@@ -1205,6 +993,54 @@ func (e Extras) GetFloat32Path(path string) (float32, bool) {
 	return convertToFloat32(v)
 }
 
+// GetFloat32Slice 获取float32切片
+func (e Extras) GetFloat32Slice(key string) ([]float32, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []float32:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []float32{}, true
+		}
+		nums := make([]float32, len(val))
+		for i, item := range val {
+			num, ok := convertToFloat32(item)
+			if !ok {
+				return nil, false
+			}
+			nums[i] = num
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetFloat64 获取float64值
+//
+//go:inline
+func (e Extras) GetFloat64(key string) (float64, bool) {
+	value, exists := e[key]
+	if !exists {
+		return 0, false
+	}
+	return convertToFloat64(value)
+}
+
+// GetFloat64Or 获取float64值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetFloat64Or(key string, defaultValue float64) float64 {
+	if v, ok := e.GetFloat64(key); ok {
+		return v
+	}
+	return defaultValue
+}
+
 // GetFloat64Path 获取float64类型的路径值
 func (e Extras) GetFloat64Path(path string) (float64, bool) {
 	v, ok := e.GetPath(path)
@@ -1212,6 +1048,55 @@ func (e Extras) GetFloat64Path(path string) (float64, bool) {
 		return 0, false
 	}
 	return convertToFloat64(v)
+}
+
+// GetFloat64Slice 获取float64切片
+func (e Extras) GetFloat64Slice(key string) ([]float64, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []float64:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []float64{}, true
+		}
+		nums := make([]float64, len(val))
+		for i := 0; i < len(val); i++ {
+			num, ok := convertToFloat64(val[i])
+			if !ok {
+				return nil, false
+			}
+			nums[i] = num
+		}
+		return nums, true
+	}
+	return nil, false
+}
+
+// GetBool 获取bool值
+//
+//go:inline
+func (e Extras) GetBool(key string) (bool, bool) {
+	value, exists := e[key]
+	if !exists {
+		return false, false
+	}
+	b, ok := value.(bool)
+	return b, ok
+}
+
+// GetBoolOr 获取bool值，失败时返回默认值
+//
+//go:inline
+func (e Extras) GetBoolOr(key string, defaultValue bool) bool {
+	if v, ok := e.GetBool(key); ok {
+		return v
+	}
+	return defaultValue
 }
 
 // GetBoolPath 获取布尔类型的路径值
@@ -1224,6 +1109,43 @@ func (e Extras) GetBoolPath(path string) (bool, bool) {
 	return b, ok
 }
 
+// GetBoolSlice 获取bool切片
+func (e Extras) GetBoolSlice(key string) ([]bool, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []bool:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []bool{}, true
+		}
+		bools := make([]bool, len(val))
+		for i, item := range val {
+			if b, ok := item.(bool); ok {
+				bools[i] = b
+			} else {
+				return nil, false
+			}
+		}
+		return bools, true
+	}
+	return nil, false
+}
+
+// GetSlice 获取切片
+func (e Extras) GetSlice(key string) ([]any, bool) {
+	value, exists := e[key]
+	if !exists {
+		return nil, false
+	}
+	slice, ok := value.([]any)
+	return slice, ok
+}
+
 // GetSlicePath 获取嵌套Slice类型的路径值
 func (e Extras) GetSlicePath(path string) ([]any, bool) {
 	v, ok := e.GetPath(path)
@@ -1232,6 +1154,18 @@ func (e Extras) GetSlicePath(path string) ([]any, bool) {
 	}
 	slice, ok := v.([]any)
 	return slice, ok
+}
+
+// GetMap 获取Map
+//
+//go:inline
+func (e Extras) GetMap(key string) (map[string]any, bool) {
+	value, exists := e[key]
+	if !exists {
+		return nil, false
+	}
+	m, ok := value.(map[string]any)
+	return m, ok
 }
 
 // GetMapPath 获取嵌套Map类型的路径值
@@ -1243,6 +1177,21 @@ func (e Extras) GetMapPath(path string) (map[string]any, bool) {
 
 	m, ok := v.(map[string]any)
 	return m, ok
+}
+
+// GetExtras 获取Extras
+//
+//go:inline
+func (e Extras) GetExtras(key string) (Extras, bool) {
+	if v, ok := e[key]; ok {
+		switch val := v.(type) {
+		case Extras:
+			return val, true
+		case map[string]any:
+			return Extras(val), true
+		}
+	}
+	return nil, false
 }
 
 // GetExtrasPath 获取嵌套Extras类型的路径值
@@ -1257,6 +1206,51 @@ func (e Extras) GetExtrasPath(path string) (Extras, bool) {
 		return val, true
 	case map[string]any:
 		return Extras(val), true
+	}
+	return nil, false
+}
+
+// GetExtrasSlice 获取extras切片
+func (e Extras) GetExtrasSlice(key string) ([]Extras, bool) {
+	v, ok := e[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch val := v.(type) {
+	case []Extras:
+		return val, true
+	case []any:
+		if len(val) == 0 {
+			return []Extras{}, true
+		}
+		// 精确预分配
+		extras := make([]Extras, len(val))
+		for i, item := range val {
+			switch mapVal := item.(type) {
+			case Extras:
+				extras[i] = mapVal
+			case map[string]any:
+				extras[i] = Extras(mapVal)
+			default:
+				return nil, false
+			}
+		}
+		return extras, true
+	}
+	return nil, false
+}
+
+// GetBytes 获取字节
+func (e Extras) GetBytes(key string) ([]byte, bool) {
+	if v, ok := e[key]; ok {
+		switch val := v.(type) {
+		case []byte:
+			return val, true
+		case string:
+			// 使用unsafe零拷贝转换（只读场景）
+			return stringToBytes(val), true
+		}
 	}
 	return nil, false
 }
