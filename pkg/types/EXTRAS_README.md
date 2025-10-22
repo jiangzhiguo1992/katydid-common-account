@@ -96,12 +96,6 @@ class Extras {
   + GetMultiple(keys ...string): map[string]any
   + DeleteMultiple(keys ...string)
   
-  ' 路径操作
-  + SetPath(path string, value any): error
-  + GetPath(path string): (any, bool)
-  + GetStringPath(path string): (string, bool)
-  + GetIntPath(path string): (int, bool)
-  
   ' 类型转换
   + GetString(key string): (string, bool)
   + GetInt(key string): (int, bool)
@@ -114,15 +108,69 @@ class Extras {
   + GetExtras(key string): (Extras, bool)
   + GetBytes(key string): ([]byte, bool)
   
+  ' 路径操作
+  + SetPath(path string, value any): error
+  + GetPath(path string): (any, bool)
+  + GetStringPath(path string): (string, bool)
+  + GetIntPath(path string): (int, bool)
+  + GetInt8Path(path string): (int8, bool)
+  + GetInt16Path(path string): (int16, bool)
+  + GetInt32Path(path string): (int32, bool)
+  + GetInt64Path(path string): (int64, bool)
+  + GetUintPath(path string): (uint, bool)
+  + GetUint8Path(path string): (uint8, bool)
+  + GetUint16Path(path string): (uint16, bool)
+  + GetUint32Path(path string): (uint32, bool)
+  + GetUint64Path(path string): (uint64, bool)
+  + GetFloat32Path(path string): (float32, bool)
+  + GetFloat64Path(path string): (float64, bool)
+  + GetBoolPath(path string): (bool, bool)
+  + GetSlicePath(path string): ([]any], bool)
+  + GetMapPath(path string): (map[string]any], bool)
+  + GetExtrasPath(path string): (Extras, bool)
+  
   ' 默认值方法
   + GetStringOr(key, default string): string
   + GetIntOr(key string, default int): int
+  + GetInt8Or(key string, default int8): int8
+  + GetInt16Or(key string, default int16): int16
+  + GetInt32Or(key string, default int32): int32
+  + GetInt64Or(key string, default int64): int64
+  + GetUintOr(key string, default uint): uint
+  + GetUint8Or(key string, default uint8): uint8
+  + GetUint16Or(key string, default uint16): uint16
+  + GetUint32Or(key string, default uint32): uint32
+  + GetUint64Or(key string, default uint64): uint64
+  + GetFloat32Or(key string, default float32): float32
   + GetFloat64Or(key string, default float64): float64
   + GetBoolOr(key string, default bool): bool
+  + GetStringPathOr(path, default string): string
+  + GetIntPathOr(path string, default int): int
+  + GetInt8PathOr(path string, default int8): int8
+  + GetInt16PathOr(path string, default int16): int16
+  + GetInt32PathOr(path string, default int32): int32
+  + GetInt64PathOr(path string, default int64): int64
+  + GetUintPathOr(path string, default uint): uint
+  + GetUint8PathOr(path string, default uint8): uint8
+  + GetUint16PathOr(path string, default uint16): uint16
+  + GetUint32PathOr(path string, default uint32): uint32
+  + GetUint64PathOr(path string, default uint64): uint64
+  + GetFloat32PathOr(path string, default float32): float32
+  + GetFloat64PathOr(path string, default float64): float64
+  + GetBoolPathOr(path string, default bool): bool
   
   ' 切片类型
   + GetStringSlice(key string): ([]string, bool)
   + GetIntSlice(key string): ([]int, bool)
+  + GetInt8Slice(key string): ([]int8, bool)
+  + GetInt16Slice(key string): ([]int16, bool)
+  + GetInt32Slice(key string): ([]int32, bool)
+  + GetInt64Slice(key string): ([]int64, bool)
+  + GetUintSlice(key string): ([]uint, bool)
+  + GetUint8Slice(key string): ([]uint8, bool)
+  + GetUint16Slice(key string): ([]uint16, bool)
+  + GetUint32Slice(key string): ([]uint32, bool)
+  + GetUint64Slice(key string): ([]uint64, bool)
   + GetFloat32Slice(key string): ([]float32, bool)
   + GetFloat64Slice(key string): ([]float64, bool)
   + GetBoolSlice(key string): ([]bool, bool)

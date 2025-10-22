@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1473,4 +1474,726 @@ func TestExtrasStressTest(t *testing.T) {
 		t.Logf("混合操作 %d 次耗时: %v (%.0f ops/s)",
 			operations, duration, float64(operations)/duration.Seconds())
 	})
+}
+
+// ============================================================================
+// 高级功能测试
+// ============================================================================
+
+// TestExtrasSetFromStruct 测试从结构体设置值
+func TestExtrasSetFromStruct(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+		City string `json:"city"`
+	}
+
+	user := &User{Name: "Alice", Age: 30, City: "Beijing"}
+	extras := NewExtras(0)
+
+	err := extras.SetFromStruct(user)
+	if err != nil {
+		t.Fatalf("SetFromStruct 失败: %v", err)
+	}
+
+	if name, _ := extras.GetString("name"); name != "Alice" {
+		t.Errorf("SetFromStruct 后 name 值错误: %s", name)
+	}
+	if age, _ := extras.GetInt("age"); age != 30 {
+		t.Errorf("SetFromStruct 后 age 值错误: %d", age)
+	}
+	if city, _ := extras.GetString("city"); city != "Beijing" {
+		t.Errorf("SetFromStruct 后 city 值错误: %s", city)
+	}
+
+	// 测试 nil 指针
+	err = extras.SetFromStruct(nil)
+	if err == nil {
+		t.Error("SetFromStruct(nil) 应该返回错误")
+	}
+
+	// 测试非结构体类型
+	var m map[string]string
+	err = extras.SetFromStruct(m)
+	if err != nil {
+		t.Errorf("SetFromStruct 应该支持 map 类型: %v", err)
+	}
+}
+
+// TestExtrasContains 测试包含关系检查
+func TestExtrasContains(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("name", "Alice")
+	extras.Set("age", 30)
+	extras.Set("tags", []string{"a", "b"})
+
+	tests := []struct {
+		name   string
+		key    string
+		target any
+		want   bool
+	}{
+		{"字符串匹配", "name", "Alice", true},
+		{"字符串不匹配", "name", "Bob", false},
+		{"整数匹配", "age", 30, true},
+		{"整数不匹配", "age", 25, false},
+		{"不存在的键", "notexist", "Alice", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extras.Contains(tt.key, tt.target); got != tt.want {
+				t.Errorf("Contains() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtrasDiff 测试差异计算
+func TestExtrasDiff(t *testing.T) {
+	extras1 := NewExtras(0)
+	extras1.Set("key1", "value1")
+	extras1.Set("common", "original")
+	extras1.Set("remove_me", "will_remove")
+
+	extras2 := NewExtras(0)
+	extras2.Set("key2", "value2")
+	extras2.Set("common", "modified")
+
+	added, changed, removed := extras1.Diff(extras2)
+
+	if !added.Has("key2") {
+		t.Error("Diff 应识别新增的键")
+	}
+	if !changed.Has("common") {
+		t.Error("Diff 应识别修改的键")
+	}
+	if !removed.Has("remove_me") {
+		t.Error("Diff 应识别删除的键")
+	}
+}
+
+// TestExtrasFilter 测试过滤
+func TestExtrasFilter(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", 10)
+	extras.Set("key2", 20)
+	extras.Set("key3", 30)
+	extras.Set("str", "hello")
+
+	// 过滤整数值
+	filtered := extras.Filter(func(key string, value any) bool {
+		_, ok := value.(int)
+		return ok
+	})
+
+	if filtered.Len() != 3 {
+		t.Errorf("Filter 后长度应为 3，实际为 %d", filtered.Len())
+	}
+	if filtered.Has("str") {
+		t.Error("Filter 不应包含字符串值")
+	}
+}
+
+// TestExtrasCompact 测试紧凑化
+func TestExtrasCompact(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", nil)
+	extras.Set("key3", "value3")
+
+	extras.Compact()
+
+	if extras.Len() != 2 {
+		t.Errorf("Compact 后长度应为 2，实际为 %d", extras.Len())
+	}
+	if extras.Has("key2") {
+		t.Error("Compact 应删除 nil 值")
+	}
+}
+
+// TestExtrasCompactCopy 测试紧凑化副本
+func TestExtrasCompactCopy(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", nil)
+	extras.Set("key3", "value3")
+
+	compacted := extras.CompactCopy()
+
+	// 原始对象不变
+	if extras.Len() != 3 {
+		t.Error("CompactCopy 不应修改原始对象")
+	}
+	// 副本应删除 nil 值
+	if compacted.Len() != 2 {
+		t.Errorf("CompactCopy 后长度应为 2，实际为 %d", compacted.Len())
+	}
+}
+
+// TestExtrasSetIfAbsent 测试条件设置
+func TestExtrasSetIfAbsent(t *testing.T) {
+	extras := NewExtras(0)
+
+	// 键不存在时设置
+	ok := extras.SetIfAbsent("key", "value")
+	if !ok {
+		t.Error("SetIfAbsent 应返回 true（键不存在）")
+	}
+	if val, _ := extras.GetString("key"); val != "value" {
+		t.Error("SetIfAbsent 设置失败")
+	}
+
+	// 键已存在时不覆盖
+	ok = extras.SetIfAbsent("key", "new_value")
+	if ok {
+		t.Error("SetIfAbsent 应返回 false（键已存在）")
+	}
+	if val, _ := extras.GetString("key"); val != "value" {
+		t.Error("SetIfAbsent 不应覆盖已有值")
+	}
+}
+
+// TestExtrasUpdate 测试更新
+func TestExtrasUpdate(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key", "original")
+
+	// 键存在时更新
+	ok := extras.Update("key", "updated")
+	if !ok {
+		t.Error("Update 应返回 true（键存在）")
+	}
+	if val, _ := extras.GetString("key"); val != "updated" {
+		t.Error("Update 更新失败")
+	}
+
+	// 键不存在时不操作
+	ok = extras.Update("nonexist", "value")
+	if ok {
+		t.Error("Update 应返回 false（键不存在）")
+	}
+}
+
+// TestExtrasGetOrSet 测试获取或设置
+func TestExtrasGetOrSet(t *testing.T) {
+	extras := NewExtras(0)
+
+	// 键不存在时设置并返回
+	val := extras.GetOrSet("key", "default")
+	if val != "default" {
+		t.Errorf("GetOrSet 应返回 default，实际为 %v", val)
+	}
+
+	// 键存在时返回已有值
+	val = extras.GetOrSet("key", "new_value")
+	if val != "default" {
+		t.Errorf("GetOrSet 应返回已有值 default，实际为 %v", val)
+	}
+}
+
+// TestExtrasGetOrSetFunc 测试函数式获取或设置
+func TestExtrasGetOrSetFunc(t *testing.T) {
+	extras := NewExtras(0)
+
+	callCount := 0
+	factory := func() any {
+		callCount++
+		return "generated"
+	}
+
+	// 键不存在时调用工厂函数
+	val := extras.GetOrSetFunc("key", factory)
+	if val != "generated" {
+		t.Errorf("GetOrSetFunc 应返回 'generated'，实际为 %v", val)
+	}
+	if callCount != 1 {
+		t.Error("工厂函数应被调用一次")
+	}
+
+	// 键存在时不调用工厂函数
+	val = extras.GetOrSetFunc("key", factory)
+	if val != "generated" {
+		t.Errorf("GetOrSetFunc 应返回已有值，实际为 %v", val)
+	}
+	if callCount != 1 {
+		t.Error("工厂函数不应被再次调用")
+	}
+}
+
+// TestExtrasSwap 测试交换
+func TestExtrasSwap(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	ok := extras.Swap("key1", "key2")
+	if !ok {
+		t.Error("Swap 应返回 true")
+	}
+
+	if val, _ := extras.GetString("key1"); val != "value2" {
+		t.Error("Swap 后 key1 值不正确")
+	}
+	if val, _ := extras.GetString("key2"); val != "value1" {
+		t.Error("Swap 后 key2 值不正确")
+	}
+
+	// 交换不存在的键
+	ok = extras.Swap("key1", "nonexist")
+	if ok {
+		t.Error("Swap 不存在的键应返回 false")
+	}
+}
+
+// TestExtrasIncrement 测试递增
+func TestExtrasIncrement(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("counter", 10)
+
+	val, ok := extras.Increment("counter", 5)
+	if !ok {
+		t.Error("Increment 应返回 true")
+	}
+	if val != 15 {
+		t.Errorf("Increment 后值应为 15，实际为 %d", val)
+	}
+
+	// 递增不存在的键（应创建并设为 0，然后递增）
+	val, ok = extras.Increment("new_counter", 3)
+	if !ok {
+		t.Error("Increment 新键应返回 true")
+	}
+	if val != 3 {
+		t.Errorf("Increment 新键后值应为 3，实际为 %d", val)
+	}
+}
+
+// TestExtrasDecrement 测试递减
+func TestExtrasDecrement(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("counter", 10)
+
+	val, ok := extras.Decrement("counter", 3)
+	if !ok {
+		t.Error("Decrement 应返回 true")
+	}
+	if val != 7 {
+		t.Errorf("Decrement 后值应为 7，实际为 %d", val)
+	}
+}
+
+// TestExtrasAppend 测试追加
+func TestExtrasAppend(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("tags", []string{"a", "b"})
+
+	err := extras.Append("tags", "c", "d")
+	if err != nil {
+		t.Fatalf("Append 失败: %v", err)
+	}
+
+	tags, _ := extras.GetStringSlice("tags")
+	if len(tags) != 4 {
+		t.Errorf("Append 后长度应为 4，实际为 %d", len(tags))
+	}
+
+	// 追加到不存在的键
+	err = extras.Append("new_tags", "x", "y")
+	if err != nil {
+		t.Errorf("追加到新键应成功: %v", err)
+	}
+}
+
+// TestExtrasRange 测试范围遍历
+func TestExtrasRange(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	count := 0
+	extras.Range(func(key string, value any) bool {
+		count++
+		return true // 继续遍历
+	})
+
+	if count != 3 {
+		t.Errorf("Range 遍历次数应为 3，实际为 %d", count)
+	}
+
+	// 测试中途停止
+	count = 0
+	extras.Range(func(key string, value any) bool {
+		count++
+		return count < 2 // 只遍历一次后停止
+	})
+
+	if count != 1 {
+		t.Errorf("Range 应在返回 false 时停止，实际遍历 %d 次", count)
+	}
+}
+
+// TestExtrasRangeKeys 测试键范围遍历
+func TestExtrasRangeKeys(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	count := 0
+	extras.RangeKeys(func(key string) bool {
+		count++
+		return true
+	})
+
+	if count != 3 {
+		t.Errorf("RangeKeys 遍历次数应为 3，实际为 %d", count)
+	}
+}
+
+// TestExtrasMap 测试映射转换
+func TestExtrasMap(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", 1)
+	extras.Set("key2", 2)
+	extras.Set("key3", 3)
+
+	mapped := extras.Map(func(key string, value any) any {
+		// 将所有值乘以 10
+		if v, ok := value.(int); ok {
+			return v * 10
+		}
+		return value
+	})
+
+	if val, _ := mapped.GetInt("key1"); val != 10 {
+		t.Error("Map 转换失败")
+	}
+	if val, _ := mapped.GetInt("key2"); val != 20 {
+		t.Error("Map 转换失败")
+	}
+	if val, _ := mapped.GetInt("key3"); val != 30 {
+		t.Error("Map 转换失败")
+	}
+}
+
+// TestExtrasForEach 测试遍历
+func TestExtrasForEach(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	count := 0
+	extras.ForEach(func(key string, value any) {
+		count++
+	})
+
+	if count != 3 {
+		t.Errorf("ForEach 遍历次数应为 3，实际为 %d", count)
+	}
+}
+
+// TestExtrasExtract 测试提取
+func TestExtrasExtract(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	extracted := extras.Extract("key1", "key3")
+
+	if extracted.Len() != 2 {
+		t.Errorf("Extract 后长度应为 2，实际为 %d", extracted.Len())
+	}
+	if !extracted.Has("key1") || !extracted.Has("key3") {
+		t.Error("Extract 没有提取指定的键")
+	}
+	if extracted.Has("key2") {
+		t.Error("Extract 不应包含未指定的键")
+	}
+}
+
+// TestExtrasOmit 测试排除
+func TestExtrasOmit(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", "value3")
+
+	omitted := extras.Omit("key2")
+
+	if omitted.Len() != 2 {
+		t.Errorf("Omit 后长度应为 2，实际为 %d", omitted.Len())
+	}
+	if !omitted.Has("key1") || !omitted.Has("key3") {
+		t.Error("Omit 不应排除指定的键以外的键")
+	}
+	if omitted.Has("key2") {
+		t.Error("Omit 应排除指定的键")
+	}
+}
+
+// TestExtrasEqual 测试相等性
+func TestExtrasEqual(t *testing.T) {
+	extras1 := NewExtras(0)
+	extras1.Set("key1", "value1")
+	extras1.Set("key2", 42)
+
+	extras2 := NewExtras(0)
+	extras2.Set("key1", "value1")
+	extras2.Set("key2", 42)
+
+	if !extras1.Equal(extras2) {
+		t.Error("相同内容的 Extras 应相等")
+	}
+
+	extras2.Set("key2", 43)
+	if extras1.Equal(extras2) {
+		t.Error("不同内容的 Extras 不应相等")
+	}
+
+	extras3 := NewExtras(0)
+	extras3.Set("key1", "value1")
+	if extras1.Equal(extras3) {
+		t.Error("长度不同的 Extras 不应相等")
+	}
+}
+
+// TestExtrasToJSON 测试 JSON 转换
+func TestExtrasToJSON(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("name", "Alice")
+	extras.Set("age", 30)
+	extras.Set("active", true)
+
+	data, err := extras.ToJSON()
+	if err != nil {
+		t.Fatalf("ToJSON 失败: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Error("ToJSON 返回空数据")
+	}
+
+	// 验证可以反序列化
+	var decoded Extras
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+}
+
+// TestExtrasToJSONString 测试 JSON 字符串转换
+func TestExtrasToJSONString(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key", "value")
+
+	str, err := extras.ToJSONString()
+	if err != nil {
+		t.Fatalf("ToJSONString 失败: %v", err)
+	}
+
+	if len(str) == 0 {
+		t.Error("ToJSONString 返回空字符串")
+	}
+
+	// 应该能解析为有效 JSON
+	var decoded Extras
+	err = json.Unmarshal([]byte(str), &decoded)
+	if err != nil {
+		t.Fatalf("ToJSONString 返回的 JSON 无效: %v", err)
+	}
+}
+
+// TestExtrasCompactJSON 测试紧凑 JSON
+func TestExtrasCompactJSON(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key", "value")
+	extras.Set("nil", nil)
+
+	data, err := extras.CompactJSON()
+	if err != nil {
+		t.Fatalf("CompactJSON 失败: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Error("CompactJSON 返回空数据")
+	}
+}
+
+// TestExtrasPrettyJSON 测试格式化 JSON
+func TestExtrasPrettyJSON(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key", "value")
+
+	data, err := extras.PrettyJSON()
+	if err != nil {
+		t.Fatalf("PrettyJSON 失败: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Error("PrettyJSON 返回空数据")
+	}
+
+	// 格式化 JSON 应该包含换行符或缩进
+	str := string(data)
+	if !strings.Contains(str, "\n") && !strings.Contains(str, "\t") {
+		t.Logf("PrettyJSON 可能没有正确格式化: %s", str)
+	}
+}
+
+// TestExtrasKeyBuffer 测试使用缓冲区获取键
+func TestExtrasKeyBuffer(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	buf := make([]string, 0, 2)
+	keys := extras.KeysBuffer(buf)
+
+	if len(keys) != 2 {
+		t.Errorf("KeysBuffer 返回长度应为 2，实际为 %d", len(keys))
+	}
+}
+
+// TestExtrasGetByteSlice 测试获取字节切片
+func TestExtrasGetByteSlice(t *testing.T) {
+	extras := NewExtras(0)
+	data := []byte{1, 2, 3, 4, 5}
+	extras.Set("bytes", data)
+
+	got, ok := extras.GetBytes("bytes")
+	if !ok {
+		t.Error("GetBytes 失败")
+	}
+
+	if len(got) != len(data) {
+		t.Errorf("字节切片长度不匹配: got %d, want %d", len(got), len(data))
+	}
+}
+
+// TestExtrasMergeIf 测试条件合并
+func TestExtrasMergeIf(t *testing.T) {
+	extras1 := NewExtras(0)
+	extras1.Set("key1", "value1")
+	extras1.Set("key2", "value2")
+
+	extras2 := NewExtras(0)
+	extras2.Set("key3", "value3")
+	extras2.Set("key4", 42)
+
+	// 只合并字符串类型的值
+	extras1.MergeIf(extras2, func(key string, value any) bool {
+		_, ok := value.(string)
+		return ok
+	})
+
+	if !extras1.Has("key3") {
+		t.Error("MergeIf 应合并满足条件的键")
+	}
+	if extras1.Has("key4") {
+		t.Error("MergeIf 不应合并不满足条件的键")
+	}
+}
+
+// TestExtrasMergeFrom 测试从其他对象合并
+func TestExtrasMergeFrom(t *testing.T) {
+	extras1 := NewExtras(0)
+	extras1.Set("key1", "value1")
+
+	extras2 := NewExtras(0)
+	extras2.Set("key2", "value2")
+
+	extras2.MergeFrom(extras1)
+
+	if !extras2.Has("key1") {
+		t.Error("MergeFrom 应合并来源对象的键")
+	}
+	if !extras2.Has("key2") {
+		t.Error("MergeFrom 不应删除目标对象的键")
+	}
+}
+
+// TestExtrasGetMultiple 测试批量获取
+func TestExtrasGetMultiple(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", 42)
+	extras.Set("key3", 3.14)
+
+	result := extras.GetMultiple("key1", "key2", "nonexistent")
+
+	if len(result) != 2 {
+		t.Errorf("GetMultiple 应返回 2 个存在的键，实际为 %d", len(result))
+	}
+	if result["key1"] != "value1" {
+		t.Error("GetMultiple 返回值不正确")
+	}
+}
+
+// TestExtrasGetStrings 测试批量获取字符串
+func TestExtrasGetStrings(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+	extras.Set("key3", 42) // 非字符串
+
+	result := extras.GetStrings("key1", "key2", "key3", "nonexistent")
+
+	if len(result) != 2 {
+		t.Errorf("GetStrings 应返回 2 个字符串值，实际为 %d", len(result))
+	}
+	if result["key1"] != "value1" {
+		t.Error("GetStrings 返回值不正确")
+	}
+}
+
+// TestExtrasGetIntSlice 测试获取整数切片
+func TestExtrasGetIntSlice(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("ints", []int{1, 2, 3})
+	extras.Set("any_ints", []any{4, 5, 6})
+
+	ints, ok := extras.GetIntSlice("ints")
+	if !ok {
+		t.Error("GetIntSlice 失败")
+	}
+	if len(ints) != 3 {
+		t.Errorf("GetIntSlice 长度应为 3，实际为 %d", len(ints))
+	}
+
+	anyInts, ok := extras.GetIntSlice("any_ints")
+	if !ok {
+		t.Error("GetIntSlice 从 []any 失败")
+	}
+	if len(anyInts) != 3 {
+		t.Errorf("GetIntSlice 从 []any 长度应为 3，实际为 %d", len(anyInts))
+	}
+}
+
+// TestExtrasGetFloat64Slice 测试获取浮点数切片
+func TestExtrasGetFloat64Slice(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("floats", []float64{1.1, 2.2, 3.3})
+
+	floats, ok := extras.GetFloat64Slice("floats")
+	if !ok {
+		t.Error("GetFloat64Slice 失败")
+	}
+	if len(floats) != 3 {
+		t.Errorf("GetFloat64Slice 长度应为 3，实际为 %d", len(floats))
+	}
+}
+
+// TestExtrasSize 测试大小获取
+func TestExtrasSize(t *testing.T) {
+	extras := NewExtras(0)
+	extras.Set("key1", "value1")
+	extras.Set("key2", "value2")
+
+	if extras.Size() != 2 {
+		t.Errorf("Size() 应返回 2，实际为 %d", extras.Size())
+	}
 }
