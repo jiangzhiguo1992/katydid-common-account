@@ -15,12 +15,12 @@ type Validator interface {
 	Validate(obj any, scene Scene) Result
 }
 
-// RuleProvider 规则提供者接口 - 提供字段验证规则
+// RuleValidator 规则提供者接口 - 提供字段验证规则
 // 单一职责原则（SRP）：只负责提供验证规则，不执行验证
-type RuleProvider interface {
-	// ProvideRules 提供场景化的验证规则
+type RuleValidator interface {
+	// ValidateRules 提供场景化的验证规则
 	// 返回格式：map[场景][字段名]规则字符串
-	ProvideRules() map[Scene]FieldRules
+	ValidateRules() map[Scene]FieldRules
 }
 
 // CustomValidator 自定义验证器接口 - 复杂业务逻辑验证
@@ -39,8 +39,8 @@ type ErrorReporter interface {
 	// Report 报告一个验证错误
 	Report(namespace, tag, param string)
 
-	// ReportWithMessage 报告一个带自定义消息的验证错误
-	ReportWithMessage(namespace, tag, param, message string)
+	// ReportMsg 报告一个带自定义消息的验证错误
+	ReportMsg(namespace, tag, param, message string)
 }
 
 // ValidationStrategy 验证策略接口 - 策略模式
@@ -121,27 +121,6 @@ type RegistryManager interface {
 	Clear()
 }
 
-// FieldValidator 字段验证器接口 - 验证单个字段
-// 接口隔离原则（ISP）：只负责字段级别的验证
-type FieldValidator interface {
-	// ValidateField 验证单个字段
-	ValidateField(obj any, fieldName string, rule string, collector ErrorCollector) error
-}
-
-// StructValidator 结构体验证器接口 - 验证整个结构体
-// 接口隔离原则（ISP）：只负责结构体级别的验证
-type StructValidator interface {
-	// ValidateStruct 验证结构体
-	ValidateStruct(obj any, collector ErrorCollector) error
-}
-
-// NestedValidator 嵌套验证器接口 - 递归验证嵌套结构
-// 单一职责原则（SRP）：只负责嵌套结构的验证
-type NestedValidator interface {
-	// ValidateNested 验证嵌套的结构体字段
-	ValidateNested(obj any, scene Scene, depth int, collector ErrorCollector)
-}
-
 // ValidatorBuilder 验证器构建器接口 - 建造者模式
 // 开放封闭原则（OCP）：通过构建器扩展配置，而不修改验证器
 type ValidatorBuilder interface {
@@ -157,21 +136,3 @@ type ValidatorBuilder interface {
 	// Build 构建验证器
 	Build() Validator
 }
-
-// ============================================================================
-// 辅助类型和常量
-// ============================================================================
-
-// Scene 验证场景类型 - 使用字符串以支持动态场景
-type Scene string
-
-// FieldRules 字段规则类型 - 字段名到规则的映射
-type FieldRules map[string]string
-
-// 预定义的通用场景常量
-const (
-	SceneCreate Scene = "create" // 创建场景
-	SceneUpdate Scene = "update" // 更新场景
-	SceneDelete Scene = "delete" // 删除场景
-	SceneQuery  Scene = "query"  // 查询场景
-)
