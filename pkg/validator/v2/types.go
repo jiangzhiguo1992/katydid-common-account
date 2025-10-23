@@ -13,22 +13,26 @@ import (
 // FieldError 字段验证错误 - 不可变的值对象
 // 设计原则：单一职责 - 只负责表示一个字段的验证错误信息
 type FieldError struct {
-	// Namespace 字段的完整路径（如 User.Profile.Email）
+	// Namespace 字段的完整命名空间路径（如 User.Profile.Email）
+	// 用于嵌套结构体的错误定位，支持复杂对象的精确错误追踪
 	Namespace string `json:"namespace"`
 
 	// Field 字段名（简化版，不含路径）
 	Field string `json:"field"`
 
-	// Tag 验证标签（如 required, email, min）
+	// Tag 验证标签，描述验证规则类型（如 required, email, min, max 等）
 	Tag string `json:"tag"`
 
-	// Param 验证参数（如 min=3 中的 "3"）
+	// Param 验证参数，提供验证规则的具体配置值
+	// 例如：min=3 中的 "3"，len=11 中的 "11"
 	Param string `json:"param"`
 
-	// Value 字段的实际值（可选）
+	// Value 字段的实际值（用于 sl.ReportError 的 value 参数）
+	// 用于调试和详细错误信息，可能包含敏感信息，谨慎使用
 	Value any `json:"value,omitempty"`
 
-	// Message 用户友好的错误消息
+	// Message 用户友好的错误消息（可选，用于直接显示给终端用户）
+	// 支持国际化，建议使用本地化后的错误消息
 	Message string `json:"message,omitempty"`
 }
 
@@ -38,13 +42,13 @@ type TypeInfo struct {
 	// Type 反射类型
 	Type reflect.Type
 
-	// IsRuleProvider 是否实现了 RuleProvider 接口
-	IsRuleProvider bool
+	// IsRuleValidator 是否实现了 RuleValidator 接口
+	IsRuleValidator bool
 
 	// IsCustomValidator 是否实现了 CustomValidator 接口
 	IsCustomValidator bool
 
-	// Rules 缓存的验证规则
+	// Rules 缓存的验证规则（来自 RuleValidator）
 	Rules map[Scene]FieldRules
 }
 
@@ -65,7 +69,7 @@ func NewFieldError(namespace, field, tag, param string) *FieldError {
 		Namespace: truncate(namespace, 512),
 		Field:     truncate(field, 256),
 		Tag:       truncate(tag, 128),
-		Param:     truncate(param, 256),
+		Param:     truncate(param, 1024),
 	}
 }
 
@@ -113,7 +117,7 @@ func (e *FieldError) ToJSON() ([]byte, error) {
 func NewTypeInfo(typ reflect.Type) *TypeInfo {
 	return &TypeInfo{
 		Type:              typ,
-		IsRuleProvider:    false,
+		IsRuleValidator:   false,
 		IsCustomValidator: false,
 		Rules:             make(map[Scene]FieldRules),
 	}
