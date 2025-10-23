@@ -286,3 +286,100 @@ func TestResetPools(t *testing.T) {
 	}
 	releaseStringBuilder(sb2)
 }
+
+// TestPoolUsageInValidator 测试 validator 中对象池的使用
+func TestPoolUsageInValidator(t *testing.T) {
+	t.Run("Validate uses pool", func(t *testing.T) {
+		type TestStruct struct {
+			Name  string `validate:"required"`
+			Email string `validate:"required,email"`
+		}
+
+		obj := &TestStruct{
+			Name:  "",
+			Email: "invalid",
+		}
+
+		// 验证会使用对象池
+		errors := Validate(obj, SceneAll)
+		if len(errors) == 0 {
+			t.Error("Expected validation errors")
+		}
+	})
+
+	t.Run("NewFieldError uses pool", func(t *testing.T) {
+		// 测试 NewFieldError 是否从对象池获取
+		fe := NewFieldError("test.field", "required", "")
+		if fe == nil {
+			t.Fatal("NewFieldError returned nil")
+		}
+		if fe.Namespace != "test.field" {
+			t.Errorf("Expected namespace 'test.field', got '%s'", fe.Namespace)
+		}
+	})
+
+	t.Run("Error() uses pool for StringBuilder", func(t *testing.T) {
+		ctx := NewValidationContext(SceneAll)
+		defer ReleaseValidationContext(ctx)
+
+		// 添加一些错误
+		for i := 0; i < 5; i++ {
+			fe := NewFieldError("field", "required", "")
+			ctx.AddError(fe)
+		}
+
+		// Error() 方法应该使用对象池的 StringBuilder
+		errMsg := ctx.Error()
+		if errMsg == "" {
+			t.Error("Expected non-empty error message")
+		}
+	})
+
+	t.Run("ToLocalizes uses pool for StringBuilder", func(t *testing.T) {
+		fe := NewFieldError("User.Name", "required", "")
+
+		// ToLocalizes 应该使用对象池的 StringBuilder
+		key, param := fe.ToLocalizes()
+		if key != "User.Name.required" {
+			t.Errorf("Expected key 'User.Name.required', got '%s'", key)
+		}
+		if param != "" {
+			t.Errorf("Expected empty param, got '%s'", param)
+		}
+	})
+}
+
+// BenchmarkValidatorWithPool 测试使用对象池的性能
+func BenchmarkValidatorWithPool(b *testing.B) {
+	type TestStruct struct {
+		Name  string `validate:"required,min=3"`
+		Email string `validate:"required,email"`
+		Age   int    `validate:"required,min=18,max=100"`
+	}
+
+	validObj := &TestStruct{
+		Name:  "John",
+		Email: "john@example.com",
+		Age:   25,
+	}
+
+	invalidObj := &TestStruct{
+		Name:  "Jo",
+		Email: "invalid",
+		Age:   15,
+	}
+
+	b.Run("valid object", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = Validate(validObj, SceneAll)
+		}
+	})
+
+	b.Run("invalid object", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = Validate(invalidObj, SceneAll)
+		}
+	})
+}

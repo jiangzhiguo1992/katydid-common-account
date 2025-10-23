@@ -601,3 +601,222 @@ func BenchmarkMapValidator_Parallel(b *testing.B) {
 		}
 	})
 }
+
+// ============================================================================
+// 内存优化全面基准测试
+// ============================================================================
+
+// BenchmarkNewFieldError 测试 FieldError 创建性能
+func BenchmarkNewFieldError(b *testing.B) {
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			fe := NewFieldError("User.Name", "required", "")
+			_ = fe
+		}
+	})
+
+	b.Run("without_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			fe := &FieldError{
+				Namespace: "User.Name",
+				Tag:       "required",
+				Param:     "",
+			}
+			_ = fe
+		}
+	})
+}
+
+// BenchmarkValidationContextError 测试 Error() 方法性能
+func BenchmarkValidationContextError(b *testing.B) {
+	// 准备测试数据
+	ctx := NewValidationContext(SceneNone)
+	for i := 0; i < 5; i++ {
+		ctx.AddError(NewFieldError("User.Field", "required", ""))
+	}
+
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = ctx.Error()
+		}
+	})
+
+	releaseValidationContext(ctx)
+}
+
+// BenchmarkFieldErrorString 测试 FieldError.String() 性能
+func BenchmarkFieldErrorString(b *testing.B) {
+	fe := NewFieldError("User.Email", "email", "")
+
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = fe.String()
+		}
+	})
+}
+
+// BenchmarkToLocalizes 测试本地化转换性能
+func BenchmarkToLocalizes(b *testing.B) {
+	fe := NewFieldError("User.Profile.Email", "email", "")
+
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = fe.ToLocalizes()
+		}
+	})
+}
+
+// BenchmarkValidateComplete 完整验证流程基准测试
+func BenchmarkValidateComplete(b *testing.B) {
+	type TestUser struct {
+		Name  string `validate:"required,min=3"`
+		Email string `validate:"required,email"`
+		Age   int    `validate:"required,min=18"`
+	}
+
+	user := &TestUser{
+		Name:  "Jo",      // 太短
+		Email: "invalid", // 无效邮箱
+		Age:   16,        // 太小
+	}
+
+	v := New()
+
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			errors := v.Validate(user, SceneNone)
+			_ = errors
+		}
+	})
+}
+
+// BenchmarkAddError 测试添加错误性能
+func BenchmarkAddError(b *testing.B) {
+	b.Run("single_error", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			ctx := acquireValidationContext(SceneNone)
+			ctx.AddError(NewFieldError("User.Name", "required", ""))
+			releaseValidationContext(ctx)
+		}
+	})
+
+	b.Run("multiple_errors", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			ctx := acquireValidationContext(SceneNone)
+			for j := 0; j < 10; j++ {
+				ctx.AddError(NewFieldError("User.Field", "required", ""))
+			}
+			releaseValidationContext(ctx)
+		}
+	})
+}
+
+// BenchmarkStringBuilderUsage 测试 StringBuilder 使用性能
+func BenchmarkStringBuilderUsage(b *testing.B) {
+	b.Run("with_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			sb := acquireStringBuilder()
+			sb.WriteString("field '")
+			sb.WriteString("User.Name")
+			sb.WriteString("' validation failed")
+			_ = sb.String()
+			releaseStringBuilder(sb)
+		}
+	})
+
+	b.Run("without_pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			result := "field '" + "User.Name" + "' validation failed"
+			_ = result
+		}
+	})
+}
+
+// BenchmarkMemoryFootprint 内存占用基准测试
+func BenchmarkMemoryFootprint(b *testing.B) {
+	b.Run("validation_context", func(b *testing.B) {
+		b.ReportAllocs()
+		contexts := make([]*ValidationContext, b.N)
+		for i := 0; i < b.N; i++ {
+			contexts[i] = acquireValidationContext(SceneNone)
+		}
+		for i := 0; i < b.N; i++ {
+			releaseValidationContext(contexts[i])
+		}
+	})
+
+	b.Run("field_errors", func(b *testing.B) {
+		b.ReportAllocs()
+		errors := make([]*FieldError, b.N)
+		for i := 0; i < b.N; i++ {
+			errors[i] = NewFieldError("User.Name", "required", "")
+		}
+		// FieldError 不需要手动释放，由 ValidationContext 管理
+	})
+}
+
+// BenchmarkConcurrentValidation 并发验证基准测试
+func BenchmarkConcurrentValidation(b *testing.B) {
+	type TestUser struct {
+		Name string `validate:"required,min=3"`
+	}
+
+	user := &TestUser{Name: "Jo"}
+	v := New()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			errors := v.Validate(user, SceneNone)
+			_ = errors
+		}
+	})
+}
+
+// BenchmarkHighLoad 高负载场景基准测试
+func BenchmarkHighLoad(b *testing.B) {
+	type ComplexUser struct {
+		Name    string `validate:"required,min=3,max=50"`
+		Email   string `validate:"required,email"`
+		Age     int    `validate:"required,min=18,max=120"`
+		Phone   string `validate:"required,len=11"`
+		Address string `validate:"required,min=10"`
+		City    string `validate:"required"`
+		Country string `validate:"required"`
+		Zip     string `validate:"required"`
+		Bio     string `validate:"max=500"`
+		Website string `validate:"omitempty,url"`
+	}
+
+	user := &ComplexUser{
+		Name:    "Jo",
+		Email:   "invalid",
+		Age:     16,
+		Phone:   "123",
+		Address: "short",
+		City:    "",
+		Country: "",
+		Zip:     "",
+		Bio:     "",
+		Website: "not-a-url",
+	}
+
+	v := New()
+
+	b.Run("pool_optimized", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			errors := v.Validate(user, SceneNone)
+			_ = errors
+		}
+	})
+}
