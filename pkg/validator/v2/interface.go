@@ -60,15 +60,15 @@ type ValidationStrategy interface {
 // CacheManager 缓存管理器接口 - 单一职责：只负责规则缓存
 type CacheManager interface {
 	// Get 获取缓存的规则
-	// Remove 移除指定类型的缓存
-	Remove(key string)
-	// Size 获取缓存大小
-	Size() int
 	Get(key string, scene Scene) (map[string]string, bool)
 	// Set 设置缓存
 	Set(key string, scene Scene, rules map[string]string)
 	// Clear 清空缓存
 	Clear()
+	// Remove 移除指定类型的缓存
+	Remove(key string)
+	// Size 获取缓存大小
+	Size() int
 }
 
 // ValidatorPool 验证器池接口 - 单一职责：只负责对象复用
@@ -115,7 +115,6 @@ type ValidatorConfig interface {
 	EnablePool() bool
 	// GetStrategy 获取验证策略
 	GetStrategy() ValidationStrategy
-	// 遵循建造者模式：分离构造过程和表示
 	// GetTagName 获取标签名称
 	GetTagName() string
 }
