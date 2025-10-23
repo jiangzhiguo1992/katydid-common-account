@@ -41,7 +41,7 @@ func NewValidator() *DefaultValidator {
 	typeCache := NewTypeCache()
 	registry := NewRegistryManager()
 
-	validator := &DefaultValidator{
+	valid := &DefaultValidator{
 		strategies: make([]ValidationStrategy, 0, 3),
 		typeCache:  typeCache,
 		registry:   registry,
@@ -49,11 +49,11 @@ func NewValidator() *DefaultValidator {
 	}
 
 	// 注册默认策略（执行顺序很重要）
-	validator.addStrategy(NewRuleValidationStrategy(typeCache, v))
-	validator.addStrategy(NewCustomValidationStrategy(typeCache))
+	valid.addStrategy(NewRuleValidationStrategy(typeCache, v))
+	valid.addStrategy(NewCustomValidationStrategy(typeCache))
 	// 嵌套验证策略需要在实例化后添加，避免循环依赖
 
-	return validator
+	return valid
 }
 
 // Validate 验证对象 - 实现 Validator 接口

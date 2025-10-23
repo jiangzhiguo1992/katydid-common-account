@@ -94,7 +94,7 @@ func (b *DefaultValidatorBuilder) WithDefaultStrategies() *DefaultValidatorBuild
 
 // Build 构建验证器 - 实现 ValidatorBuilder 接口
 func (b *DefaultValidatorBuilder) Build() Validator {
-	validator := &DefaultValidator{
+	v := &DefaultValidator{
 		strategies: b.strategies,
 		typeCache:  b.typeCache,
 		registry:   b.registry,
@@ -102,16 +102,16 @@ func (b *DefaultValidatorBuilder) Build() Validator {
 	}
 
 	// 如果没有添加任何策略，使用默认策略
-	if len(validator.strategies) == 0 {
-		validator.strategies = []ValidationStrategy{
+	if len(v.strategies) == 0 {
+		v.strategies = []ValidationStrategy{
 			NewRuleValidationStrategy(b.typeCache, b.validate),
 			NewCustomValidationStrategy(b.typeCache),
 		}
 	}
 
-	// 添加嵌套验证策略（必须在最后，因为需要引用构建好的 validator）
-	validator.strategies = append(validator.strategies,
-		NewNestedValidationStrategy(validator, b.maxDepth))
+	// 添加嵌套验证策略（必须在最后，因为需要引用构建好的 v）
+	v.strategies = append(v.strategies,
+		NewNestedValidationStrategy(v, b.maxDepth))
 
-	return validator
+	return v
 }

@@ -8,6 +8,14 @@ import (
 // 测试用例 - User 模型
 // ============================================================================
 
+// 预定义的通用场景常量
+const (
+	SceneCreate Scene = "create" // 创建场景
+	SceneUpdate Scene = "update" // 更新场景
+	SceneDelete Scene = "delete" // 删除场景
+	SceneQuery  Scene = "query"  // 查询场景
+)
+
 // User 测试用户模型
 type User struct {
 	Username        string `json:"username"`
@@ -17,8 +25,8 @@ type User struct {
 	Age             int    `json:"age"`
 }
 
-// ProvideRules 实现 RuleProvider 接口
-func (u *User) ProvideRules() map[Scene]FieldRules {
+// ProvideRules 实现 RuleValidator 接口
+func (u *User) ValidateRules() map[Scene]FieldRules {
 	return map[Scene]FieldRules{
 		SceneCreate: {
 			"Username": "required,min=3,max=20",
@@ -38,7 +46,7 @@ func (u *User) ProvideRules() map[Scene]FieldRules {
 func (u *User) ValidateCustom(scene Scene, reporter ErrorReporter) {
 	// 跨字段验证：密码和确认密码必须一致
 	if u.Password != "" && u.Password != u.ConfirmPassword {
-		reporter.ReportWithMessage(
+		reporter.ReportMsg(
 			"User.ConfirmPassword",
 			"password_mismatch",
 			"",
@@ -48,7 +56,7 @@ func (u *User) ValidateCustom(scene Scene, reporter ErrorReporter) {
 
 	// 场景化验证：创建时年龄必须大于等于 18
 	if scene == SceneCreate && u.Age > 0 && u.Age < 18 {
-		reporter.ReportWithMessage(
+		reporter.ReportMsg(
 			"User.Age",
 			"min_age",
 			"18",
@@ -128,59 +136,23 @@ func TestValidator_Validate_MinLength(t *testing.T) {
 	}
 
 	// 检查所有错误
-	errors := result.Errors()
-	if len(errors) == 0 {
+	allErrors := result.Errors()
+	if len(allErrors) == 0 {
 		t.Error("Expected validation errors")
 		return
 	}
 
 	// 查找 username 相关的错误（可能是 min 或其他标签）
-	hasUsernameError := false
-	for _, err := range errors {
+	found := false
+	for _, err := range allErrors {
 		if err.Field == "username" {
-			hasUsernameError = true
-			break
-
-	}
-
-
-		t.Errorf("Expected username validation error, got errors: %v", errors)
-	}
-}
-
-	// 检查所有错误
-	errors := result.Errors()
-	user := &User{
-		t.Error("Expected validation errors")
-		return
-	}
-
-	// 查找 email 相关的错误
-	hasEmailError := false
-	for _, err := range errors {
-		if err.Field == "email" {
-			hasEmailError = true
+			found = true
 			break
 		}
 	}
 
-	if !hasEmailError {
-		t.Errorf("Expected email validation error, got errors: %v", errors)
-		Email:           "invalid-email", // 无效的邮箱格式
-		Password:        "password123",
-		ConfirmPassword: "password123",
-	}
-
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail, but it passed")
-	}
-
-	errors := result.ErrorsByField("email")
-	if len(errors) == 0 {
-		t.Error("Expected email validation error")
+	if !found {
+		t.Errorf("Expected username validation error, got errors: %v", allErrors)
 	}
 }
 
@@ -280,6 +252,7 @@ func TestValidationResult_FirstError(t *testing.T) {
 
 	if firstError == nil {
 		t.Error("Expected FirstError to return an error")
+		return
 	}
 
 	if firstError.Field != "field1" {
