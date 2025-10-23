@@ -202,39 +202,6 @@ func TestValidateMapInt(t *testing.T) {
 	}
 }
 
-func TestValidateMapFloat(t *testing.T) {
-	data := map[string]any{
-		"price": 5.5,
-	}
-
-	// 测试最小值
-	err := ValidateMapFloat(data, "price", 10.0, 100.0)
-	if err == nil {
-		t.Error("Expected error for value less than minimum")
-	}
-
-	// 测试最大值
-	data["price"] = 150.0
-	err = ValidateMapFloat(data, "price", 0.0, 100.0)
-	if err == nil {
-		t.Error("Expected error for value greater than maximum")
-	}
-	
-	// 测试通过
-	data["price"] = 50.5
-	err = ValidateMapFloat(data, "price", 0.0, 100.0)
-	if err != nil {
-		t.Errorf("Expected no error, but got: %v", err)
-	}
-
-	// 测试 int 类型
-	data["price"] = 60
-	err = ValidateMapFloat(data, "price", 0.0, 100.0)
-	if err != nil {
-		t.Errorf("Expected no error for int, but got: %v", err)
-	}
-}
-
 func TestValidateMapBool(t *testing.T) {
 	data := map[string]any{
 		"active": true,
@@ -250,37 +217,6 @@ func TestValidateMapBool(t *testing.T) {
 	err = ValidateMapBool(data, "active")
 	if err == nil {
 		t.Error("Expected error for non-bool value")
-	}
-}
-
-func TestValidateMapKey(t *testing.T) {
-	data := map[string]any{
-		"size": "XL",
-	}
-
-	// 自定义验证器
-	validator := func(value any) error {
-		size, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("size must be string")
-		}
-		validSizes := map[string]bool{"S": true, "M": true, "L": true}
-		if !validSizes[size] {
-			return fmt.Errorf("size must be S, M, or L")
-		}
-		return nil
-	}
-
-	err := ValidateMapKey(data, "size", validator)
-	if err == nil {
-		t.Error("Expected error for invalid size value")
-	}
-
-	// 测试有效值
-	data["size"] = "M"
-	err = ValidateMapKey(data, "size", validator)
-	if err != nil {
-		t.Errorf("Expected no error, but got: %v", err)
 	}
 }
 

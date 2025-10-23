@@ -13,6 +13,28 @@ type Validator interface {
 	//   - scene: 验证场景
 	// 返回：验证结果
 	Validate(obj any, scene Scene) Result
+
+	// ValidateFields 只验证指定字段
+	// 参数：
+	//   - obj: 待验证的对象
+	//   - scene: 验证场景
+	//   - fields: 需要验证的字段名列表
+	// 返回：验证结果
+	ValidateFields(obj any, scene Scene, fields ...string) Result
+
+	// ValidateExcept 验证除指定字段外的所有字段
+	// 参数：
+	//   - obj: 待验证的对象
+	//   - scene: 验证场景
+	//   - excludeFields: 需要排除的字段名列表
+	// 返回：验证结果
+	ValidateExcept(obj any, scene Scene, excludeFields ...string) Result
+
+	// RegisterAlias 注册验证标签别名
+	// 参数：
+	//   - alias: 别名标签名
+	//   - tags: 实际的验证规则字符串
+	RegisterAlias(alias, tags string)
 }
 
 // RuleValidator 规则提供者接口 - 提供字段验证规则
@@ -41,6 +63,12 @@ type ErrorReporter interface {
 
 	// ReportMsg 报告一个带自定义消息的验证错误
 	ReportMsg(namespace, tag, param, message string)
+
+	// ReportWithValue 报告一个带值的验证错误
+	ReportWithValue(namespace, tag, param string, value any)
+
+	// ReportDetail 报告一个详细的验证错误（包含值和消息）
+	ReportDetail(namespace, tag, param string, value any, message string)
 }
 
 // ValidationStrategy 验证策略接口 - 策略模式
@@ -119,6 +147,25 @@ type RegistryManager interface {
 
 	// Clear 清空注册记录
 	Clear()
+}
+
+// MapValidatorConfig Map 验证器配置接口
+// 单一职责原则（SRP）：只负责 Map 验证配置
+type MapValidatorConfig interface {
+	// GetNamespace 获取命名空间
+	GetNamespace() string
+
+	// GetRequiredKeys 获取必填键列表
+	GetRequiredKeys() []string
+
+	// GetAllowedKeys 获取允许的键列表
+	GetAllowedKeys() []string
+
+	// GetKeyValidator 获取指定键的验证器
+	GetKeyValidator(key string) func(value any) error
+
+	// Validate 验证 map 数据
+	Validate(data map[string]any) []*FieldError
 }
 
 // ValidatorBuilder 验证器构建器接口 - 建造者模式

@@ -42,6 +42,25 @@ func (c *DefaultErrorCollector) ReportMsg(namespace, tag, param, message string)
 	c.Add(err)
 }
 
+// ReportWithValue 报告一个带值的验证错误
+// 用于需要记录实际值的场景
+func (c *DefaultErrorCollector) ReportWithValue(namespace, tag, param string, value any) {
+	field := extractFieldName(namespace)
+	err := NewFieldError(namespace, field, tag, param).WithValue(value)
+	c.Add(err)
+}
+
+// ReportDetail 报告一个详细的验证错误
+// 同时包含值和自定义消息
+func (c *DefaultErrorCollector) ReportDetail(namespace, tag, param string, value any, message string) {
+	field := extractFieldName(namespace)
+	err := NewFieldError(namespace, field, tag, param).WithValue(value)
+	if message != "" {
+		err = err.WithMessage(message)
+	}
+	c.Add(err)
+}
+
 // Add 添加一个错误
 func (c *DefaultErrorCollector) Add(err *FieldError) {
 	if err == nil {
