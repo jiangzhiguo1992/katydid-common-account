@@ -19,9 +19,11 @@ type defaultValidator struct {
 	pool           ValidatorPool
 	strategy       ValidationStrategy
 	errorFormatter ErrorFormatter
+	typeCache      *TypeCacheManager // 类型缓存管理器
 	tagName        string
 	useCache       bool
 	usePool        bool
+	maxDepth       int // 最大嵌套深度
 }
 
 // Validate 执行验证
@@ -30,11 +32,14 @@ func (v *defaultValidator) Validate(data interface{}, scene Scene) error {
 		return fmt.Errorf("验证数据不能为nil")
 	}
 
+	// 获取类型缓存（性能优化：避免重复反射）
+	typeCache := v.getOrCacheTypeInfo(data)
+
 	// 获取类型名称
 	typeName := getTypeName(data)
 
-	// 获取验证规则
-	rules := v.getRules(data, scene, typeName)
+	// 获取验证规则（使用类型缓存优化）
+	rules := v.getRulesWithCache(data, scene, typeName, typeCache)
 
 	// 执行基础验证
 	var baseErr error
@@ -468,4 +473,56 @@ func WithErrorFormatter(formatter ErrorFormatter) ValidatorOption {
 			val.errorFormatter = formatter
 		}
 	}
+}
+
+// getOrCacheTypeInfo 获取或缓存类型信息
+// 性能优化：避免重复的类型断言和反射操作
+func (v *defaultValidator) getOrCacheTypeInfo(data interface{}) *TypeCache {
+	if v.typeCache == nil {
+		v.typeCache = NewTypeCacheManager()
+	}
+	return v.typeCache.GetOrCreate(data)
+}
+
+// getRulesWithCache 获取验证规则（带类型缓存优化）
+func (v *defaultValidator) getRulesWithCache(data interface{}, scene Scene, typeName string, typeCache *TypeCache) map[string]string {
+	// 优先从类型缓存获取
+	if typeCache != nil && typeCache.IsRuleProvider {
+		if rules, ok := typeCache.Rules[scene]; ok && rules != nil {
+			return rules
+		}
+	}
+
+	// 回退到原有逻辑
+	return v.getRules(data, scene, typeName)
+}
+
+// ClearTypeCache 清除类型缓存
+func (v *defaultValidator) ClearTypeCache() {
+	if v.typeCache != nil {
+		v.typeCache.Clear()
+	}
+}
+
+// GetTypeCacheStats 获取类型缓存统计信息
+func (v *defaultValidator) GetTypeCacheStats() TypeCacheStats {
+	if v.typeCache == nil {
+		return TypeCacheStats{}
+	}
+	return v.typeCache.GetStats()
+}
+
+// SetMaxDepth 设置最大嵌套深度
+func (v *defaultValidator) SetMaxDepth(depth int) {
+	if depth > 0 {
+		v.maxDepth = depth
+	}
+}
+
+// GetMaxDepth 获取最大嵌套深度
+func (v *defaultValidator) GetMaxDepth() int {
+	if v.maxDepth <= 0 {
+		return 100 // 默认值
+	}
+	return v.maxDepth
 }

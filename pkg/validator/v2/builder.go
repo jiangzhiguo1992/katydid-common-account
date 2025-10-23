@@ -18,6 +18,8 @@ type validatorBuilder struct {
 	validate       *validator.Validate
 	customFuncs    map[string]validator.Func
 	aliases        map[string]string
+	maxDepth       int
+	typeCache      *TypeCacheManager
 }
 
 // NewValidatorBuilder 创建验证器构建器
@@ -60,6 +62,20 @@ func (b *validatorBuilder) WithTagName(tagName string) ValidatorBuilder {
 	return b
 }
 
+// WithMaxDepth 设置最大嵌套深度
+func (b *validatorBuilder) WithMaxDepth(depth int) ValidatorBuilder {
+	if depth > 0 {
+		b.maxDepth = depth
+	}
+	return b
+}
+
+// WithTypeCache 设置类型缓存管理器
+func (b *validatorBuilder) WithTypeCache(typeCache *TypeCacheManager) ValidatorBuilder {
+	b.typeCache = typeCache
+	return b
+}
+
 // RegisterCustomValidation 注册自定义验证函数
 func (b *validatorBuilder) RegisterCustomValidation(tag string, fn validator.Func) ValidatorBuilder {
 	b.customFuncs[tag] = fn
@@ -86,9 +102,24 @@ func (b *validatorBuilder) Build() (Validator, error) {
 		}
 	}
 
+	// 注册所有别名
+	for alias, tags := range b.aliases {
+		b.validate.RegisterAlias(alias, tags)
+	}
+
 	// 设置标签名称
 	if b.tagName != "" {
 		b.validate.SetTagName(b.tagName)
+	}
+
+	// 初始化类型缓存
+	if b.typeCache == nil {
+		b.typeCache = NewTypeCacheManager()
+	}
+
+	// 设置默认最大深度
+	if b.maxDepth <= 0 {
+		b.maxDepth = 100
 	}
 
 	// 创建验证器实例
@@ -98,7 +129,9 @@ func (b *validatorBuilder) Build() (Validator, error) {
 		pool:           b.pool,
 		strategy:       b.strategy,
 		errorFormatter: b.errorFormatter,
+		typeCache:      b.typeCache,
 		tagName:        b.tagName,
+		maxDepth:       b.maxDepth,
 		useCache:       b.cache != nil,
 		usePool:        b.pool != nil,
 	}
