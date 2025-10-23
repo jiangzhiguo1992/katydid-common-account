@@ -3,38 +3,33 @@ package v2
 import (
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/go-playground/validator/v10"
 )
 
 // ============================================================================
-// 验证器核心实现 - 协调者模式
+// 核心验证器实现
 // ============================================================================
 
-// Validator 验证器
+// DefaultValidator 默认验证器实现
 // 设计原则：
 //   - 依赖倒置：依赖抽象接口而非具体实现
-//   - 单一职责：只负责协调各个组件
-type Validator struct {
-	validate  *validator.Validate
-	typeCache TypeInfoCache
-	strategy  ValidationStrategy
+//   - 策略模式：通过可插拔的策略执行不同的验证逻辑
+//   - 单一职责：只负责协调各个策略的执行
+type DefaultValidator struct {
+	strategies []ValidationStrategy
+	typeCache  TypeCache
+	registry   RegistryManager
+	validate   *validator.Validate
 }
 
-// Config 验证器配置
-type Config struct {
-	// TypeCache 类型缓存（可选，默认使用内置实现）
-	TypeCache TypeInfoCache
-
-	// Strategy 验证策略（可选，默认使用组合策略）
-	Strategy ValidationStrategy
-}
-
-// NewValidator 创建验证器（工厂方法）
-func NewValidator(configs ...Config) *Validator {
+// NewValidator 创建默认验证器 - 工厂方法
+// 返回一个配置好的验证器实例
+func NewValidator() *DefaultValidator {
 	v := validator.New()
 
-	// 配置 JSON tag 作为字段名
+	// 配置 validator：使用 json tag 作为字段名
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		if name == "-" || name == "" {
@@ -43,104 +38,97 @@ func NewValidator(configs ...Config) *Validator {
 		return name
 	})
 
-	// 默认配置
-	var config Config
-	if len(configs) > 0 {
-		config = configs[0]
+	typeCache := NewTypeCache()
+	registry := NewRegistryManager()
+
+	validator := &DefaultValidator{
+		strategies: make([]ValidationStrategy, 0, 3),
+		typeCache:  typeCache,
+		registry:   registry,
+		validate:   v,
 	}
 
-	// 创建类型缓存
-	typeCache := config.TypeCache
-	if typeCache == nil {
-		typeCache = NewTypeCache()
-	}
+	// 注册默认策略（执行顺序很重要）
+	validator.addStrategy(NewRuleValidationStrategy(typeCache, v))
+	validator.addStrategy(NewCustomValidationStrategy(typeCache))
+	// 嵌套验证策略需要在实例化后添加，避免循环依赖
 
-	// 创建验证策略
-	strategy := config.Strategy
-	if strategy == nil {
-		// 默认使用组合策略
-		strategy = NewCompositeStrategy(
-			NewRuleStrategy(v),
-			NewBusinessStrategy(),
-		)
-	}
-
-	return &Validator{
-		validate:  v,
-		typeCache: typeCache,
-		strategy:  strategy,
-	}
+	return validator
 }
 
-// Validate 验证对象
-// 参数：
-//   - obj: 待验证对象
-//   - scene: 验证场景
-//
-// 返回：
-//   - 验证错误列表，nil 表示验证通过
-func (v *Validator) Validate(obj any, scene ValidateScene) []ValidationError {
+// Validate 验证对象 - 实现 Validator 接口
+func (v *DefaultValidator) Validate(obj any, scene Scene) Result {
 	// 参数校验
 	if obj == nil {
-		return []ValidationError{
-			NewFieldError("object", "required", "validation target cannot be nil"),
-		}
+		return NewValidationResultWithErrors([]*FieldError{
+			NewFieldError("", "", "required", "").
+				WithMessage("validation target cannot be nil"),
+		})
 	}
 
 	// 创建错误收集器
 	collector := NewErrorCollector()
 
-	// 执行验证策略
-	v.strategy.Execute(obj, scene, collector)
+	// 按顺序执行所有策略
+	for _, strategy := range v.strategies {
+		if !strategy.Execute(obj, scene, collector) {
+			// 策略返回 false 表示停止后续策略
+			break
+		}
+	}
 
-	// 返回错误
-	return collector.GetAll()
+	// 构建并返回结果
+	return NewValidationResultWithErrors(collector.GetErrors())
 }
 
-// ClearCache 清除类型缓存
-func (v *Validator) ClearCache() {
-	v.typeCache.Clear()
-}
-
-// GetUnderlyingValidator 获取底层验证器
-// 用于高级场景，直接访问 go-playground/validator
-func (v *Validator) GetUnderlyingValidator() *validator.Validate {
-	return v.validate
-}
-
-// RegisterAlias 注册验证规则别名
-func (v *Validator) RegisterAlias(alias, tags string) {
-	if alias != "" && tags != "" {
-		v.validate.RegisterAlias(alias, tags)
+// addStrategy 添加验证策略 - 私有方法
+func (v *DefaultValidator) addStrategy(strategy ValidationStrategy) {
+	if strategy != nil {
+		v.strategies = append(v.strategies, strategy)
 	}
 }
 
-// Package v2 提供了重构后的验证器实现
-//
-// 设计原则：
-//   - 单一职责原则（SRP）：每个组件只负责一个功能
-//   - 开放封闭原则（OCP）：对扩展开放，对修改封闭
-//   - 里氏替换原则（LSP）：所有实现可以互相替换
-//   - 接口隔离原则（ISP）：细化的专用接口
-//   - 依赖倒置原则（DIP）：依赖抽象而非具体实现
-//
-// 架构特点：
-//   - 高内聚低耦合
-//   - 策略模式实现可扩展验证
-//   - 工厂模式创建对象
-//   - 依赖注入支持测试
-//
-// 使用示例：
-//
-//	// 创建验证器
-//	validator := v2.NewValidator()
-//
-//	// 验证对象
-//	errors := validator.Validate(user, v2.SceneCreate)
-//
-//	// 处理错误
-//	if len(errors) > 0 {
-//	    for _, err := range errors {
-//	        fmt.Println(err.Message)
-//	    }
-//	}
+// GetUnderlyingValidator 获取底层的 go-playground/validator 实例
+// 用于高级场景下直接访问底层验证器
+func (v *DefaultValidator) GetUnderlyingValidator() *validator.Validate {
+	return v.validate
+}
+
+// ClearCache 清除所有缓存
+// 用于测试或需要重新加载类型信息的场景
+func (v *DefaultValidator) ClearCache() {
+	v.typeCache.Clear()
+	v.registry.Clear()
+}
+
+// ============================================================================
+// 全局默认验证器 - 单例模式
+// ============================================================================
+
+var (
+	defaultValidator *DefaultValidator
+	defaultOnce      sync.Once
+)
+
+// Default 获取全局默认验证器实例 - 单例模式
+// 线程安全，可在多个 goroutine 中并发调用
+func Default() Validator {
+	defaultOnce.Do(func() {
+		defaultValidator = NewValidator()
+	})
+	return defaultValidator
+}
+
+// Validate 使用默认验证器验证对象 - 便捷函数
+// 简化常见的验证调用场景
+func Validate(obj any, scene Scene) Result {
+	return Default().Validate(obj, scene)
+}
+
+// ClearCache 清除默认验证器的缓存 - 便捷函数
+// 用于测试场景
+func ClearCache() {
+	if defaultValidator != nil {
+		defaultValidator.ClearCache()
+	}
+}

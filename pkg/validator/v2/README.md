@@ -1,105 +1,138 @@
-# Validator V2 - 重构版验证器
+# Validator V2 - 优化架构设计
 
-## 📋 概述
+## 概述
 
-`validator/v2` 是对原有验证器的完全重构版本，严格遵循 **SOLID 原则**和**设计模式最佳实践**，提供了更清晰的架构和更好的可扩展性。
+Validator V2 是基于 SOLID 设计原则和面向对象最佳实践重新设计的验证器架构，相比 V1 版本提供了更好的：
+
+- ✅ **可扩展性**：通过策略模式轻松扩展新的验证逻辑
+- ✅ **可维护性**：职责清晰，每个组件只负责单一功能
+- ✅ **可测试性**：依赖接口而非具体实现，便于单元测试
+- ✅ **可读性**：清晰的接口定义和命名规范
+- ✅ **可复用性**：组件独立，可在不同场景下复用
 
 ---
 
-## 🎯 设计原则应用
+## 架构设计原则
 
-### 1. ✅ 单一职责原则（SRP）
+### 1. 单一职责原则（SRP）
 
-每个组件只负责一个功能：
+每个组件只负责一项职责：
 
-| 组件 | 职责 | 文件 |
-|------|------|------|
-| `Validator` | 协调验证流程 | `validator.go` |
-| `ErrorCollector` | 收集和管理错误 | `collector.go` |
-| `TypeInfoCache` | 缓存类型元数据 | `cache.go` |
-| `ValidationStrategy` | 执行具体验证 | `strategy.go` |
+- **RuleProvider**: 只提供验证规则
+- **CustomValidator**: 只执行自定义验证逻辑
+- **ErrorCollector**: 只收集和管理错误
+- **TypeCache**: 只缓存类型信息
+- **ValidationStrategy**: 每个策略只负责一种验证逻辑
 
-### 2. ✅ 开放封闭原则（OCP）
+### 2. 开放封闭原则（OCP）
 
-通过策略模式实现扩展：
+对扩展开放，对修改封闭：
 
-```go
-// 定义验证策略接口
-type ValidationStrategy interface {
-    Execute(obj any, scene ValidateScene, collector ErrorCollector)
-}
+- 通过**策略模式**扩展新的验证逻辑，无需修改核心验证器
+- 通过**接口隔离**实现不同的验证行为
+- 通过**建造者模式**灵活配置验证器
 
-// 轻松添加新策略，无需修改核心代码
-type customStrategy struct{}
-func (s *customStrategy) Execute(obj any, scene ValidateScene, collector ErrorCollector) {
-    // 自定义验证逻辑
-}
-```
+### 3. 里氏替换原则（LSP）
 
-### 3. ✅ 里氏替换原则（LSP）
+所有接口实现都可以互相替换：
 
-所有策略实现可以互相替换：
+- `TypeCache` 接口的不同实现可以互换
+- `ValidationStrategy` 的不同策略可以互换
+- `ErrorCollector` 的不同实现可以互换
 
-```go
-var strategy ValidationStrategy
-strategy = NewRuleStrategy(v)
-strategy = NewBusinessStrategy()
-strategy = NewCompositeStrategy(s1, s2) // 组合策略
-// 统一调用
-strategy.Execute(obj, scene, collector)
-```
-
-### 4. ✅ 接口隔离原则（ISP）
-
-细化的专用接口：
-
-```go
-// 规则提供者接口
-type RuleProvider interface {
-    GetRules() map[ValidateScene]map[string]string
-}
-
-// 业务验证器接口
-type BusinessValidator interface {
-    ValidateBusiness(scene ValidateScene) []ValidationError
-}
-
-// 模型只需实现需要的接口
-```
-
-### 5. ✅ 依赖倒置原则（DIP）
+### 4. 依赖倒置原则（DIP）
 
 依赖抽象而非具体实现：
 
-```go
-type Validator struct {
-    typeCache TypeInfoCache        // 依赖接口
-    strategy  ValidationStrategy   // 依赖接口
-}
+- 验证器依赖 `ValidationStrategy` 接口，而非具体策略
+- 策略依赖 `TypeCache` 接口，而非具体缓存实现
+- 所有组件都通过接口交互
 
-// 可以注入自定义实现
-validator := NewValidator(Config{
-    TypeCache: myCustomCache,
-    Strategy:  myCustomStrategy,
-})
+### 5. 接口隔离原则（ISP）
+
+接口细粒度设计，客户端不依赖不需要的接口：
+
+- `ErrorReporter`: 只提供报告错误的方法
+- `ErrorCollector`: 扩展 ErrorReporter，增加错误管理功能
+- `Result`: 只提供结果查询功能
+- `Validator`: 只提供验证功能
+
+---
+
+## 核心架构
+
+### 架构图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Validator                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         Strategy Pattern (策略模式)                  │  │
+│  │  ┌────────────────┐  ┌──────────────┐  ┌──────────┐ │  │
+│  │  │ RuleValidation │  │   Custom     │  │  Nested  │ │  │
+│  │  │   Strategy     │→ │  Validation  │→ │Validation│ │  │
+│  │  │                │  │   Strategy   │  │ Strategy │ │  │
+│  │  └────────────────┘  └──────────────┘  └──────────┘ │  │
+│  └──────────────────────────────────────────────────────┘  │
+│         ↓                  ↓                    ↓            │
+│  ┌──────────┐      ┌──────────────┐    ┌──────────────┐   │
+│  │TypeCache │      │ErrorCollector│    │RegistryMgr   │   │
+│  └──────────┘      └──────────────┘    └──────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+                      ┌───────────────┐
+                      │    Result     │
+                      │  (验证结果)    │
+                      └───────────────┘
 ```
 
+### 核心接口
+
+#### 1. Validator - 验证器接口
+
+```go
+type Validator interface {
+    Validate(obj any, scene Scene) Result
+}
+```
+
+**职责**：执行验证并返回结果
+
+#### 2. RuleProvider - 规则提供者接口
+
+```go
+type RuleProvider interface {
+    ProvideRules() map[Scene]FieldRules
+}
+```
+
+**职责**：为模型提供场景化的字段验证规则
+
+#### 3. CustomValidator - 自定义验证器接口
+
+```go
+type CustomValidator interface {
+    ValidateCustom(scene Scene, reporter ErrorReporter)
+}
+```
+
+**职责**：执行复杂的业务逻辑验证
+
+#### 4. ValidationStrategy - 验证策略接口
+
+```go
+type ValidationStrategy interface {
+    Execute(obj any, scene Scene, collector ErrorCollector) bool
+}
+```
+
+**职责**：定义可插拔的验证策略
+
 ---
 
-## 🎨 设计模式应用
+## 快速开始
 
-| 设计模式 | 应用场景 | 优势 |
-|---------|---------|------|
-| **策略模式** | 验证策略 | 易于扩展新验证类型 |
-| **工厂方法** | 对象创建 | 统一的创建接口 |
-| **组合模式** | 策略组合 | 灵活组合多个策略 |
-| **依赖注入** | 配置验证器 | 提升可测试性 |
-
----
-
-## 🚀 快速开始
-
-### 1. 基本使用
+### 基础使用
 
 ```go
 package main
@@ -113,604 +146,489 @@ import (
 type User struct {
     Username string `json:"username"`
     Email    string `json:"email"`
+    Password string `json:"password"`
     Age      int    `json:"age"`
 }
 
-// 实现 RuleProvider 接口（字段规则验证）
-func (u *User) GetRules() map[v2.ValidateScene]map[string]string {
-    return map[v2.ValidateScene]map[string]string{
+// 实现 RuleProvider 接口 - 提供字段验证规则
+func (u *User) ProvideRules() map[v2.Scene]v2.FieldRules {
+    return map[v2.Scene]v2.FieldRules{
         v2.SceneCreate: {
-            "username": "required,min=3,max=20",
-            "email":    "required,email",
-            "age":      "omitempty,gte=0,lte=150",
+            "Username": "required,min=3,max=20",
+            "Email":    "required,email",
+            "Password": "required,min=6",
+            "Age":      "omitempty,gte=0,lte=150",
+        },
+        v2.SceneUpdate: {
+            "Username": "omitempty,min=3,max=20",
+            "Email":    "omitempty,email",
         },
     }
-}
-
-// 实现 BusinessValidator 接口（业务逻辑验证）
-func (u *User) ValidateBusiness(scene v2.ValidateScene) []v2.ValidationError {
-    var errors []v2.ValidationError
-    
-    if u.Username == "admin" {
-        errors = append(errors, v2.NewFieldError(
-            "username",
-            "reserved",
-            "用户名是保留字",
-        ))
-    }
-    
-    return errors
 }
 
 func main() {
-    // 创建验证器
-    validator := v2.NewValidator()
-    
-    // 创建用户
     user := &User{
         Username: "john",
         Email:    "john@example.com",
+        Password: "password123",
         Age:      25,
     }
     
-    // 验证
-    errors := validator.Validate(user, v2.SceneCreate)
+    // 使用全局验证器
+    result := v2.Validate(user, v2.SceneCreate)
     
-    // 处理结果
-    if len(errors) > 0 {
-        fmt.Println("验证失败:")
-        for _, err := range errors {
-            fmt.Printf("- %s: %s\n", err.Field(), err.Message())
+    if !result.IsValid() {
+        for _, err := range result.Errors() {
+            fmt.Printf("字段 %s 验证失败: %s\n", err.Field, err.Message)
         }
-    } else {
-        fmt.Println("验证通过!")
-    }
-}
-```
-
----
-
-## 📚 核心接口
-
-### RuleProvider - 字段规则验证
-
-```go
-type RuleProvider interface {
-    GetRules() map[ValidateScene]map[string]string
-}
-
-// 使用示例
-func (u *User) GetRules() map[v2.ValidateScene]map[string]string {
-    return map[v2.ValidateScene]map[string]string{
-        v2.SceneCreate: {
-            "username": "required,min=3,max=20,alphanum",
-            "email":    "required,email",
-        },
-        v2.SceneUpdate: {
-            "username": "omitempty,min=3,max=20,alphanum",
-            "email":    "omitempty,email",
-        },
-    }
-}
-```
-
-### BusinessValidator - 业务逻辑验证
-
-```go
-type BusinessValidator interface {
-    ValidateBusiness(scene ValidateScene) []ValidationError
-}
-
-// 使用示例
-func (u *User) ValidateBusiness(scene v2.ValidateScene) []v2.ValidationError {
-    var errors []v2.ValidationError
-    
-    // 复杂的业务逻辑验证
-    if scene == v2.SceneCreate && u.Age < 18 {
-        errors = append(errors, v2.NewFieldError(
-            "age",
-            "underage",
-            "用户必须年满18岁",
-        ))
-    }
-    
-    return errors
-}
-```
-
----
-
-## 🔧 高级功能
-
-### 1. 自定义验证策略
-
-```go
-// 定义自定义策略
-type DatabaseValidationStrategy struct {
-    db *sql.DB
-}
-
-func (s *DatabaseValidationStrategy) Execute(
-    obj any, 
-    scene v2.ValidateScene, 
-    collector v2.ErrorCollector,
-) {
-    user, ok := obj.(*User)
-    if !ok {
         return
     }
     
-    // 检查用户名唯一性
-    exists := s.checkUsernameExists(user.Username)
-    if exists {
-        collector.Add(v2.NewFieldError(
-            "username",
-            "unique",
-            "用户名已存在",
-        ))
+    fmt.Println("验证通过！")
+}
+```
+
+---
+
+## 高级功能
+
+### 1. 自定义验证逻辑
+
+实现 `CustomValidator` 接口来添加复杂的业务逻辑验证：
+
+```go
+func (u *User) ValidateCustom(scene v2.Scene, reporter v2.ErrorReporter) {
+    // 跨字段验证
+    if u.Password != "" && u.Password != u.ConfirmPassword {
+        reporter.ReportWithMessage(
+            "User.ConfirmPassword",
+            "password_mismatch",
+            "",
+            "密码和确认密码不一致",
+        )
     }
+    
+    // 场景化验证
+    if scene == v2.SceneCreate && u.Age < 18 {
+        reporter.ReportWithMessage(
+            "User.Age",
+            "min_age",
+            "18",
+            "创建用户时年龄必须大于等于 18 岁",
+        )
+    }
+    
+    // 业务规则验证
+    if u.Username == "admin" || u.Username == "root" {
+        reporter.ReportWithMessage(
+            "User.Username",
+            "reserved_word",
+            "",
+            "用户名是保留字，不能使用",
+        )
+    }
+}
+```
+
+### 2. Map 字段验证
+
+验证动态 map 字段（如 Extras、Metadata）：
+
+```go
+type Product struct {
+    Name     string         `json:"name"`
+    Category string         `json:"category"`
+    Extras   map[string]any `json:"extras"`
+}
+
+func (p *Product) ValidateCustom(scene v2.Scene, reporter v2.ErrorReporter) {
+    if p.Extras == nil {
+        return
+    }
+    
+    // 根据分类验证不同的 Extras 字段
+    switch p.Category {
+    case "electronics":
+        // 验证必填字段
+        if err := v2.ValidateMapRequired(p.Extras, "brand", "warranty"); err != nil {
+            reporter.ReportWithMessage("Product.Extras", "required_keys", "", err.Error())
+        }
+        
+        // 验证字段类型和范围
+        if err := v2.ValidateMapString(p.Extras, "brand", 2, 50); err != nil {
+            reporter.ReportWithMessage("Product.Extras.brand", "invalid", "", err.Error())
+        }
+        
+        if err := v2.ValidateMapInt(p.Extras, "warranty", 12, 60); err != nil {
+            reporter.ReportWithMessage("Product.Extras.warranty", "invalid", "", err.Error())
+        }
+        
+    case "clothing":
+        if err := v2.ValidateMapRequired(p.Extras, "size", "color"); err != nil {
+            reporter.ReportWithMessage("Product.Extras", "required_keys", "", err.Error())
+        }
+        
+        // 自定义验证
+        if err := v2.ValidateMapKey(p.Extras, "size", func(value any) error {
+            size, ok := value.(string)
+            if !ok {
+                return fmt.Errorf("size 必须是字符串")
+            }
+            validSizes := map[string]bool{"S": true, "M": true, "L": true, "XL": true}
+            if !validSizes[size] {
+                return fmt.Errorf("size 必须是 S, M, L, XL 之一")
+            }
+            return nil
+        }); err != nil {
+            reporter.ReportWithMessage("Product.Extras.size", "invalid", "", err.Error())
+        }
+    }
+}
+```
+
+### 3. 使用 MapValidator 进行结构化验证
+
+```go
+func (p *Product) ValidateCustom(scene v2.Scene, reporter v2.ErrorReporter) {
+    if p.Extras == nil {
+        return
+    }
+    
+    // 创建 Map 验证器
+    validator := v2.NewMapValidator().
+        WithNamespace("Product.Extras").
+        WithRequiredKeys("brand", "warranty").
+        WithAllowedKeys("brand", "warranty", "color", "model").
+        WithKeyValidator("warranty", func(value any) error {
+            warranty, ok := value.(int)
+            if !ok {
+                return fmt.Errorf("warranty 必须是整数")
+            }
+            if warranty < 12 || warranty > 60 {
+                return fmt.Errorf("warranty 必须在 12 到 60 个月之间")
+            }
+            return nil
+        })
+    
+    // 执行验证
+    errors := validator.Validate(p.Extras)
+    
+    // 添加错误到报告器
+    for _, err := range errors {
+        reporter.ReportWithMessage(err.Namespace, err.Tag, err.Param, err.Message)
+    }
+}
+```
+
+### 4. 建造者模式自定义验证器
+
+```go
+// 创建自定义配置的验证器
+validator := v2.NewValidatorBuilder().
+    WithMaxDepth(50).                    // 设置最大嵌套深度
+    WithTypeCache(customCache).          // 使用自定义缓存
+    WithDefaultStrategies().             // 使用默认策略
+    Build()
+
+result := validator.Validate(user, v2.SceneCreate)
+```
+
+### 5. 添加自定义策略
+
+```go
+// 定义自定义策略
+type LoggingStrategy struct{}
+
+func (s *LoggingStrategy) Execute(obj any, scene v2.Scene, collector v2.ErrorCollector) bool {
+    fmt.Printf("Validating object of type %T in scene %s\n", obj, scene)
+    return true // 继续执行后续策略
 }
 
 // 使用自定义策略
-validator := v2.NewValidator(v2.Config{
-    Strategy: v2.NewCompositeStrategy(
-        v2.NewRuleStrategy(nil),
-        v2.NewBusinessStrategy(),
-        &DatabaseValidationStrategy{db: db},
-    ),
-})
+validator := v2.NewValidatorBuilder().
+    WithStrategy(&LoggingStrategy{}).
+    WithDefaultStrategies().
+    Build()
 ```
 
-### 2. 场景组合
+---
+
+## 验证结果处理
+
+### Result 接口方法
 
 ```go
-// 定义组合场景
+result := v2.Validate(user, v2.SceneCreate)
+
+// 检查是否验证通过
+if result.IsValid() {
+    fmt.Println("验证通过")
+}
+
+// 获取所有错误
+errors := result.Errors()
+
+// 获取第一个错误
+firstError := result.FirstError()
+
+// 按字段筛选错误
+usernameErrors := result.ErrorsByField("username")
+
+// 按标签筛选错误
+requiredErrors := result.ErrorsByTag("required")
+
+// 实现 error 接口
+fmt.Println(result.Error())
+```
+
+---
+
+## 场景化验证
+
+V2 支持灵活的场景定义：
+
+```go
 const (
-    SceneCreateOrUpdate = v2.SceneCreate | v2.SceneUpdate
-    SceneAll            = v2.SceneCreate | v2.SceneUpdate | v2.SceneDelete
+    SceneCreate v2.Scene = "create"
+    SceneUpdate v2.Scene = "update"
+    SceneDelete v2.Scene = "delete"
+    SceneQuery  v2.Scene = "query"
+    
+    // 自定义场景
+    SceneImport v2.Scene = "import"
+    SceneExport v2.Scene = "export"
 )
 
-// 使用组合场景
-errors := validator.Validate(user, SceneCreateOrUpdate)
-```
-
-### 3. 依赖注入
-
-```go
-// 注入自定义缓存
-validator := v2.NewValidator(v2.Config{
-    TypeCache: myCustomCache,
-})
-
-// 注入自定义策略
-validator := v2.NewValidator(v2.Config{
-    Strategy: myCustomStrategy,
-})
-```
-
----
-
-## 🧪 测试支持
-
-### Mock ErrorCollector
-
-```go
-type MockCollector struct {
-    errors []v2.ValidationError
-}
-
-func (m *MockCollector) Add(err v2.ValidationError) {
-    m.errors = append(m.errors, err)
-}
-
-// 其他方法实现...
-
-// 在测试中使用
-func TestMyValidator(t *testing.T) {
-    collector := &MockCollector{}
-    strategy := NewMyStrategy()
-    strategy.Execute(obj, scene, collector)
-    
-    assert.Equal(t, 1, len(collector.errors))
+func (u *User) ProvideRules() map[v2.Scene]v2.FieldRules {
+    return map[v2.Scene]v2.FieldRules{
+        SceneCreate: {
+            "Username": "required,min=3,max=20",
+            "Email":    "required,email",
+            "Password": "required,min=6",
+        },
+        SceneUpdate: {
+            "Username": "omitempty,min=3,max=20",
+            "Email":    "omitempty,email",
+        },
+        SceneImport: {
+            "Username": "required",
+            "Email":    "required,email",
+            // 导入时可能不需要密码
+        },
+    }
 }
 ```
 
 ---
 
-## 📊 性能优化
+## 性能优化
 
-### 类型缓存
+### 1. 类型缓存
+
+类型信息会被自动缓存，避免重复的反射操作：
 
 ```go
-// 第一次验证：缓存类型信息
-validator.Validate(user1, v2.SceneCreate)
+validator := v2.NewValidator()
+
+// 第一次验证：构建类型信息并缓存
+result1 := validator.Validate(user1, v2.SceneCreate)
 
 // 后续验证：使用缓存，性能提升
-validator.Validate(user2, v2.SceneCreate)
-validator.Validate(user3, v2.SceneCreate)
+result2 := validator.Validate(user2, v2.SceneCreate)
 ```
 
-### 并发安全
+### 2. 并发安全
+
+V2 验证器是线程安全的，可以在多个 goroutine 中并发使用：
 
 ```go
-// ErrorCollector 支持并发安全
+validator := v2.NewValidator()
+
 var wg sync.WaitGroup
 for _, user := range users {
     wg.Add(1)
     go func(u *User) {
         defer wg.Done()
-        errors := validator.Validate(u, v2.SceneCreate)
-        // 处理错误
+        result := validator.Validate(u, v2.SceneCreate)
+        // 处理结果...
     }(user)
 }
 wg.Wait()
 ```
 
----
+### 3. 清除缓存
 
-## 🔄 与原版本对比
+在测试或需要重新加载类型信息时：
 
-| 特性 | 原版本 | V2 版本 |
-|------|--------|---------|
-| **接口设计** | 回调函数 | 直接返回错误列表 |
-| **依赖管理** | 依赖具体实现 | 依赖抽象接口 |
-| **可扩展性** | 需修改核心代码 | 通过策略模式扩展 |
-| **可测试性** | 难以 Mock | 易于 Mock 和测试 |
-| **代码组织** | 单文件多职责 | 多文件单一职责 |
-| **并发安全** | 部分支持 | 完全支持 |
+```go
+// 清除默认验证器的缓存
+v2.ClearCache()
 
----
-
-## 📖 文件结构
-
-```
-validator/v2/
-├── doc.go           # 包文档
-├── types.go         # 基本类型定义
-├── interfaces.go    # 核心接口
-├── validator.go     # 验证器实现
-├── strategy.go      # 验证策略
-├── collector.go     # 错误收集器
-├── cache.go         # 类型缓存
-├── validator_test.go # 单元测试
-└── README.md        # 本文档
+// 或清除自定义验证器的缓存
+validator.ClearCache()
 ```
 
 ---
 
-## 💡 最佳实践
+## 设计模式应用
+
+### 1. 策略模式（Strategy Pattern）
+
+不同的验证逻辑通过策略实现：
+
+- `RuleValidationStrategy`: 基于规则的验证
+- `CustomValidationStrategy`: 自定义业务逻辑验证
+- `NestedValidationStrategy`: 嵌套结构验证
+
+### 2. 建造者模式（Builder Pattern）
+
+灵活配置验证器：
+
+```go
+validator := v2.NewValidatorBuilder().
+    WithMaxDepth(50).
+    WithDefaultStrategies().
+    Build()
+```
+
+### 3. 工厂方法模式（Factory Method Pattern）
+
+创建各种组件：
+
+- `NewValidator()`: 创建验证器
+- `NewErrorCollector()`: 创建错误收集器
+- `NewMapValidator()`: 创建 Map 验证器
+
+### 4. 单例模式（Singleton Pattern）
+
+全局默认验证器：
+
+```go
+result := v2.Validate(user, v2.SceneCreate) // 使用全局单例
+```
+
+---
+
+## 与 V1 版本对比
+
+| 特性 | V1 | V2 |
+|------|----|----|
+| **接口设计** | 混合职责 | 职责分离，符合 ISP |
+| **可扩展性** | 通过修改代码扩展 | 通过策略模式扩展 |
+| **依赖管理** | 依赖具体实现 | 依赖抽象接口（DIP） |
+| **测试性** | 较难 mock | 易于 mock 和测试 |
+| **配置灵活性** | 有限 | 建造者模式，高度灵活 |
+| **错误处理** | 返回切片 | Result 接口，功能丰富 |
+| **代码组织** | 单一大文件 | 按职责分文件 |
+
+---
+
+## 最佳实践
 
 ### 1. 接口实现建议
 
-```go
-// ✅ 好的实践：分离验证逻辑
-type User struct {
-    Username string
-    Email    string
-}
+- 简单的格式验证使用 `RuleProvider`
+- 复杂的业务逻辑使用 `CustomValidator`
+- Map 字段验证使用 `MapValidator` 或便捷函数
 
-// 简单规则 -> RuleProvider
-func (u *User) GetRules() map[v2.ValidateScene]map[string]string {
-    return map[v2.ValidateScene]map[string]string{
-        v2.SceneCreate: {"username": "required,min=3"},
-    }
-}
-
-// 复杂逻辑 -> BusinessValidator
-func (u *User) ValidateBusiness(scene v2.ValidateScene) []v2.ValidationError {
-    // 复杂的业务验证
-    return nil
-}
-```
-
-### 2. 错误处理
+### 2. 错误消息建议
 
 ```go
-errors := validator.Validate(user, v2.SceneCreate)
-if len(errors) > 0 {
-    // 按字段分组
-    errorMap := make(map[string][]string)
-    for _, err := range errors {
-        errorMap[err.Field()] = append(
-            errorMap[err.Field()],
-            err.Message(),
-        )
-    }
-    
-    // 返回给客户端
-    return errorMap
-}
-```
-
-### 3. 场景化验证
-
-```go
-// 定义清晰的场景常量
-const (
-    SceneCreate v2.ValidateScene = 1 << 0
-    SceneUpdate v2.ValidateScene = 1 << 1
-    SceneDelete v2.ValidateScene = 1 << 2
+// 提供友好的中文错误消息
+reporter.ReportWithMessage(
+    "User.Email",
+    "email",
+    "",
+    "邮箱格式不正确，请输入有效的邮箱地址",
 )
+```
 
-// 场景组合
-const SceneCreateOrUpdate = SceneCreate | SceneUpdate
+### 3. 性能建议
+
+- 对于高频验证，创建独立的验证器实例而非使用全局单例
+- 合理设置最大嵌套深度，防止过深的递归
+- 定期清理不再使用的类型缓存
+
+### 4. 测试建议
+
+```go
+func TestUserValidation(t *testing.T) {
+    // 使用独立的验证器实例，避免测试间干扰
+    validator := v2.NewValidator()
+    
+    user := &User{...}
+    result := validator.Validate(user, v2.SceneCreate)
+    
+    if !result.IsValid() {
+        t.Errorf("Expected validation to pass, but got: %v", result.Error())
+    }
+}
 ```
 
 ---
 
-## 🎓 总结
+## API 参考
 
-V2 版本的验证器通过应用 **SOLID 原则**和**设计模式**，实现了：
+### 便捷函数
 
-- ✅ **高内聚低耦合**：每个组件职责明确
-- ✅ **易于扩展**：通过策略模式无需修改核心代码
-- ✅ **易于测试**：依赖接口，支持 Mock
-- ✅ **易于维护**：清晰的代码结构
-- ✅ **高性能**：类型缓存优化
-- ✅ **并发安全**：支持多协程并发验证
+```go
+// 使用默认验证器
+func Validate(obj any, scene Scene) Result
 
-这是一个**生产级别**的验证器实现，适合大型项目使用！
-package v2_test
+// 清除默认验证器缓存
+func ClearCache()
+```
 
-import (
-	"fmt"
-	"testing"
+### Map 验证便捷函数
 
-	"katydid-common-account/pkg/validator/v2"
-)
+```go
+func ValidateMapRequired(data map[string]any, keys ...string) error
+func ValidateMapString(data map[string]any, key string, minLen, maxLen int) error
+func ValidateMapInt(data map[string]any, key string, min, max int) error
+func ValidateMapFloat(data map[string]any, key string, min, max float64) error
+func ValidateMapBool(data map[string]any, key string) error
+func ValidateMapKey(data map[string]any, key string, validator func(value any) error) error
+```
 
-// ============================================================================
-// 示例：基本使用
-// ============================================================================
+---
 
-// User 用户模型
-type User struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Age      int    `json:"age"`
-	Password string `json:"password"`
-}
+## 常见验证标签
 
-// GetRules 实现 RuleProvider 接口
-func (u *User) GetRules() map[v2.ValidateScene]map[string]string {
-	return map[v2.ValidateScene]map[string]string{
-		v2.SceneCreate: {
-			"username": "required,min=3,max=20,alphanum",
-			"email":    "required,email",
-			"age":      "omitempty,gte=0,lte=150",
-			"password": "required,min=6",
-		},
-		v2.SceneUpdate: {
-			"username": "omitempty,min=3,max=20,alphanum",
-			"email":    "omitempty,email",
-			"age":      "omitempty,gte=0,lte=150",
-		},
-	}
-}
+与 V1 相同，支持 go-playground/validator 的所有标签：
 
-// ValidateBusiness 实现 BusinessValidator 接口
-func (u *User) ValidateBusiness(scene v2.ValidateScene) []v2.ValidationError {
-	var errors []v2.ValidationError
-	
-	// 场景化业务验证
-	if scene == v2.SceneCreate {
-		// 检查用户名是否为保留字
-		if u.Username == "admin" || u.Username == "root" || u.Username == "system" {
-			errors = append(errors, v2.NewFieldError(
-				"username",
-				"reserved",
-				"用户名是保留字，不能使用",
-			))
-		}
-		
-		// 检查密码强度（示例）
-		if len(u.Password) > 0 && len(u.Password) < 6 {
-			errors = append(errors, v2.NewFieldError(
-				"password",
-				"weak",
-				"密码强度不足",
-			))
-		}
-	}
-	
-	return errors
-}
+```
+required      - 必填
+omitempty     - 可选
+min=N         - 最小长度/值
+max=N         - 最大长度/值
+len=N         - 长度等于
+email         - 邮箱格式
+url           - URL 格式
+numeric       - 数字
+alpha         - 字母
+alphanum      - 字母和数字
+gt=N          - 大于
+gte=N         - 大于等于
+lt=N          - 小于
+lte=N         - 小于等于
+```
 
-// TestBasicValidation 基本验证测试
-func TestBasicValidation(t *testing.T) {
-	// 创建验证器
-	validator := v2.NewValidator()
-	
-	// 测试1: 验证成功
-	user1 := &User{
-		Username: "john",
-		Email:    "john@example.com",
-		Age:      25,
-		Password: "secret123",
-	}
-	
-	errors := validator.Validate(user1, v2.SceneCreate)
-	if len(errors) > 0 {
-		t.Errorf("Expected no errors, got %d errors", len(errors))
-		for _, err := range errors {
-			t.Logf("Error: %s", err.Message())
-		}
-	}
-	
-	// 测试2: 验证失败 - 缺少必填字段
-	user2 := &User{
-		Email: "invalid-email", // 无效的邮箱
-	}
-	
-	errors = validator.Validate(user2, v2.SceneCreate)
-	if len(errors) == 0 {
-		t.Error("Expected validation errors, got none")
-	}
-	
-	// 测试3: 业务验证失败 - 保留字用户名
-	user3 := &User{
-		Username: "admin", // 保留字
-		Email:    "admin@example.com",
-		Password: "admin123",
-	}
-	
-	errors = validator.Validate(user3, v2.SceneCreate)
-	hasReservedError := false
-	for _, err := range errors {
-		if err.Tag() == "reserved" {
-			hasReservedError = true
-			break
-		}
-	}
-	
-	if !hasReservedError {
-		t.Error("Expected reserved username error")
-	}
-}
+---
 
-// ExampleValidator_Validate 使用示例
-func ExampleValidator_Validate() {
-	// 创建验证器
-	validator := v2.NewValidator()
-	
-	// 创建用户对象
-	user := &User{
-		Username: "john",
-		Email:    "john@example.com",
-		Age:      25,
-		Password: "secret123",
-	}
-	
-	// 验证创建场景
-	errors := validator.Validate(user, v2.SceneCreate)
-	
-	// 处理验证结果
-	if len(errors) > 0 {
-		fmt.Println("验证失败:")
-		for _, err := range errors {
-			fmt.Printf("- %s: %s\n", err.Field(), err.Message())
-		}
-	} else {
-		fmt.Println("验证通过")
-	}
-	
-	// Output:
-	// 验证通过
-}
+## 总结
 
-// ============================================================================
-// 示例：自定义策略
-// ============================================================================
+Validator V2 通过应用 SOLID 原则和设计模式，提供了一个：
 
-// customStrategy 自定义验证策略示例
-type customStrategy struct{}
+- ✅ **高内聚低耦合**的验证架构
+- ✅ **易于扩展和维护**的代码结构
+- ✅ **便于测试**的接口设计
+- ✅ **功能完整**的验证解决方案
 
-func (s *customStrategy) Execute(obj any, scene v2.ValidateScene, collector v2.ErrorCollector) {
-	user, ok := obj.(*User)
-	if !ok {
-		return
-	}
-	
-	// 自定义验证逻辑：用户名和邮箱前缀不能相同
-	if user.Username != "" && user.Email != "" {
-		emailPrefix := user.Email[:len(user.Username)]
-		if emailPrefix == user.Username {
-			collector.Add(v2.NewFieldError(
-				"email",
-				"conflict",
-				"邮箱前缀不能与用户名相同",
-			))
-		}
-	}
-}
+同时保持了与 V1 版本相同的功能，平滑迁移路径清晰。
 
-func TestCustomStrategy(t *testing.T) {
-	// 创建带自定义策略的验证器
-	validator := v2.NewValidator(v2.Config{
-		Strategy: v2.NewCompositeStrategy(
-			v2.NewRuleStrategy(nil), // 会在内部创建
-			v2.NewBusinessStrategy(),
-			&customStrategy{}, // 自定义策略
-		),
-	})
-	
-	user := &User{
-		Username: "john",
-		Email:    "john@example.com", // 邮箱前缀与用户名相同
-		Password: "secret123",
-	}
-	
-	errors := validator.Validate(user, v2.SceneCreate)
-	
-	hasConflictError := false
-	for _, err := range errors {
-		if err.Tag() == "conflict" {
-			hasConflictError = true
-			t.Logf("Found conflict error: %s", err.Message())
-		}
-	}
-	
-	if !hasConflictError {
-		t.Error("Expected conflict error")
-	}
-}
+---
 
-// ============================================================================
-// 示例：场景组合
-// ============================================================================
+## 许可证
 
-func TestSceneCombination(t *testing.T) {
-	validator := v2.NewValidator()
-	
-	// 定义组合场景
-	const SceneCreateOrUpdate = v2.SceneCreate | v2.SceneUpdate
-	
-	user := &User{
-		Username: "john",
-		Email:    "john@example.com",
-	}
-	
-	// 使用组合场景验证
-	errors := validator.Validate(user, SceneCreateOrUpdate)
-	
-	t.Logf("Validation with combined scene returned %d errors", len(errors))
-}
-
-// ============================================================================
-// 性能测试
-// ============================================================================
-
-func BenchmarkValidation(b *testing.B) {
-	validator := v2.NewValidator()
-	
-	user := &User{
-		Username: "john",
-		Email:    "john@example.com",
-		Age:      25,
-		Password: "secret123",
-	}
-	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = validator.Validate(user, v2.SceneCreate)
-	}
-}
-
-func BenchmarkValidationWithCache(b *testing.B) {
-	validator := v2.NewValidator()
-	
-	// 预热缓存
-	user := &User{
-		Username: "john",
-		Email:    "john@example.com",
-		Age:      25,
-		Password: "secret123",
-	}
-	_ = validator.Validate(user, v2.SceneCreate)
-	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = validator.Validate(user, v2.SceneCreate)
-	}
-}
+本项目遵循项目根目录的许可证。
 

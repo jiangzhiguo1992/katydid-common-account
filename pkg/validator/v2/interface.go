@@ -1,0 +1,177 @@
+package v2
+
+// ============================================================================
+// 核心接口定义 - 基于接口隔离原则（ISP）
+// ============================================================================
+
+// Validator 验证器核心接口 - 单一职责：只负责执行验证
+// 依赖倒置原则（DIP）：依赖抽象而非具体实现
+type Validator interface {
+	// Validate 验证对象
+	// 参数：
+	//   - obj: 待验证的对象
+	//   - scene: 验证场景
+	// 返回：验证结果
+	Validate(obj any, scene Scene) Result
+}
+
+// RuleProvider 规则提供者接口 - 提供字段验证规则
+// 单一职责原则（SRP）：只负责提供验证规则，不执行验证
+type RuleProvider interface {
+	// ProvideRules 提供场景化的验证规则
+	// 返回格式：map[场景][字段名]规则字符串
+	ProvideRules() map[Scene]FieldRules
+}
+
+// CustomValidator 自定义验证器接口 - 复杂业务逻辑验证
+// 单一职责原则（SRP）：只负责复杂的业务逻辑验证
+type CustomValidator interface {
+	// ValidateCustom 执行自定义验证逻辑
+	// 参数：
+	//   - scene: 当前验证场景
+	//   - reporter: 错误报告器
+	ValidateCustom(scene Scene, reporter ErrorReporter)
+}
+
+// ErrorReporter 错误报告器接口 - 用于收集验证错误
+// 接口隔离原则（ISP）：只提供必要的报告方法
+type ErrorReporter interface {
+	// Report 报告一个验证错误
+	Report(namespace, tag, param string)
+
+	// ReportWithMessage 报告一个带自定义消息的验证错误
+	ReportWithMessage(namespace, tag, param, message string)
+}
+
+// ValidationStrategy 验证策略接口 - 策略模式
+// 开放封闭原则（OCP）：对扩展开放，对修改封闭
+type ValidationStrategy interface {
+	// Execute 执行验证策略
+	// 参数：
+	//   - obj: 待验证的对象
+	//   - scene: 验证场景
+	//   - collector: 错误收集器
+	// 返回：是否应继续执行后续策略
+	Execute(obj any, scene Scene, collector ErrorCollector) bool
+}
+
+// ErrorCollector 错误收集器接口 - 收集和管理验证错误
+// 接口隔离原则（ISP）：分离错误收集和查询功能
+type ErrorCollector interface {
+	ErrorReporter
+
+	// Add 添加一个错误
+	Add(err *FieldError)
+
+	// AddAll 批量添加错误
+	AddAll(errs []*FieldError)
+
+	// HasErrors 是否存在错误
+	HasErrors() bool
+
+	// GetErrors 获取所有错误
+	GetErrors() []*FieldError
+
+	// Clear 清空所有错误
+	Clear()
+}
+
+// Result 验证结果接口 - 查询验证结果
+// 接口隔离原则（ISP）：只提供结果查询功能
+type Result interface {
+	// IsValid 验证是否通过
+	IsValid() bool
+
+	// Errors 获取所有错误
+	Errors() []*FieldError
+
+	// FirstError 获取第一个错误
+	FirstError() *FieldError
+
+	// ErrorsByField 获取指定字段的错误
+	ErrorsByField(field string) []*FieldError
+
+	// ErrorsByTag 获取指定标签的错误
+	ErrorsByTag(tag string) []*FieldError
+
+	// Error 实现 error 接口
+	Error() string
+}
+
+// TypeCache 类型缓存接口 - 缓存类型信息
+// 单一职责原则（SRP）：只负责类型信息的缓存
+type TypeCache interface {
+	// Get 获取类型信息
+	Get(obj any) *TypeInfo
+
+	// Clear 清空缓存
+	Clear()
+}
+
+// RegistryManager 注册管理器接口 - 管理已注册的类型
+// 单一职责原则（SRP）：只负责注册状态管理
+type RegistryManager interface {
+	// IsRegistered 检查类型是否已注册
+	IsRegistered(obj any) bool
+
+	// MarkRegistered 标记类型已注册
+	MarkRegistered(obj any)
+
+	// Clear 清空注册记录
+	Clear()
+}
+
+// FieldValidator 字段验证器接口 - 验证单个字段
+// 接口隔离原则（ISP）：只负责字段级别的验证
+type FieldValidator interface {
+	// ValidateField 验证单个字段
+	ValidateField(obj any, fieldName string, rule string, collector ErrorCollector) error
+}
+
+// StructValidator 结构体验证器接口 - 验证整个结构体
+// 接口隔离原则（ISP）：只负责结构体级别的验证
+type StructValidator interface {
+	// ValidateStruct 验证结构体
+	ValidateStruct(obj any, collector ErrorCollector) error
+}
+
+// NestedValidator 嵌套验证器接口 - 递归验证嵌套结构
+// 单一职责原则（SRP）：只负责嵌套结构的验证
+type NestedValidator interface {
+	// ValidateNested 验证嵌套的结构体字段
+	ValidateNested(obj any, scene Scene, depth int, collector ErrorCollector)
+}
+
+// ValidatorBuilder 验证器构建器接口 - 建造者模式
+// 开放封闭原则（OCP）：通过构建器扩展配置，而不修改验证器
+type ValidatorBuilder interface {
+	// WithStrategy 添加验证策略
+	WithStrategy(strategy ValidationStrategy) ValidatorBuilder
+
+	// WithTypeCache 设置类型缓存
+	WithTypeCache(cache TypeCache) ValidatorBuilder
+
+	// WithRegistry 设置注册管理器
+	WithRegistry(registry RegistryManager) ValidatorBuilder
+
+	// Build 构建验证器
+	Build() Validator
+}
+
+// ============================================================================
+// 辅助类型和常量
+// ============================================================================
+
+// Scene 验证场景类型 - 使用字符串以支持动态场景
+type Scene string
+
+// FieldRules 字段规则类型 - 字段名到规则的映射
+type FieldRules map[string]string
+
+// 预定义的通用场景常量
+const (
+	SceneCreate Scene = "create" // 创建场景
+	SceneUpdate Scene = "update" // 更新场景
+	SceneDelete Scene = "delete" // 删除场景
+	SceneQuery  Scene = "query"  // 查询场景
+)

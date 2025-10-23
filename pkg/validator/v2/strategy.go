@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -8,65 +9,75 @@ import (
 )
 
 // ============================================================================
-// 验证策略实现 - 策略模式 + 开放封闭原则（OCP）
+// 验证策略实现 - 策略模式
 // ============================================================================
 
-// ruleStrategy 规则验证策略
-// 职责：基于 RuleProvider 提供的规则进行验证
-type ruleStrategy struct {
-	validate *validator.Validate
+// RuleValidationStrategy 规则验证策略 - 执行基于规则的字段验证
+// 设计原则：
+//   - 单一职责：只负责字段规则验证
+//   - 开放封闭：可以被替换或扩展，不影响其他策略
+type RuleValidationStrategy struct {
+	typeCache TypeCache
+	validate  *validator.Validate
 }
 
-// NewRuleStrategy 创建规则验证策略（工厂方法）
-func NewRuleStrategy(v *validator.Validate) ValidationStrategy {
-	return &ruleStrategy{validate: v}
+// NewRuleValidationStrategy 创建规则验证策略 - 工厂方法
+func NewRuleValidationStrategy(typeCache TypeCache, validate *validator.Validate) *RuleValidationStrategy {
+	return &RuleValidationStrategy{
+		typeCache: typeCache,
+		validate:  validate,
+	}
 }
 
-// Execute 执行规则验证
-func (s *ruleStrategy) Execute(obj any, scene ValidateScene, collector ErrorCollector) {
-	// 类型检查
-	ruleProvider, ok := obj.(RuleProvider)
-	if !ok {
-		// 不实现 RuleProvider 接口，跳过
-		return
+// Execute 执行规则验证 - 实现 ValidationStrategy 接口
+func (s *RuleValidationStrategy) Execute(obj any, scene Scene, collector ErrorCollector) bool {
+	if obj == nil {
+		return true // 继续执行后续策略
 	}
 
-	// 获取验证规则
-	rules := ruleProvider.GetRules()
-	if len(rules) == 0 {
-		return
+	// 获取类型信息
+	info := s.typeCache.Get(obj)
+	if !info.IsRuleProvider {
+		// 没有规则，尝试使用 struct tag
+		if err := s.validate.Struct(obj); err != nil {
+			s.collectValidationErrors(err, collector)
+		}
+		return true
 	}
 
 	// 匹配当前场景的规则
-	matchedRules := s.matchRules(rules, scene)
-	if len(matchedRules) == 0 {
-		return
+	rules := s.matchSceneRules(info.Rules, scene)
+	if len(rules) == 0 {
+		return true
 	}
 
-	// 执行验证
-	s.validateFields(obj, matchedRules, collector)
+	// 验证每个字段
+	s.validateFields(obj, rules, collector)
+
+	return true // 继续执行后续策略
 }
 
-// matchRules 匹配场景规则
-func (s *ruleStrategy) matchRules(rules map[ValidateScene]map[string]string, scene ValidateScene) map[string]string {
-	matched := make(map[string]string)
+// matchSceneRules 匹配场景规则 - 私有方法
+func (s *RuleValidationStrategy) matchSceneRules(allRules map[Scene]FieldRules, scene Scene) FieldRules {
+	result := make(FieldRules)
 
-	for ruleScene, fieldRules := range rules {
-		// 使用位运算匹配场景
-		if scene&ruleScene != 0 {
-			for field, rule := range fieldRules {
-				matched[field] = rule
-			}
+	// 直接匹配场景
+	if rules, ok := allRules[scene]; ok {
+		for field, rule := range rules {
+			result[field] = rule
 		}
 	}
 
-	return matched
+	return result
 }
 
-// validateFields 验证字段
-func (s *ruleStrategy) validateFields(obj any, rules map[string]string, collector ErrorCollector) {
+// validateFields 验证字段 - 私有方法
+func (s *RuleValidationStrategy) validateFields(obj any, rules FieldRules, collector ErrorCollector) {
 	val := reflect.ValueOf(obj)
 	if val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return
+		}
 		val = val.Elem()
 	}
 
@@ -81,33 +92,37 @@ func (s *ruleStrategy) validateFields(obj any, rules map[string]string, collecto
 			continue
 		}
 
-		// 查找字段
-		field := s.findField(val, typ, fieldName)
+		// 先尝试通过字段名查找
+		field := val.FieldByName(fieldName)
+
+		// 如果找不到，尝试通过 JSON tag 查找
+		if !field.IsValid() {
+			field = s.findFieldByJSONTag(val, typ, fieldName)
+		}
+
 		if !field.IsValid() || !field.CanInterface() {
 			continue
 		}
 
-		// 执行验证
-		err := s.validate.Var(field.Interface(), rule)
-		if err != nil {
-			s.addValidationErrors(err, fieldName, collector)
+		// 验证字段
+		if err := s.validate.Var(field.Interface(), rule); err != nil {
+			s.collectValidationErrors(err, collector)
 		}
 	}
 }
 
-// findField 查找字段（支持 JSON tag）
-func (s *ruleStrategy) findField(val reflect.Value, typ reflect.Type, fieldName string) reflect.Value {
-	// 先按字段名查找
-	field := val.FieldByName(fieldName)
-	if field.IsValid() {
-		return field
-	}
-
-	// 按 JSON tag 查找
+// findFieldByJSONTag 通过 JSON tag 查找字段
+func (s *RuleValidationStrategy) findFieldByJSONTag(val reflect.Value, typ reflect.Type, jsonTag string) reflect.Value {
 	for i := 0; i < typ.NumField(); i++ {
-		structField := typ.Field(i)
-		jsonTag := strings.SplitN(structField.Tag.Get("json"), ",", 2)[0]
-		if jsonTag == fieldName {
+		field := typ.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "" {
+			continue
+		}
+
+		// 提取 tag 名称（忽略选项）
+		tagName := strings.SplitN(tag, ",", 2)[0]
+		if tagName == jsonTag {
 			return val.Field(i)
 		}
 	}
@@ -115,65 +130,166 @@ func (s *ruleStrategy) findField(val reflect.Value, typ reflect.Type, fieldName 
 	return reflect.Value{}
 }
 
-// addValidationErrors 添加验证错误
-func (s *ruleStrategy) addValidationErrors(err error, fieldName string, collector ErrorCollector) {
-	if validationErrors, ok := err.(validator.ValidationErrors); ok {
-		for _, e := range validationErrors {
-			collector.Add(NewFieldError(
-				fieldName,
-				e.Tag(),
-				e.Error(),
-			))
-		}
-	} else {
-		collector.Add(NewFieldError(fieldName, "validation", err.Error()))
-	}
-}
-
-// businessStrategy 业务验证策略
-// 职责：执行 BusinessValidator 的业务逻辑验证
-type businessStrategy struct{}
-
-// NewBusinessStrategy 创建业务验证策略（工厂方法）
-func NewBusinessStrategy() ValidationStrategy {
-	return &businessStrategy{}
-}
-
-// Execute 执行业务验证
-func (s *businessStrategy) Execute(obj any, scene ValidateScene, collector ErrorCollector) {
-	// 类型检查
-	businessValidator, ok := obj.(BusinessValidator)
-	if !ok {
-		// 不实现 BusinessValidator 接口，跳过
+// collectValidationErrors 收集验证错误 - 私有方法
+func (s *RuleValidationStrategy) collectValidationErrors(err error, collector ErrorCollector) {
+	if err == nil {
 		return
 	}
 
-	// 执行业务验证
-	errors := businessValidator.ValidateBusiness(scene)
-	if len(errors) > 0 {
-		collector.AddAll(errors)
+	// 转换为 ValidationErrors
+	if validationErrors, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range validationErrors {
+			fieldErr := NewFieldError(
+				e.Namespace(),
+				e.Field(),
+				e.Tag(),
+				e.Param(),
+			).WithValue(e.Value())
+
+			collector.Add(fieldErr)
+		}
+	} else {
+		// 其他类型的错误
+		collector.Add(NewFieldError("", "", "validation_error", "").
+			WithMessage(err.Error()))
 	}
 }
 
-// compositeStrategy 组合策略
-// 职责：组合多个验证策略
-// 设计模式：组合模式
-type compositeStrategy struct {
-	strategies []ValidationStrategy
+// ============================================================================
+// CustomValidationStrategy 自定义验证策略 - 执行自定义业务逻辑验证
+// ============================================================================
+
+// CustomValidationStrategy 自定义验证策略
+// 设计原则：
+//   - 单一职责：只负责自定义验证逻辑的执行
+//   - 开放封闭：不修改策略本身，通过接口扩展
+type CustomValidationStrategy struct {
+	typeCache TypeCache
 }
 
-// NewCompositeStrategy 创建组合策略（工厂方法）
-func NewCompositeStrategy(strategies ...ValidationStrategy) ValidationStrategy {
-	return &compositeStrategy{
-		strategies: strategies,
+// NewCustomValidationStrategy 创建自定义验证策略 - 工厂方法
+func NewCustomValidationStrategy(typeCache TypeCache) *CustomValidationStrategy {
+	return &CustomValidationStrategy{
+		typeCache: typeCache,
 	}
 }
 
-// Execute 执行所有策略
-func (s *compositeStrategy) Execute(obj any, scene ValidateScene, collector ErrorCollector) {
-	for _, strategy := range s.strategies {
-		if strategy != nil {
-			strategy.Execute(obj, scene, collector)
+// Execute 执行自定义验证 - 实现 ValidationStrategy 接口
+func (s *CustomValidationStrategy) Execute(obj any, scene Scene, collector ErrorCollector) bool {
+	if obj == nil {
+		return true
+	}
+
+	// 获取类型信息
+	info := s.typeCache.Get(obj)
+	if !info.IsCustomValidator {
+		return true // 没有自定义验证，继续执行后续策略
+	}
+
+	// 类型断言
+	customValidator, ok := obj.(CustomValidator)
+	if !ok {
+		return true
+	}
+
+	// 执行自定义验证（带 panic 恢复）
+	defer func() {
+		if r := recover(); r != nil {
+			collector.Add(NewFieldError("", "", "validation_panic", "").
+				WithMessage(fmt.Sprintf("custom validation panicked: %v", r)))
+		}
+	}()
+
+	customValidator.ValidateCustom(scene, collector)
+
+	return true // 继续执行后续策略
+}
+
+// ============================================================================
+// NestedValidationStrategy 嵌套验证策略 - 递归验证嵌套结构
+// ============================================================================
+
+// NestedValidationStrategy 嵌套验证策略
+// 设计原则：
+//   - 单一职责：只负责嵌套结构的递归验证
+//   - 防御性编程：防止无限递归和栈溢出
+type NestedValidationStrategy struct {
+	validator    Validator
+	maxDepth     int
+	currentDepth int
+}
+
+// NewNestedValidationStrategy 创建嵌套验证策略 - 工厂方法
+func NewNestedValidationStrategy(validator Validator, maxDepth int) *NestedValidationStrategy {
+	if maxDepth <= 0 {
+		maxDepth = 100 // 默认最大深度
+	}
+
+	return &NestedValidationStrategy{
+		validator: validator,
+		maxDepth:  maxDepth,
+	}
+}
+
+// Execute 执行嵌套验证 - 实现 ValidationStrategy 接口
+func (s *NestedValidationStrategy) Execute(obj any, scene Scene, collector ErrorCollector) bool {
+	if obj == nil {
+		return true
+	}
+
+	// 防止无限递归
+	if s.currentDepth >= s.maxDepth {
+		collector.Add(NewFieldError("", "", "max_depth", fmt.Sprintf("%d", s.maxDepth)).
+			WithMessage(fmt.Sprintf("nested validation depth exceeds maximum limit %d", s.maxDepth)))
+		return false // 停止后续策略
+	}
+
+	val := reflect.ValueOf(obj)
+	if val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return true
+		}
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return true
+	}
+
+	// 遍历字段
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldType := typ.Field(i)
+
+		// 跳过不可访问的字段
+		if !field.CanInterface() || !field.IsValid() {
+			continue
+		}
+
+		// 只验证嵌入的结构体字段
+		if !fieldType.Anonymous {
+			continue
+		}
+
+		fieldKind := field.Kind()
+		if fieldKind == reflect.Ptr && !field.IsNil() {
+			fieldKind = field.Elem().Kind()
+		}
+
+		if fieldKind != reflect.Struct {
+			continue
+		}
+
+		// 递归验证嵌套结构
+		s.currentDepth++
+		result := s.validator.Validate(field.Interface(), scene)
+		s.currentDepth--
+
+		if !result.IsValid() {
+			collector.AddAll(result.Errors())
 		}
 	}
+
+	return true // 继续执行后续策略
 }
