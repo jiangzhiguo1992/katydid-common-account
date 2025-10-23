@@ -37,7 +37,7 @@ func (s *RuleValidationStrategy) Execute(obj any, scene Scene, collector ErrorCo
 
 	// 获取类型信息
 	info := s.typeCache.Get(obj)
-	if !info.IsRuleProvider {
+	if !info.IsRuleValidator {
 		// 没有规则，尝试使用 struct tag
 		if err := s.validate.Struct(obj); err != nil {
 			s.collectValidationErrors(err, collector)

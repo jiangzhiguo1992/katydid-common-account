@@ -58,11 +58,11 @@ func (c *DefaultTypeCache) Clear() {
 func (c *DefaultTypeCache) buildTypeInfo(obj any, typ reflect.Type) *TypeInfo {
 	info := NewTypeInfo(typ)
 
-	// 检查是否实现了 RuleProvider 接口
-	if provider, ok := obj.(RuleProvider); ok {
-		info.IsRuleProvider = true
+	// 检查是否实现了 RuleValidator 接口
+	if provider, ok := obj.(RuleValidator); ok {
+		info.IsRuleValidator = true
 		// 缓存规则，避免重复调用
-		info.Rules = provider.ProvideRules()
+		info.Rules = provider.ValidateRules()
 	}
 
 	// 检查是否实现了 CustomValidator 接口

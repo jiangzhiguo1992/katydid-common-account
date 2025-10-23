@@ -26,11 +26,11 @@ func NewErrorCollector() *DefaultErrorCollector {
 
 // Report 报告一个验证错误 - 实现 ErrorReporter 接口
 func (c *DefaultErrorCollector) Report(namespace, tag, param string) {
-	c.ReportWithMessage(namespace, tag, param, "")
+	c.ReportMsg(namespace, tag, param, "")
 }
 
-// ReportWithMessage 报告一个带自定义消息的验证错误
-func (c *DefaultErrorCollector) ReportWithMessage(namespace, tag, param, message string) {
+// ReportMsg 报告一个带自定义消息的验证错误
+func (c *DefaultErrorCollector) ReportMsg(namespace, tag, param, message string) {
 	// 从 namespace 中提取字段名
 	field := extractFieldName(namespace)
 
