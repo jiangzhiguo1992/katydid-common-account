@@ -19,7 +19,7 @@ func newErrorCollector() *errorCollector {
 	}
 }
 
-// Report 报告错误
+// Report 报告错误（namespace 作为完整路径）
 func (c *errorCollector) Report(namespace, tag, param string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

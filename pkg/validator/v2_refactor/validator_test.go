@@ -8,6 +8,14 @@ import (
 // 测试用例结构体定义
 // ============================================================================
 
+// 常用场景定义
+const (
+	SceneCreate Scene = 1 << iota // 创建场景 (1)
+	SceneUpdate                   // 更新场景 (2)
+	SceneDelete                   // 删除场景 (4)
+	SceneQuery                    // 查询场景 (8)
+)
+
 type User struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`

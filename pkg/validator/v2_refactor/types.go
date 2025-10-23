@@ -18,14 +18,6 @@ const (
 	SceneAll  Scene = -1 // 所有场景
 )
 
-// 常用场景定义
-const (
-	SceneCreate Scene = 1 << iota // 创建场景 (1)
-	SceneUpdate                   // 更新场景 (2)
-	SceneDelete                   // 删除场景 (4)
-	SceneQuery                    // 查询场景 (8)
-)
-
 // Has 检查是否包含指定场景
 func (s Scene) Has(scene Scene) bool {
 	if s == SceneAll || scene == SceneAll {
@@ -34,46 +26,18 @@ func (s Scene) Has(scene Scene) bool {
 	return s&scene != 0
 }
 
-// String 场景名称
-func (s Scene) String() string {
-	if s == SceneNone {
-		return "None"
-	}
-	if s == SceneAll {
-		return "All"
-	}
-
-	var scenes []string
-	if s.Has(SceneCreate) {
-		scenes = append(scenes, "Create")
-	}
-	if s.Has(SceneUpdate) {
-		scenes = append(scenes, "Update")
-	}
-	if s.Has(SceneDelete) {
-		scenes = append(scenes, "Delete")
-	}
-	if s.Has(SceneQuery) {
-		scenes = append(scenes, "Query")
-	}
-
-	if len(scenes) == 0 {
-		return "Unknown"
-	}
-	return strings.Join(scenes, "|")
-}
-
 // ============================================================================
 // 错误类型定义
 // ============================================================================
 
 // FieldError 字段验证错误
 type FieldError struct {
-	Field   string      // 字段名称
-	Tag     string      // 验证标签
-	Param   string      // 验证参数
-	Value   interface{} // 字段值
-	Message string      // 错误消息
+	Namespace string      `json:"namespace"`         // 字段的完整命名空间路径（如 User.Profile.Email）
+	Field     string      `json:"field"`             // 字段名称
+	Tag       string      `json:"tag"`               // 验证标签
+	Param     string      `json:"param"`             // 验证参数
+	Value     interface{} `json:"value,omitempty"`   // 字段值
+	Message   string      `json:"message,omitempty"` // 错误消息
 }
 
 // Error 实现 error 接口
@@ -81,10 +45,17 @@ func (e *FieldError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
-	if e.Param != "" {
-		return fmt.Sprintf("字段 '%s' 验证失败: %s=%s", e.Field, e.Tag, e.Param)
+
+	// 优先使用 Namespace，如果没有则使用 Field
+	fieldName := e.Namespace
+	if fieldName == "" {
+		fieldName = e.Field
 	}
-	return fmt.Sprintf("字段 '%s' 验证失败: %s", e.Field, e.Tag)
+
+	if e.Param != "" {
+		return fmt.Sprintf("字段 '%s' 验证失败: %s=%s", fieldName, e.Tag, e.Param)
+	}
+	return fmt.Sprintf("字段 '%s' 验证失败: %s", fieldName, e.Tag)
 }
 
 // WithMessage 设置自定义错误消息
@@ -94,11 +65,18 @@ func (e *FieldError) WithMessage(msg string) *FieldError {
 }
 
 // NewFieldError 创建字段错误
-func NewFieldError(field, tag, param string) *FieldError {
+func NewFieldError(namespace, tag, param string) *FieldError {
+	// 从 namespace 中提取 field 名称（取最后一个点后面的部分）
+	field := namespace
+	if idx := strings.LastIndex(namespace, "."); idx >= 0 {
+		field = namespace[idx+1:]
+	}
+
 	return &FieldError{
-		Field: field,
-		Tag:   tag,
-		Param: param,
+		Namespace: namespace,
+		Field:     field,
+		Tag:       tag,
+		Param:     param,
 	}
 }
 

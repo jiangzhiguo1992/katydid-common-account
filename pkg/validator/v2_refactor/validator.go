@@ -408,11 +408,16 @@ func (v *Validator) processValidationErrors(err error, obj interface{}, collecto
 	// 处理 validator.ValidationErrors
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
 		for _, fieldErr := range validationErrors {
+			// 从 go-playground/validator 获取完整的 namespace
+			namespace := fieldErr.Namespace()
+			field := fieldErr.Field()
+
 			collector.AddError(&FieldError{
-				Field: fieldErr.Field(),
-				Tag:   fieldErr.Tag(),
-				Param: fieldErr.Param(),
-				Value: fieldErr.Value(),
+				Namespace: namespace,
+				Field:     field,
+				Tag:       fieldErr.Tag(),
+				Param:     fieldErr.Param(),
+				Value:     fieldErr.Value(),
 			})
 		}
 	}
