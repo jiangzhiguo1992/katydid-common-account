@@ -201,6 +201,12 @@ func Default() *Validator {
 	return defaultValidator
 }
 
+// RegisterAlias 在默认验证器上注册别名
+// 便捷函数，使用全局默认验证器
+func RegisterAlias(alias, tags string) {
+	Default().RegisterAlias(alias, tags)
+}
+
 // Validate 使用默认验证器验证对象
 // 便捷函数，简化验证调用
 // 参数：
@@ -213,6 +219,16 @@ func Default() *Validator {
 //	验证错误列表，nil 表示验证通过
 func Validate(obj any, scene ValidateScene) []*FieldError {
 	return Default().Validate(obj, scene)
+}
+
+// ValidateFields 使用默认验证器验证指定字段
+func ValidateFields(obj any, scene ValidateScene, fields ...string) []*FieldError {
+	return Default().ValidateFields(obj, scene, fields...)
+}
+
+// ValidateExcept 使用默认验证器验证排除字段外的所有字段
+func ValidateExcept(obj any, scene ValidateScene, excludeFields ...string) []*FieldError {
+	return Default().ValidateExcept(obj, scene, excludeFields...)
 }
 
 // ClearTypeCache 清除默认验证器的类型缓存
@@ -246,6 +262,30 @@ func New() *Validator {
 		typeCache:       &sync.Map{},
 		registeredCache: &sync.Map{},
 	}
+}
+
+// RegisterAlias 注册验证标签别名
+// 用途：创建自定义标签别名，简化常用的复杂验证规则
+//
+// 示例：
+//
+//	validator.Default().RegisterAlias("password", "required,min=8,max=50,containsany=!@#$%^&*()")
+//
+//	// 在 RuleValidator 中使用别名
+//	func (u *User) RuleValidation() map[ValidateScene]map[string]string {
+//	    return map[ValidateScene]map[string]string{
+//	        SceneCreate: {"Password": "password"},  // 使用别名
+//	    }
+//	}
+//
+// 参数：
+//   - alias: 别名标签名
+//   - tags: 实际的验证规则字符串
+func (v *Validator) RegisterAlias(alias, tags string) {
+	if len(alias) == 0 || len(tags) == 0 {
+		return
+	}
+	v.validate.RegisterAlias(alias, tags)
 }
 
 // Validate 验证模型，支持指定场景和嵌套验证（默认使用对象池优化）
@@ -341,6 +381,123 @@ func (v *Validator) Validate(obj any, scene ValidateScene) []*FieldError {
 	}
 
 	// 返回验证结果（需要复制错误列表，因为 ctx 会被归还到对象池）
+	return v.buildValidationResult(ctx)
+}
+
+// ValidateFields 只验证结构体的指定字段
+// 用途：当只需要验证部分字段时使用，避免不必要的验证开销
+//
+// 示例：
+//
+//	// 只验证 Username 和 Email 字段
+//	errs := validator.Default().ValidateFields(user, SceneUpdate, "Username", "Email")
+//
+// 参数：
+//   - obj: 待验证的对象
+//   - scene: 验证场景
+//   - fields: 需要验证的字段名列表（支持 JSON tag 名称）
+//
+// 返回：
+//   - 验证错误列表，nil 表示验证通过
+func (v *Validator) ValidateFields(obj any, scene ValidateScene, fields ...string) []*FieldError {
+	if obj == nil {
+		return []*FieldError{
+			NewFieldError("struct", "required", "").
+				WithMessage("validation target cannot be nil"),
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil // 没有指定字段，不验证
+	}
+
+	// 创建字段集合，用于快速查找
+	fieldSet := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		if f != "" {
+			fieldSet[f] = true
+		}
+	}
+
+	// 获取类型缓存
+	cache := v.getOrCacheTypeInfo(obj)
+
+	// 创建验证上下文
+	ctx := NewValidationContext(scene)
+	defer ReleaseValidationContext(ctx)
+
+	// 只验证指定的字段
+	if cache.isRuleValidator {
+		v.validatePartialFieldsByRules(obj, cache.validationRules, ctx, fieldSet)
+	} else {
+		v.validatePartialFieldsByTags(obj, ctx, fieldSet)
+	}
+
+	// 注意：部分验证不执行 CustomValidator 和嵌套验证
+	// 因为这些验证可能依赖未验证的字段
+
+	return v.buildValidationResult(ctx)
+}
+
+// ValidateExcept 验证结构体除了指定字段外的所有字段
+// 用途：当需要跳过某些字段的验证时使用
+//
+// 示例：
+//
+//	// 验证除了 Password 外的所有字段
+//	errs := validator.Default().ValidateExcept(user, SceneUpdate, "Password")
+//
+// 参数：
+//   - obj: 待验证的对象
+//   - scene: 验证场景
+//   - excludeFields: 需要排除的字段名列表
+//
+// 返回：
+//   - 验证错误列表，nil 表示验证通过
+func (v *Validator) ValidateExcept(obj any, scene ValidateScene, excludeFields ...string) []*FieldError {
+	if obj == nil {
+		return []*FieldError{
+			NewFieldError("struct", "required", "").
+				WithMessage("validation target cannot be nil"),
+		}
+	}
+
+	if len(excludeFields) == 0 {
+		// 没有排除字段，执行完整验证
+		return v.Validate(obj, scene)
+	}
+
+	// 创建排除字段集合
+	excludeSet := make(map[string]bool, len(excludeFields))
+	for _, f := range excludeFields {
+		if f != "" {
+			excludeSet[f] = true
+		}
+	}
+
+	// 获取类型缓存
+	cache := v.getOrCacheTypeInfo(obj)
+
+	// 创建验证上下文
+	ctx := NewValidationContext(scene)
+	defer ReleaseValidationContext(ctx)
+
+	// 验证非排除字段
+	if cache.isRuleValidator {
+		v.validateExceptFieldsByRules(obj, cache.validationRules, ctx, excludeSet)
+	} else {
+		v.validateExceptFieldsByTags(obj, ctx, excludeSet)
+	}
+
+	// 执行结构级验证（不受字段排除影响）
+	if cache.isCustomValidator {
+		v.registerStructValidator(obj)
+		v.validateStructRules(obj, scene, ctx)
+	}
+
+	// 递归验证嵌套结构（不受字段排除影响）
+	v.validateNestedStructs(obj, ctx, 0)
+
 	return v.buildValidationResult(ctx)
 }
 
@@ -852,4 +1009,162 @@ func (v *Validator) findFieldByJSONTag(val reflect.Value, typ reflect.Type, json
 		}
 	}
 	return reflect.Value{} // 未找到，返回零值
+}
+
+// validatePartialFieldsByRules 验证指定字段（使用 RuleValidator 规则）
+func (v *Validator) validatePartialFieldsByRules(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext, fieldSet map[string]bool) {
+	if rules == nil || len(rules) == 0 || ctx == nil || len(fieldSet) == 0 {
+		return
+	}
+
+	// 匹配当前场景的规则
+	matchedRules := make(map[string]string)
+	for scene, sceneRules := range rules {
+		if scene&ctx.Scene != 0 {
+			for fieldName, rule := range sceneRules {
+				// 只添加指定字段的规则
+				if fieldSet[fieldName] {
+					matchedRules[fieldName] = rule
+				}
+			}
+		}
+	}
+
+	if len(matchedRules) == 0 {
+		return
+	}
+
+	// 验证字段
+	v.validateFieldsWithRules(obj, matchedRules, ctx)
+}
+
+// validatePartialFieldsByTags 验证指定字段（使用 struct tag）
+func (v *Validator) validatePartialFieldsByTags(obj any, ctx *ValidationContext, fieldSet map[string]bool) {
+	if ctx == nil || len(fieldSet) == 0 {
+		return
+	}
+
+	// 使用底层验证器的 StructPartial 方法
+	fields := make([]string, 0, len(fieldSet))
+	for f := range fieldSet {
+		fields = append(fields, f)
+	}
+
+	if err := v.validate.StructPartial(obj, fields...); err != nil {
+		v.addFieldErrors(obj, err, ctx)
+	}
+}
+
+// validateExceptFieldsByRules 验证排除字段外的所有字段（使用 RuleValidator 规则）
+func (v *Validator) validateExceptFieldsByRules(obj any, rules map[ValidateScene]map[string]string, ctx *ValidationContext, excludeSet map[string]bool) {
+	if rules == nil || len(rules) == 0 || ctx == nil {
+		return
+	}
+
+	// 匹配当前场景的规则
+	matchedRules := make(map[string]string)
+	for scene, sceneRules := range rules {
+		if scene&ctx.Scene != 0 {
+			for fieldName, rule := range sceneRules {
+				// 跳过排除字段
+				if !excludeSet[fieldName] {
+					matchedRules[fieldName] = rule
+				}
+			}
+		}
+	}
+
+	if len(matchedRules) == 0 {
+		return
+	}
+
+	// 验证字段
+	v.validateFieldsWithRules(obj, matchedRules, ctx)
+}
+
+// validateExceptFieldsByTags 验证排除字段外的所有字段（使用 struct tag）
+func (v *Validator) validateExceptFieldsByTags(obj any, ctx *ValidationContext, excludeSet map[string]bool) {
+	if ctx == nil {
+		return
+	}
+
+	if len(excludeSet) == 0 {
+		// 没有排除字段，执行完整验证
+		if err := v.validate.Struct(obj); err != nil {
+			v.addFieldErrors(obj, err, ctx)
+		}
+		return
+	}
+
+	// 使用底层验证器的 StructExcept 方法
+	excludeFields := make([]string, 0, len(excludeSet))
+	for f := range excludeSet {
+		excludeFields = append(excludeFields, f)
+	}
+
+	if err := v.validate.StructExcept(obj, excludeFields...); err != nil {
+		v.addFieldErrors(obj, err, ctx)
+	}
+}
+
+// validateFieldsWithRules 使用规则映射验证字段（内部辅助函数）
+func (v *Validator) validateFieldsWithRules(obj any, rules map[string]string, ctx *ValidationContext) {
+	if len(rules) == 0 || ctx == nil {
+		return
+	}
+
+	val := reflect.ValueOf(obj)
+	if !val.IsValid() {
+		return
+	}
+
+	if val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return
+		}
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return
+	}
+
+	typ := val.Type()
+
+	for fieldName, rule := range rules {
+		if len(ctx.Errors) >= maxValidationErrors {
+			return
+		}
+
+		if rule == "" {
+			continue
+		}
+
+		// 获取字段值
+		field := val.FieldByName(fieldName)
+		if !field.IsValid() {
+			// 尝试通过 JSON tag 查找
+			field = v.findFieldByJSONTag(val, typ, fieldName)
+		}
+
+		if !field.IsValid() || !field.CanInterface() {
+			continue
+		}
+
+		// 验证字段
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					ctx.AddErrorByDetail(
+						"", "validation_panic", "", nil,
+						fmt.Sprintf("field validation panicked: %v", r),
+					)
+				}
+			}()
+
+			if err := v.validate.Var(field.Interface(), rule); err != nil {
+				v.addFieldErrors(obj, err, ctx)
+			}
+		}()
+	}
 }
