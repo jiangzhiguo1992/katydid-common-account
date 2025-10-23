@@ -1,271 +1,414 @@
 package v2
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/go-playground/validator/v10"
 )
 
 // ============================================================================
-// 核心验证器实现
+// 核心验证器实现 - 组合各个组件，遵循依赖倒置原则
 // ============================================================================
 
-// DefaultValidator 默认验证器实现
-// 设计原则：
-//   - 依赖倒置：依赖抽象接口而非具体实现
-//   - 策略模式：通过可插拔的策略执行不同的验证逻辑
-//   - 单一职责：只负责协调各个策略的执行
-type DefaultValidator struct {
-	strategies []ValidationStrategy
-	typeCache  TypeCache
-	registry   RegistryManager
-	validate   *validator.Validate
+// defaultValidator 默认验证器实现
+type defaultValidator struct {
+	validate       *validator.Validate
+	cache          CacheManager
+	pool           ValidatorPool
+	strategy       ValidationStrategy
+	errorFormatter ErrorFormatter
+	tagName        string
+	useCache       bool
+	usePool        bool
 }
 
-// NewValidator 创建默认验证器 - 工厂方法
-// 返回一个配置好的验证器实例
-func NewValidator() *DefaultValidator {
-	v := validator.New()
-
-	// 配置 validator：使用 json tag 作为字段名
-	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
-		if name == "-" || name == "" {
-			return fld.Name
-		}
-		return name
-	})
-
-	typeCache := NewTypeCache()
-	registry := NewRegistryManager()
-
-	valid := &DefaultValidator{
-		strategies: make([]ValidationStrategy, 0, 3),
-		typeCache:  typeCache,
-		registry:   registry,
-		validate:   v,
+// Validate 执行验证
+func (v *defaultValidator) Validate(data interface{}, scene Scene) error {
+	if data == nil {
+		return fmt.Errorf("验证数据不能为nil")
 	}
 
-	// 注册默认策略（执行顺序很重要）
-	valid.addStrategy(NewRuleValidationStrategy(typeCache, v))
-	valid.addStrategy(NewCustomValidationStrategy(typeCache))
-	// 嵌套验证策略需要在实例化后添加，避免循环依赖
+	// 获取类型名称
+	typeName := getTypeName(data)
 
-	return valid
-}
+	// 获取验证规则
+	rules := v.getRules(data, scene, typeName)
 
-// Validate 验证对象 - 实现 Validator 接口
-func (v *DefaultValidator) Validate(obj any, scene Scene) Result {
-	// 参数校验
-	if obj == nil {
-		return NewValidationResultWithErrors([]*FieldError{
-			NewFieldError("", "", "required", "").
-				WithMessage("validation target cannot be nil"),
-		})
+	// 执行基础验证
+	var baseErr error
+	if v.usePool && v.pool != nil {
+		validate := v.pool.Get()
+		defer v.pool.Put(validate)
+		baseErr = v.executeValidation(validate, data, rules)
+	} else {
+		baseErr = v.executeValidation(v.validate, data, rules)
 	}
 
-	// 内存优化：从对象池获取错误收集器
-	collector := AcquireErrorCollector()
-	defer ReleaseErrorCollector(collector)
+	// 收集错误
+	collector := GetPooledErrorCollector()
+	defer PutPooledErrorCollector(collector)
 
-	// 按顺序执行所有策略
-	for _, strategy := range v.strategies {
-		if !strategy.Execute(obj, scene, collector) {
-			// 策略返回 false 表示停止后续策略
-			break
+	// 处理基础验证错误
+	if baseErr != nil {
+		if errs, ok := baseErr.(validator.ValidationErrors); ok {
+			v.processValidationErrors(errs, data, collector)
+		} else {
+			return baseErr
 		}
 	}
 
-	// 构建并返回结果
-	return NewValidationResultWithErrors(collector.GetErrors())
+	// 执行自定义验证
+	if customValidator, ok := data.(CustomValidator); ok {
+		customValidator.CustomValidate(scene, collector)
+	}
+
+	// 返回错误
+	if collector.HasErrors() {
+		return collector.GetErrors()
+	}
+
+	return nil
 }
 
-// ValidateFields 只验证结构体的指定字段 - 部分验证
-// 用途：当只需要验证部分字段时使用，避免不必要的验证开销
-//
-// 示例：
-//
-//	// 只验证 Username 和 Email 字段
-//	result := validator.ValidateFields(user, "create", "Username", "Email")
-//
-// 参数：
-//   - obj: 待验证的对象
-//   - scene: 验证场景
-//   - fields: 需要验证的字段名列表（支持 JSON tag 名称）
-//
-// 返回：验证结果
-func (v *DefaultValidator) ValidateFields(obj any, scene Scene, fields ...string) Result {
-	if obj == nil {
-		return NewValidationResultWithErrors([]*FieldError{
-			NewFieldError("", "", "required", "").
-				WithMessage("validation target cannot be nil"),
-		})
+// ValidatePartial 部分字段验证
+func (v *defaultValidator) ValidatePartial(data interface{}, fields ...string) error {
+	if data == nil {
+		return fmt.Errorf("验证数据不能为nil")
 	}
 
 	if len(fields) == 0 {
-		return NewValidationResult() // 没有指定字段，返回成功
+		return nil
 	}
 
-	// 创建字段集合，用于快速查找
-	fieldSet := make(map[string]bool, len(fields))
-	for _, f := range fields {
-		if f != "" {
-			fieldSet[f] = true
+	// 获取所有规则（使用默认 SceneCreate 场景）
+	var allRules map[string]string
+	if provider, ok := data.(RuleProvider); ok {
+		allRules = provider.GetRules(SceneCreate)
+	}
+
+	// 如果没有规则，回退到 struct tag 验证
+	if allRules == nil || len(allRules) == 0 {
+		var err error
+		if v.usePool && v.pool != nil {
+			validate := v.pool.Get()
+			defer v.pool.Put(validate)
+			err = validate.StructPartial(data, fields...)
+		} else {
+			err = v.validate.StructPartial(data, fields...)
+		}
+
+		if err == nil {
+			return nil
+		}
+
+		// 格式化错误
+		collector := GetPooledErrorCollector()
+		defer PutPooledErrorCollector(collector)
+
+		if errs, ok := err.(validator.ValidationErrors); ok {
+			v.processValidationErrors(errs, data, collector)
+		} else {
+			return err
+		}
+
+		if collector.HasErrors() {
+			return collector.GetErrors()
+		}
+
+		return nil
+	}
+
+	// 使用动态规则，只验证指定字段
+	partialRules := make(map[string]string)
+	for _, field := range fields {
+		if rule, ok := allRules[field]; ok {
+			partialRules[field] = rule
 		}
 	}
 
-	// 内存优化：从对象池获取错误收集器
-	collector := AcquireErrorCollector()
-	defer ReleaseErrorCollector(collector)
+	if len(partialRules) == 0 {
+		return nil
+	}
 
-	// 创建部分验证策略
-	partialStrategy := NewPartialValidationStrategy(v.typeCache, v.validate, fieldSet, false)
-	partialStrategy.Execute(obj, scene, collector)
+	// 执行验证
+	var validate *validator.Validate
+	if v.usePool && v.pool != nil {
+		validate = v.pool.Get()
+		defer v.pool.Put(validate)
+	} else {
+		validate = v.validate
+	}
 
-	return NewValidationResultWithErrors(collector.GetErrors())
+	return v.validateWithRules(validate, data, partialRules)
 }
 
-// ValidateExcept 验证结构体除了指定字段外的所有字段
-// 用途：当需要跳过某些字段的验证时使用
-//
-// 示例：
-//
-//	// 验证除了 Password 外的所有字段
-//	result := validator.ValidateExcept(user, "update", "Password")
-//
-// 参数：
-//   - obj: 待验证的对象
-//   - scene: 验证场景
-//   - excludeFields: 需要排除的字段名列表
-//
-// 返回：验证结果
-func (v *DefaultValidator) ValidateExcept(obj any, scene Scene, excludeFields ...string) Result {
-	if obj == nil {
-		return NewValidationResultWithErrors([]*FieldError{
-			NewFieldError("", "", "required", "").
-				WithMessage("validation target cannot be nil"),
-		})
-	}
-
-	if len(excludeFields) == 0 {
-		// 没有排除字段，执行完整验证
-		return v.Validate(obj, scene)
-	}
-
-	// 创建排除字段集合
-	excludeSet := make(map[string]bool, len(excludeFields))
-	for _, f := range excludeFields {
-		if f != "" {
-			excludeSet[f] = true
+// getRules 获取验证规则（带缓存）
+func (v *defaultValidator) getRules(data interface{}, scene Scene, typeName string) map[string]string {
+	// 尝试从缓存获取
+	if v.useCache && v.cache != nil {
+		if rules, ok := v.cache.Get(typeName, scene); ok {
+			return rules
 		}
 	}
 
-	// 内存优化：从对象池获取错误收集器
-	collector := AcquireErrorCollector()
-	defer ReleaseErrorCollector(collector)
+	// 从数据对象获取规则
+	var rules map[string]string
+	if provider, ok := data.(RuleProvider); ok {
+		rules = provider.GetRules(scene)
+	}
 
-	// 创建排除验证策略
-	excludeStrategy := NewPartialValidationStrategy(v.typeCache, v.validate, excludeSet, true)
-	excludeStrategy.Execute(obj, scene, collector)
+	// 缓存规则
+	if v.useCache && v.cache != nil && rules != nil {
+		v.cache.Set(typeName, scene, rules)
+	}
 
-	// 仍然执行自定义验证和嵌套验证
-	for _, strategy := range v.strategies {
-		// 只执行自定义和嵌套验证策略
-		switch strategy.(type) {
-		case *CustomValidationStrategy, *NestedValidationStrategy:
-			if !strategy.Execute(obj, scene, collector) {
-				break
+	return rules
+}
+
+// executeValidation 执行验证
+func (v *defaultValidator) executeValidation(validate *validator.Validate, data interface{}, rules map[string]string) error {
+	// 如果有规则，使用动态验证
+	if rules != nil && len(rules) > 0 {
+		return v.validateWithRules(validate, data, rules)
+	}
+
+	// 否则使用策略或默认验证
+	if v.strategy != nil {
+		return v.strategy.Execute(validate, data, rules)
+	}
+	return validate.Struct(data)
+}
+
+// validateWithRules 使用动态规则验证
+func (v *defaultValidator) validateWithRules(validate *validator.Validate, data interface{}, rules map[string]string) error {
+	val := reflect.ValueOf(data)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return fmt.Errorf("data must be a struct")
+	}
+
+	collector := NewErrorCollector()
+	typ := val.Type()
+
+	// 遍历规则并验证每个字段
+	for fieldName, rule := range rules {
+		field := val.FieldByName(fieldName)
+		if !field.IsValid() {
+			continue
+		}
+
+		// 获取字段的 JSON tag 名称（用于错误消息）
+		structField, found := typ.FieldByName(fieldName)
+		if !found {
+			continue
+		}
+
+		displayName := fieldName
+		if jsonTag := structField.Tag.Get("json"); jsonTag != "" {
+			if idx := strings.Index(jsonTag, ","); idx > 0 {
+				displayName = jsonTag[:idx]
+			} else {
+				displayName = jsonTag
+			}
+		}
+
+		// 检查是否为 required 字段
+		isRequired := strings.Contains(rule, "required")
+		fieldValue := field.Interface()
+
+		// 检查零值
+		isZero := false
+		switch field.Kind() {
+		case reflect.String:
+			isZero = field.String() == ""
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			isZero = field.Int() == 0
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			isZero = field.Uint() == 0
+		case reflect.Float32, reflect.Float64:
+			isZero = field.Float() == 0
+		case reflect.Bool:
+			isZero = !field.Bool()
+		case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+			isZero = field.IsNil()
+		}
+
+		// 如果是必填字段且为零值，添加 required 错误
+		if isRequired && isZero {
+			collector.AddFieldError(displayName, "required", "", "")
+			continue
+		}
+
+		// 如果不是必填字段且为零值，跳过验证（omitempty 语义）
+		if !isRequired && isZero {
+			continue
+		}
+
+		// 验证字段
+		err := validate.Var(fieldValue, rule)
+		if err != nil {
+			if errs, ok := err.(validator.ValidationErrors); ok {
+				for _, e := range errs {
+					collector.AddFieldError(displayName, e.Tag(), e.Param(), "")
+				}
 			}
 		}
 	}
 
-	return NewValidationResultWithErrors(collector.GetErrors())
-}
-
-// RegisterAlias 注册验证标签别名
-// 用途：创建自定义标签别名，简化常用的复杂验证规则
-//
-// 示例：
-//
-//	validator.RegisterAlias("password", "required,min=8,max=50,containsany=!@#$%^&*()")
-//
-// 参数：
-//   - alias: 别名标签名
-//   - tags: 实际的验证规则字符串
-func (v *DefaultValidator) RegisterAlias(alias, tags string) {
-	if alias == "" || tags == "" {
-		return
+	if collector.HasErrors() {
+		return collector.(interface{ GetErrors() ValidationErrors }).GetErrors()
 	}
-	v.validate.RegisterAlias(alias, tags)
+
+	return nil
 }
 
-// addStrategy 添加验证策略 - 私有方法
-func (v *DefaultValidator) addStrategy(strategy ValidationStrategy) {
-	if strategy != nil {
-		v.strategies = append(v.strategies, strategy)
+// processValidationErrors 处理验证错误
+func (v *defaultValidator) processValidationErrors(errs validator.ValidationErrors, data interface{}, collector ErrorCollector) {
+	var msgProvider ErrorMessageProvider
+	if provider, ok := data.(ErrorMessageProvider); ok {
+		msgProvider = provider
 	}
-}
 
-// GetUnderlyingValidator 获取底层的 go-playground/validator 实例
-// 用于高级场景下直接访问底层验证器
-func (v *DefaultValidator) GetUnderlyingValidator() *validator.Validate {
-	return v.validate
-}
+	for _, err := range errs {
+		field := err.Field()
+		tag := err.Tag()
+		param := err.Param()
 
-// ClearCache 清除所有缓存
-// 用于测试或需要重新加载类型信息的场景
-func (v *DefaultValidator) ClearCache() {
-	v.typeCache.Clear()
-	v.registry.Clear()
+		// 获取自定义消息
+		var message string
+		if msgProvider != nil {
+			message = msgProvider.GetErrorMessage(field, tag, param)
+		}
+
+		collector.AddFieldError(field, tag, param, message)
+	}
 }
 
 // ============================================================================
-// 全局默认验证器 - 单例模式
+// 辅助函数
 // ============================================================================
 
-var (
-	defaultValidator *DefaultValidator
-	defaultOnce      sync.Once
-)
-
-// Default 获取全局默认验证器实例 - 单例模式
-// 线程安全，可在多个 goroutine 中并发调用
-func Default() Validator {
-	defaultOnce.Do(func() {
-		defaultValidator = NewValidator()
-	})
-	return defaultValidator
+// getTypeName 获取类型名称
+func getTypeName(data interface{}) string {
+	t := reflect.TypeOf(data)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Name()
 }
 
-// Validate 使用默认验证器验证对象 - 便捷函数
-// 简化常见的验证调用场景
-func Validate(obj any, scene Scene) Result {
-	return Default().Validate(obj, scene)
+// ============================================================================
+// 多场景验证器 - 支持map数据验证
+// ============================================================================
+
+// MapValidator Map数据验证器
+type MapValidator struct {
+	validate       *validator.Validate
+	cache          CacheManager
+	errorFormatter ErrorFormatter
 }
 
-// ValidateFields 使用默认验证器验证指定字段 - 便捷函数
-func ValidateFields(obj any, scene Scene, fields ...string) Result {
-	return Default().ValidateFields(obj, scene, fields...)
+// NewMapValidator 创建Map验证器
+func NewMapValidator(opts ...ValidatorOption) *MapValidator {
+	mv := &MapValidator{
+		validate: validator.New(),
+	}
+
+	// 应用选项
+	for _, opt := range opts {
+		opt(mv)
+	}
+
+	return mv
 }
 
-// ValidateExcept 使用默认验证器验证排除字段外的所有字段 - 便捷函数
-func ValidateExcept(obj any, scene Scene, excludeFields ...string) Result {
-	return Default().ValidateExcept(obj, scene, excludeFields...)
+// ValidateMap 验证Map数据
+func (v *MapValidator) ValidateMap(data map[string]interface{}, rules map[string]string) error {
+	collector := GetPooledErrorCollector()
+	defer PutPooledErrorCollector(collector)
+
+	for field, rule := range rules {
+		value, exists := data[field]
+
+		// 检查必填字段
+		if strings.Contains(rule, "required") && !exists {
+			collector.AddError(field, "required")
+			continue
+		}
+
+		if !exists {
+			continue
+		}
+
+		// 验证字段
+		if err := v.validate.Var(value, rule); err != nil {
+			if errs, ok := err.(validator.ValidationErrors); ok {
+				for _, e := range errs {
+					collector.AddFieldError(field, e.Tag(), e.Param(), "")
+				}
+			}
+		}
+	}
+
+	if collector.HasErrors() {
+		return collector.GetErrors()
+	}
+
+	return nil
 }
 
-// RegisterAlias 在默认验证器上注册别名 - 便捷函数
-func RegisterAlias(alias, tags string) {
-	if dv, ok := Default().(*DefaultValidator); ok {
-		dv.RegisterAlias(alias, tags)
+// ============================================================================
+// 验证器选项 - 函数选项模式
+// ============================================================================
+
+// ValidatorOption 验证器选项函数
+type ValidatorOption func(interface{})
+
+// WithValidatorCache 设置缓存
+func WithValidatorCache(cache CacheManager) ValidatorOption {
+	return func(v interface{}) {
+		switch val := v.(type) {
+		case *defaultValidator:
+			val.cache = cache
+			val.useCache = true
+		case *MapValidator:
+			val.cache = cache
+		}
 	}
 }
 
-// ClearCache 清除默认验证器的缓存 - 便捷函数
-// 用于测试场景
-func ClearCache() {
-	if defaultValidator != nil {
-		defaultValidator.ClearCache()
+// WithValidatorPool 设置对象池
+func WithValidatorPool(pool ValidatorPool) ValidatorOption {
+	return func(v interface{}) {
+		if val, ok := v.(*defaultValidator); ok {
+			val.pool = pool
+			val.usePool = true
+		}
+	}
+}
+
+// WithValidatorStrategy 设置验证策略
+func WithValidatorStrategy(strategy ValidationStrategy) ValidatorOption {
+	return func(v interface{}) {
+		if val, ok := v.(*defaultValidator); ok {
+			val.strategy = strategy
+		}
+	}
+}
+
+// WithErrorFormatter 设置错误格式化器
+func WithErrorFormatter(formatter ErrorFormatter) ValidatorOption {
+	return func(v interface{}) {
+		switch val := v.(type) {
+		case *defaultValidator:
+			val.errorFormatter = formatter
+		case *MapValidator:
+			val.errorFormatter = formatter
+		}
 	}
 }

@@ -1,123 +1,182 @@
 package v2
 
 import (
-	"reflect"
 	"sync"
 )
 
 // ============================================================================
-// TypeCache 实现 - 线程安全的类型缓存
+// 缓存管理器实现 - 单一职责：规则缓存管理
 // ============================================================================
 
-// DefaultTypeCache 默认类型缓存实现
-// 设计原则：
-//   - 单一职责：只负责类型信息的缓存
-//   - 线程安全：使用 sync.Map 保证并发安全
-//   - 性能优化：避免重复的反射和接口检查操作
-type DefaultTypeCache struct {
-	cache sync.Map // key: reflect.Type, value: *TypeInfo
+// cacheKey 缓存键
+type cacheKey struct {
+	typeName string
+	scene    Scene
 }
 
-// NewTypeCache 创建类型缓存 - 工厂方法
-func NewTypeCache() *DefaultTypeCache {
-	return &DefaultTypeCache{}
+// defaultCacheManager 默认缓存管理器
+type defaultCacheManager struct {
+	cache map[cacheKey]map[string]string
+	mu    sync.RWMutex
 }
 
-// Get 获取类型信息 - 实现 TypeCache 接口
-// 如果缓存不存在，会自动创建并缓存
-func (c *DefaultTypeCache) Get(obj any) *TypeInfo {
-	if obj == nil {
-		return NewTypeInfo(nil)
+// NewCacheManager 创建缓存管理器
+func NewCacheManager() CacheManager {
+	return &defaultCacheManager{
+		cache: make(map[cacheKey]map[string]string),
 	}
-
-	typ := reflect.TypeOf(obj)
-	if typ == nil {
-		return NewTypeInfo(nil)
-	}
-
-	// 尝试从缓存获取
-	if cached, ok := c.cache.Load(typ); ok {
-		return cached.(*TypeInfo)
-	}
-
-	// 缓存未命中，创建新的类型信息
-	info := c.buildTypeInfo(obj, typ)
-
-	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
-	actual, _ := c.cache.LoadOrStore(typ, info)
-	return actual.(*TypeInfo)
 }
 
-// Clear 清空缓存 - 实现 TypeCache 接口
-func (c *DefaultTypeCache) Clear() {
-	c.cache = sync.Map{}
+// Get 获取缓存
+func (c *defaultCacheManager) Get(key string, scene Scene) (map[string]string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	cKey := cacheKey{typeName: key, scene: scene}
+	rules, ok := c.cache[cKey]
+	return rules, ok
 }
 
-// buildTypeInfo 构建类型信息 - 私有方法
-// 通过接口检查确定类型实现了哪些验证接口
-func (c *DefaultTypeCache) buildTypeInfo(obj any, typ reflect.Type) *TypeInfo {
-	info := NewTypeInfo(typ)
+// Set 设置缓存
+func (c *defaultCacheManager) Set(key string, scene Scene, rules map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	// 检查是否实现了 RuleValidator 接口
-	if provider, ok := obj.(RuleValidator); ok {
-		info.IsRuleValidator = true
-		// 缓存规则，避免重复调用
-		info.Rules = provider.ValidateRules()
+	cKey := cacheKey{typeName: key, scene: scene}
+	// 深拷贝规则，避免外部修改
+	copiedRules := make(map[string]string, len(rules))
+	for k, v := range rules {
+		copiedRules[k] = v
 	}
+	c.cache[cKey] = copiedRules
+}
 
-	// 检查是否实现了 CustomValidator 接口
-	_, info.IsCustomValidator = obj.(CustomValidator)
-
-	return info
+// Clear 清空缓存
+func (c *defaultCacheManager) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cache = make(map[cacheKey]map[string]string)
 }
 
 // ============================================================================
-// RegistryManager 实现 - 注册状态管理
+// LRU 缓存管理器 - 带容量限制的缓存
 // ============================================================================
 
-// DefaultRegistryManager 默认注册管理器实现
-// 设计原则：
-//   - 单一职责：只负责记录类型是否已注册
-//   - 线程安全：使用 sync.Map 保证并发安全
-type DefaultRegistryManager struct {
-	registry sync.Map // key: reflect.Type, value: bool
+// lruNode LRU节点
+type lruNode struct {
+	key   cacheKey
+	value map[string]string
+	prev  *lruNode
+	next  *lruNode
 }
 
-// NewRegistryManager 创建注册管理器 - 工厂方法
-func NewRegistryManager() *DefaultRegistryManager {
-	return &DefaultRegistryManager{}
+// LRUCacheManager LRU缓存管理器
+type LRUCacheManager struct {
+	capacity int
+	cache    map[cacheKey]*lruNode
+	head     *lruNode // 最近使用
+	tail     *lruNode // 最少使用
+	mu       sync.RWMutex
 }
 
-// IsRegistered 检查类型是否已注册 - 实现 RegistryManager 接口
-func (m *DefaultRegistryManager) IsRegistered(obj any) bool {
-	if obj == nil {
-		return false
+// NewLRUCacheManager 创建LRU缓存管理器
+func NewLRUCacheManager(capacity int) CacheManager {
+	if capacity <= 0 {
+		capacity = 100 // 默认容量
 	}
 
-	typ := reflect.TypeOf(obj)
-	if typ == nil {
-		return false
+	lru := &LRUCacheManager{
+		capacity: capacity,
+		cache:    make(map[cacheKey]*lruNode),
+		head:     &lruNode{},
+		tail:     &lruNode{},
 	}
+	lru.head.next = lru.tail
+	lru.tail.prev = lru.head
 
-	_, registered := m.registry.Load(typ)
-	return registered
+	return lru
 }
 
-// MarkRegistered 标记类型已注册 - 实现 RegistryManager 接口
-func (m *DefaultRegistryManager) MarkRegistered(obj any) {
-	if obj == nil {
-		return
-	}
+// Get 获取缓存
+func (c *LRUCacheManager) Get(key string, scene Scene) (map[string]string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	typ := reflect.TypeOf(obj)
-	if typ == nil {
-		return
+	cKey := cacheKey{typeName: key, scene: scene}
+	if node, ok := c.cache[cKey]; ok {
+		c.moveToHead(node)
+		return node.value, true
 	}
-
-	m.registry.Store(typ, true)
+	return nil, false
 }
 
-// Clear 清空注册记录 - 实现 RegistryManager 接口
-func (m *DefaultRegistryManager) Clear() {
-	m.registry = sync.Map{}
+// Set 设置缓存
+func (c *LRUCacheManager) Set(key string, scene Scene, rules map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cKey := cacheKey{typeName: key, scene: scene}
+
+	// 深拷贝规则
+	copiedRules := make(map[string]string, len(rules))
+	for k, v := range rules {
+		copiedRules[k] = v
+	}
+
+	if node, ok := c.cache[cKey]; ok {
+		// 更新现有节点
+		node.value = copiedRules
+		c.moveToHead(node)
+	} else {
+		// 创建新节点
+		node := &lruNode{
+			key:   cKey,
+			value: copiedRules,
+		}
+		c.cache[cKey] = node
+		c.addToHead(node)
+
+		// 检查容量
+		if len(c.cache) > c.capacity {
+			removed := c.removeTail()
+			delete(c.cache, removed.key)
+		}
+	}
+}
+
+// Clear 清空缓存
+func (c *LRUCacheManager) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cache = make(map[cacheKey]*lruNode)
+	c.head.next = c.tail
+	c.tail.prev = c.head
+}
+
+// moveToHead 移动节点到头部
+func (c *LRUCacheManager) moveToHead(node *lruNode) {
+	c.removeNode(node)
+	c.addToHead(node)
+}
+
+// removeNode 移除节点
+func (c *LRUCacheManager) removeNode(node *lruNode) {
+	node.prev.next = node.next
+	node.next.prev = node.prev
+}
+
+// addToHead 添加节点到头部
+func (c *LRUCacheManager) addToHead(node *lruNode) {
+	node.prev = c.head
+	node.next = c.head.next
+	c.head.next.prev = node
+	c.head.next = node
+}
+
+// removeTail 移除尾部节点
+func (c *LRUCacheManager) removeTail() *lruNode {
+	node := c.tail.prev
+	c.removeNode(node)
+	return node
 }

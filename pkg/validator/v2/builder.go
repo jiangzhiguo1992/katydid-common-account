@@ -1,117 +1,137 @@
 package v2
 
 import (
-	"reflect"
-	"strings"
-
 	"github.com/go-playground/validator/v10"
 )
 
 // ============================================================================
-// 验证器建造者 - 建造者模式
+// 构建器实现 - 建造者模式：流式API构建复杂验证器
 // ============================================================================
 
-// DefaultValidatorBuilder 默认验证器建造者实现
-// 设计原则：
-//   - 建造者模式：提供灵活的构建方式
-//   - 流式接口：支持链式调用
-//   - 开放封闭：通过建造者扩展配置，而不修改验证器
-type DefaultValidatorBuilder struct {
-	strategies []ValidationStrategy
-	typeCache  TypeCache
-	registry   RegistryManager
-	validate   *validator.Validate
-	maxDepth   int
+// validatorBuilder 验证器构建器
+type validatorBuilder struct {
+	cache          CacheManager
+	pool           ValidatorPool
+	strategy       ValidationStrategy
+	errorFormatter ErrorFormatter
+	tagName        string
+	validate       *validator.Validate
+	customFuncs    map[string]validator.Func
 }
 
-// NewValidatorBuilder 创建验证器建造者 - 工厂方法
-func NewValidatorBuilder() *DefaultValidatorBuilder {
-	v := validator.New()
-
-	// 配置 validator：使用 json tag 作为字段名
-	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
-		if name == "-" || name == "" {
-			return fld.Name
-		}
-		return name
-	})
-
-	return &DefaultValidatorBuilder{
-		strategies: make([]ValidationStrategy, 0),
-		typeCache:  NewTypeCache(),
-		registry:   NewRegistryManager(),
-		validate:   v,
-		maxDepth:   100, // 默认最大深度
+// NewValidatorBuilder 创建验证器构建器
+func NewValidatorBuilder() ValidatorBuilder {
+	return &validatorBuilder{
+		validate:    validator.New(),
+		tagName:     "validate",
+		customFuncs: make(map[string]validator.Func),
 	}
 }
 
-// WithStrategy 添加验证策略 - 实现 ValidatorBuilder 接口
-func (b *DefaultValidatorBuilder) WithStrategy(strategy ValidationStrategy) ValidatorBuilder {
-	if strategy != nil {
-		b.strategies = append(b.strategies, strategy)
-	}
+// WithCache 设置缓存
+func (b *validatorBuilder) WithCache(cache CacheManager) ValidatorBuilder {
+	b.cache = cache
 	return b
 }
 
-// WithTypeCache 设置类型缓存 - 实现 ValidatorBuilder 接口
-func (b *DefaultValidatorBuilder) WithTypeCache(cache TypeCache) ValidatorBuilder {
-	if cache != nil {
-		b.typeCache = cache
-	}
+// WithPool 设置对象池
+func (b *validatorBuilder) WithPool(pool ValidatorPool) ValidatorBuilder {
+	b.pool = pool
 	return b
 }
 
-// WithRegistry 设置注册管理器 - 实现 ValidatorBuilder 接口
-func (b *DefaultValidatorBuilder) WithRegistry(registry RegistryManager) ValidatorBuilder {
-	if registry != nil {
-		b.registry = registry
-	}
+// WithStrategy 设置验证策略
+func (b *validatorBuilder) WithStrategy(strategy ValidationStrategy) ValidatorBuilder {
+	b.strategy = strategy
 	return b
 }
 
-// WithMaxDepth 设置最大嵌套深度
-func (b *DefaultValidatorBuilder) WithMaxDepth(depth int) *DefaultValidatorBuilder {
-	if depth > 0 {
-		b.maxDepth = depth
-	}
+// WithErrorFormatter 设置错误格式化器
+func (b *validatorBuilder) WithErrorFormatter(formatter ErrorFormatter) ValidatorBuilder {
+	b.errorFormatter = formatter
 	return b
 }
 
-// WithDefaultStrategies 使用默认策略集
-func (b *DefaultValidatorBuilder) WithDefaultStrategies() *DefaultValidatorBuilder {
-	// 清空现有策略
-	b.strategies = make([]ValidationStrategy, 0, 3)
-
-	// 添加默认策略（顺序很重要）
-	b.strategies = append(b.strategies,
-		NewRuleValidationStrategy(b.typeCache, b.validate),
-		NewCustomValidationStrategy(b.typeCache),
-	)
-
+// WithTagName 设置标签名称
+func (b *validatorBuilder) WithTagName(tagName string) ValidatorBuilder {
+	b.tagName = tagName
 	return b
 }
 
-// Build 构建验证器 - 实现 ValidatorBuilder 接口
-func (b *DefaultValidatorBuilder) Build() Validator {
-	v := &DefaultValidator{
-		strategies: b.strategies,
-		typeCache:  b.typeCache,
-		registry:   b.registry,
-		validate:   b.validate,
-	}
+// RegisterCustomValidation 注册自定义验证函数
+func (b *validatorBuilder) RegisterCustomValidation(tag string, fn validator.Func) ValidatorBuilder {
+	b.customFuncs[tag] = fn
+	return b
+}
 
-	// 如果没有添加任何策略，使用默认策略
-	if len(v.strategies) == 0 {
-		v.strategies = []ValidationStrategy{
-			NewRuleValidationStrategy(b.typeCache, b.validate),
-			NewCustomValidationStrategy(b.typeCache),
+// Build 构建验证器
+func (b *validatorBuilder) Build() (Validator, error) {
+	// 注册所有自定义验证函数
+	for tag, fn := range b.customFuncs {
+		if err := b.validate.RegisterValidation(tag, fn); err != nil {
+			return nil, err
 		}
 	}
 
-	// 添加嵌套验证策略（必须在最后，因为需要引用构建好的 v）
-	v.strategies = append(v.strategies,
-		NewNestedValidationStrategy(v, b.maxDepth))
+	// 设置标签名称
+	if b.tagName != "" {
+		b.validate.SetTagName(b.tagName)
+	}
 
-	return v
+	// 创建验证器实例
+	v := &defaultValidator{
+		validate:       b.validate,
+		cache:          b.cache,
+		pool:           b.pool,
+		strategy:       b.strategy,
+		errorFormatter: b.errorFormatter,
+		tagName:        b.tagName,
+		useCache:       b.cache != nil,
+		usePool:        b.pool != nil,
+	}
+
+	return v, nil
+}
+
+// ============================================================================
+// 预配置的构建器工厂函数 - 简化常用场景
+// ============================================================================
+
+// NewDefaultValidator 创建默认验证器（带缓存和对象池）
+func NewDefaultValidator() (Validator, error) {
+	return NewValidatorBuilder().
+		WithCache(NewCacheManager()).
+		WithPool(NewValidatorPool()).
+		WithStrategy(NewDefaultStrategy()).
+		Build()
+}
+
+// NewSimpleValidator 创建简单验证器（无缓存和对象池）
+func NewSimpleValidator() (Validator, error) {
+	return NewValidatorBuilder().
+		WithStrategy(NewDefaultStrategy()).
+		Build()
+}
+
+// NewPerformanceValidator 创建高性能验证器（LRU缓存 + 对象池）
+func NewPerformanceValidator(cacheSize int) (Validator, error) {
+	return NewValidatorBuilder().
+		WithCache(NewLRUCacheManager(cacheSize)).
+		WithPool(NewValidatorPool()).
+		WithStrategy(NewDefaultStrategy()).
+		Build()
+}
+
+// NewFailFastValidator 创建快速失败验证器
+func NewFailFastValidator() (Validator, error) {
+	return NewValidatorBuilder().
+		WithStrategy(NewFailFastStrategy()).
+		Build()
+}
+
+// NewPartialValidator 创建部分字段验证器
+func NewPartialValidator(fields ...string) (Validator, error) {
+	return NewValidatorBuilder().
+		WithStrategy(NewPartialStrategy(fields...)).
+		Build()
 }

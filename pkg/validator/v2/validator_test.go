@@ -2,407 +2,446 @@ package v2
 
 import (
 	"testing"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // ============================================================================
-// 测试用例 - User 模型
+// 测试模型定义
 // ============================================================================
 
-// 预定义的通用场景常量
-const (
-	SceneCreate Scene = "create" // 创建场景
-	SceneUpdate Scene = "update" // 更新场景
-	SceneDelete Scene = "delete" // 删除场景
-	SceneQuery  Scene = "query"  // 查询场景
-)
-
-// User 测试用户模型
+// User 用户模型 - 演示如何实现接口
 type User struct {
-	Username        string `json:"username"`
-	Email           string `json:"email"`
-	Password        string `json:"password"`
-	ConfirmPassword string `json:"confirm_password"`
-	Age             int    `json:"age"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Age      int    `json:"age"`
+	Phone    string `json:"phone"`
 }
 
-// ProvideRules 实现 RuleValidator 接口
-func (u *User) ValidateRules() map[Scene]FieldRules {
-	return map[Scene]FieldRules{
-		SceneCreate: {
-			"Username": "required,min=3,max=20",
-			"Email":    "required,email",
-			"Password": "required,min=6",
-			"Age":      "omitempty,gte=0,lte=150",
+// GetRules 实现 RuleProvider 接口
+func (u *User) GetRules(scene Scene) map[string]string {
+	rules := make(map[string]string)
+
+	switch {
+	case scene.Has(SceneCreate):
+		rules["Username"] = "required,min=3,max=20,alphanum"
+		rules["Email"] = "required,email"
+		rules["Password"] = "required,min=6,max=20"
+		rules["Age"] = "omitempty,gte=0,lte=150"
+		rules["Phone"] = "omitempty,len=11,numeric"
+
+	case scene.Has(SceneUpdate):
+		rules["Username"] = "omitempty,min=3,max=20,alphanum"
+		rules["Email"] = "omitempty,email"
+		rules["Password"] = "omitempty,min=6,max=20"
+		rules["Age"] = "omitempty,gte=0,lte=150"
+		rules["Phone"] = "omitempty,len=11,numeric"
+
+	case scene.Has(SceneQuery):
+		rules["ID"] = "omitempty,gt=0"
+		rules["Username"] = "omitempty,min=1"
+		rules["Email"] = "omitempty,email"
+	}
+
+	return rules
+}
+
+// CustomValidate 实现 CustomValidator 接口
+func (u *User) CustomValidate(scene Scene, collector ErrorCollector) {
+	if scene.Has(SceneCreate) {
+		// 创建时，用户名不能是保留字
+		if u.Username == "admin" || u.Username == "root" {
+			collector.AddError("Username", "reserved", u.Username, "用户名 '"+u.Username+"' 是保留字，不能使用")
+		}
+	}
+
+	// 跨字段验证：如果提供了密码，长度必须足够
+	if u.Password != "" && len(u.Password) < 6 {
+		collector.AddError("Password", "min_length", "6", "密码长度至少6位")
+	}
+}
+
+// GetErrorMessage 实现 ErrorMessageProvider 接口
+func (u *User) GetErrorMessage(field, tag, param string) string {
+	messages := map[string]map[string]string{
+		"Username": {
+			"required": "用户名不能为空",
+			"min":      "用户名长度不能少于3个字符",
+			"max":      "用户名长度不能超过20个字符",
+			"alphanum": "用户名只能包含字母和数字",
+			"reserved": "用户名 '" + param + "' 是保留字",
 		},
-		SceneUpdate: {
-			"Username": "omitempty,min=3,max=20",
-			"Email":    "omitempty,email",
-			"Password": "omitempty,min=6",
+		"Email": {
+			"required": "邮箱地址不能为空",
+			"email":    "请输入有效的邮箱地址",
+		},
+		"Password": {
+			"required":   "密码不能为空",
+			"min":        "密码长度不能少于6位",
+			"min_length": "密码长度至少" + param + "位",
+		},
+		"Phone": {
+			"len":     "手机号码必须是11位数字",
+			"numeric": "手机号码只能包含数字",
 		},
 	}
-}
 
-// ValidateCustom 实现 CustomValidator 接口
-func (u *User) ValidateCustom(scene Scene, reporter ErrorReporter) {
-	// 跨字段验证：密码和确认密码必须一致
-	if u.Password != "" && u.Password != u.ConfirmPassword {
-		reporter.ReportMsg(
-			"User.ConfirmPassword",
-			"password_mismatch",
-			"",
-			"密码和确认密码不一致",
-		)
-	}
-
-	// 场景化验证：创建时年龄必须大于等于 18
-	if scene == SceneCreate && u.Age > 0 && u.Age < 18 {
-		reporter.ReportMsg(
-			"User.Age",
-			"min_age",
-			"18",
-			"创建用户时年龄必须大于等于 18 岁",
-		)
-	}
-}
-
-// ============================================================================
-// 基础功能测试
-// ============================================================================
-
-func TestValidator_Validate_Success(t *testing.T) {
-	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
-		Age:             25,
-	}
-
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if !result.IsValid() {
-		t.Errorf("Expected validation to pass, but got errors: %v", result.Error())
-	}
-}
-
-func TestValidator_Validate_RequiredFields(t *testing.T) {
-	user := &User{
-		// 缺少必填字段
-		Username: "",
-		Email:    "",
-		Password: "",
-	}
-
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail, but it passed")
-	}
-
-	errors := result.Errors()
-	if len(errors) == 0 {
-		t.Error("Expected validation errors, but got none")
-	}
-
-	// 检查是否包含 required 错误
-	hasRequiredError := false
-	for _, err := range errors {
-		if err.Tag == "required" {
-			hasRequiredError = true
-			break
+	if fieldMsgs, ok := messages[field]; ok {
+		if msg, ok := fieldMsgs[tag]; ok {
+			return msg
 		}
 	}
 
-	if !hasRequiredError {
-		t.Error("Expected required field error")
-	}
+	return "" // 返回空字符串使用默认消息
 }
 
-func TestValidator_Validate_MinLength(t *testing.T) {
-	user := &User{
-		Username:        "ab", // 少于 3 个字符
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
+// ============================================================================
+// 基础验证测试
+// ============================================================================
+
+func TestValidator_Create(t *testing.T) {
+	validator, err := NewDefaultValidator()
+	if err != nil {
+		t.Fatalf("创建验证器失败: %v", err)
 	}
 
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail, but it passed")
+	tests := []struct {
+		name    string
+		user    *User
+		wantErr bool
+	}{
+		{
+			name: "有效的创建数据",
+			user: &User{
+				Username: "testuser",
+				Email:    "test@example.com",
+				Password: "password123",
+				Age:      25,
+			},
+			wantErr: false,
+		},
+		{
+			name: "缺少必填字段",
+			user: &User{
+				Email:    "test@example.com",
+				Password: "password123",
+			},
+			wantErr: true,
+		},
+		{
+			name: "无效的邮箱",
+			user: &User{
+				Username: "testuser",
+				Email:    "invalid-email",
+				Password: "password123",
+			},
+			wantErr: true,
+		},
+		{
+			name: "用户名是保留字",
+			user: &User{
+				Username: "admin",
+				Email:    "admin@example.com",
+				Password: "password123",
+			},
+			wantErr: true,
+		},
 	}
 
-	// 检查所有错误
-	allErrors := result.Errors()
-	if len(allErrors) == 0 {
-		t.Error("Expected validation errors")
-		return
-	}
-
-	// 查找 username 相关的错误（可能是 min 或其他标签）
-	found := false
-	for _, err := range allErrors {
-		if err.Field == "username" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Errorf("Expected username validation error, got errors: %v", allErrors)
-	}
-}
-
-func TestValidator_Validate_CustomValidation(t *testing.T) {
-	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "different", // 确认密码不一致
-		Age:             25,
-	}
-
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail due to password mismatch")
-	}
-
-	errors := result.ErrorsByTag("password_mismatch")
-	if len(errors) == 0 {
-		t.Error("Expected password mismatch error")
-	}
-}
-
-func TestValidator_Validate_SceneValidation(t *testing.T) {
-	// 创建场景：年龄小于 18 应该失败
-	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
-		Age:             16,
-	}
-
-	validator := NewValidator()
-	result := validator.Validate(user, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail due to age restriction in create scene")
-	}
-
-	errors := result.ErrorsByTag("min_age")
-	if len(errors) == 0 {
-		t.Error("Expected age validation error in create scene")
-	}
-
-	// 更新场景：年龄小于 18 应该通过（没有年龄限制）
-	result2 := validator.Validate(user, SceneUpdate)
-
-	// 更新场景下，只有密码匹配的检查
-	if !result2.IsValid() {
-		// 检查是否只是密码不匹配的错误
-		errors := result2.Errors()
-		for _, err := range errors {
-			if err.Tag == "min_age" {
-				t.Error("Should not have age validation error in update scene")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.Validate(tt.user, SceneCreate)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
-		}
+			if err != nil {
+				t.Logf("验证错误: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidator_Update(t *testing.T) {
+	validator, err := NewDefaultValidator()
+	if err != nil {
+		t.Fatalf("创建验证器失败: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		user    *User
+		wantErr bool
+	}{
+		{
+			name: "更新用户名",
+			user: &User{
+				ID:       1,
+				Username: "newname",
+			},
+			wantErr: false,
+		},
+		{
+			name: "更新邮箱",
+			user: &User{
+				ID:    1,
+				Email: "newemail@example.com",
+			},
+			wantErr: false,
+		},
+		{
+			name: "空数据（更新时所有字段都是可选的）",
+			user: &User{
+				ID: 1,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.Validate(tt.user, SceneUpdate)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
 // ============================================================================
-// Result 接口测试
+// 部分字段验证测试
 // ============================================================================
 
-func TestValidationResult_IsValid(t *testing.T) {
-	result := NewValidationResult()
-
-	if !result.IsValid() {
-		t.Error("Expected empty result to be valid")
+func TestValidator_Partial(t *testing.T) {
+	validator, err := NewDefaultValidator()
+	if err != nil {
+		t.Fatalf("创建验证器失败: %v", err)
 	}
-
-	result = NewValidationResultWithErrors([]*FieldError{
-		NewFieldError("field", "field", "required", ""),
-	})
-
-	if result.IsValid() {
-		t.Error("Expected result with errors to be invalid")
-	}
-}
-
-func TestValidationResult_FirstError(t *testing.T) {
-	result := NewValidationResult()
-
-	if result.FirstError() != nil {
-		t.Error("Expected FirstError to return nil for empty result")
-	}
-
-	errors := []*FieldError{
-		NewFieldError("field1", "field1", "required", ""),
-		NewFieldError("field2", "field2", "min", "3"),
-	}
-
-	result = NewValidationResultWithErrors(errors)
-	firstError := result.FirstError()
-
-	if firstError == nil {
-		t.Error("Expected FirstError to return an error")
-		return
-	}
-
-	if firstError.Field != "field1" {
-		t.Errorf("Expected first error field to be 'field1', got '%s'", firstError.Field)
-	}
-}
-
-func TestValidationResult_ErrorsByField(t *testing.T) {
-	errors := []*FieldError{
-		NewFieldError("User.Username", "username", "required", ""),
-		NewFieldError("User.Email", "email", "email", ""),
-		NewFieldError("User.Username", "username", "min", "3"),
-	}
-
-	result := NewValidationResultWithErrors(errors)
-	usernameErrors := result.ErrorsByField("username")
-
-	if len(usernameErrors) != 2 {
-		t.Errorf("Expected 2 username errors, got %d", len(usernameErrors))
-	}
-}
-
-func TestValidationResult_ErrorsByTag(t *testing.T) {
-	errors := []*FieldError{
-		NewFieldError("User.Username", "username", "required", ""),
-		NewFieldError("User.Email", "email", "required", ""),
-		NewFieldError("User.Password", "password", "min", "6"),
-	}
-
-	result := NewValidationResultWithErrors(errors)
-	requiredErrors := result.ErrorsByTag("required")
-
-	if len(requiredErrors) != 2 {
-		t.Errorf("Expected 2 required errors, got %d", len(requiredErrors))
-	}
-}
-
-// ============================================================================
-// 全局函数测试
-// ============================================================================
-
-func TestDefaultValidator(t *testing.T) {
-	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
-		Age:             25,
-	}
-
-	// 使用全局默认验证器
-	result := Validate(user, SceneCreate)
-
-	if !result.IsValid() {
-		t.Errorf("Expected validation to pass, but got errors: %v", result.Error())
-	}
-}
-
-func TestClearCache(t *testing.T) {
-	// 这个测试主要确保 ClearCache 不会 panic
-	ClearCache()
 
 	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
-		Age:             25,
+		Username: "ab", // 太短
+		Email:    "valid@example.com",
+		Password: "password123",
 	}
 
-	result := Validate(user, SceneCreate)
+	// 只验证Email字段（应该通过）
+	err = validator.ValidatePartial(user, "Email")
+	if err != nil {
+		t.Errorf("部分验证失败: %v", err)
+	}
 
-	if !result.IsValid() {
-		t.Error("Validation should still work after clearing cache")
+	// 验证Username字段（应该失败）
+	err = validator.ValidatePartial(user, "Username")
+	t.Logf("验证 Username 结果: %v", err)
+	if err == nil {
+		t.Error("期望验证失败，但通过了")
+	} else {
+		t.Logf("验证正确失败: %v", err)
 	}
 }
 
 // ============================================================================
-// 边界条件测试
+// 策略模式测试
 // ============================================================================
 
-func TestValidator_Validate_NilObject(t *testing.T) {
-	validator := NewValidator()
-	result := validator.Validate(nil, SceneCreate)
-
-	if result.IsValid() {
-		t.Error("Expected validation to fail for nil object")
+func TestValidator_WithStrategy(t *testing.T) {
+	// 测试快速失败策略
+	validator, err := NewFailFastValidator()
+	if err != nil {
+		t.Fatalf("创建验证器失败: %v", err)
 	}
 
-	if result.FirstError() == nil {
-		t.Error("Expected error for nil object")
-	}
-}
-
-func TestValidator_Validate_EmptyScene(t *testing.T) {
 	user := &User{
-		Username:        "john",
-		Email:           "john@example.com",
-		Password:        "password123",
-		ConfirmPassword: "password123",
+		Username: "",        // 错误1
+		Email:    "invalid", // 错误2
+		Password: "123",     // 错误3
 	}
 
-	validator := NewValidator()
-	result := validator.Validate(user, Scene(""))
+	err = validator.Validate(user, SceneCreate)
+	if err == nil {
+		t.Error("期望验证失败，但通过了")
+	}
 
-	// 空场景应该不匹配任何规则，但自定义验证仍会执行
-	if !result.IsValid() {
-		// 检查是否只有自定义验证的错误
-		errors := result.Errors()
-		for _, err := range errors {
-			// 空场景下不应该有规则验证错误
-			if err.Tag == "required" || err.Tag == "min" || err.Tag == "max" {
-				t.Errorf("Should not have rule validation errors in empty scene: %v", err)
-			}
-		}
+	// 快速失败模式应该只返回第一个错误
+	if verrs, ok := err.(ValidationErrors); ok {
+		t.Logf("错误数量: %d, 错误: %v", len(verrs), verrs)
 	}
 }
 
 // ============================================================================
-// 并发测试
+// 建造者模式测试
 // ============================================================================
 
-func TestValidator_Concurrent(t *testing.T) {
-	validator := NewValidator()
+func TestValidatorBuilder(t *testing.T) {
+	validator, err := NewValidatorBuilder().
+		WithCache(NewCacheManager()).
+		WithPool(NewValidatorPool()).
+		WithStrategy(NewDefaultStrategy()).
+		RegisterCustomValidation("is_awesome", func(fl validator.FieldLevel) bool {
+			return fl.Field().String() == "awesome"
+		}).
+		Build()
 
-	// 启动多个 goroutine 并发验证
-	done := make(chan bool, 10)
-
-	for i := 0; i < 10; i++ {
-		go func(id int) {
-			user := &User{
-				Username:        "john",
-				Email:           "john@example.com",
-				Password:        "password123",
-				ConfirmPassword: "password123",
-				Age:             25,
-			}
-
-			result := validator.Validate(user, SceneCreate)
-
-			if !result.IsValid() {
-				t.Errorf("Goroutine %d: Expected validation to pass", id)
-			}
-
-			done <- true
-		}(i)
+	if err != nil {
+		t.Fatalf("构建验证器失败: %v", err)
 	}
 
-	// 等待所有 goroutine 完成
-	for i := 0; i < 10; i++ {
-		<-done
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	err = validator.Validate(user, SceneCreate)
+	if err != nil {
+		t.Errorf("验证失败: %v", err)
+	}
+}
+
+// ============================================================================
+// 缓存测试
+// ============================================================================
+
+func TestValidator_Cache(t *testing.T) {
+	cache := NewCacheManager()
+
+	validator, err := NewValidatorBuilder().
+		WithCache(cache).
+		Build()
+
+	if err != nil {
+		t.Fatalf("创建验证器失败: %v", err)
+	}
+
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	// 第一次验证（缓存miss）
+	err = validator.Validate(user, SceneCreate)
+	if err != nil {
+		t.Errorf("验证失败: %v", err)
+	}
+
+	// 第二次验证（缓存hit）
+	err = validator.Validate(user, SceneCreate)
+	if err != nil {
+		t.Errorf("验证失败: %v", err)
+	}
+}
+
+// ============================================================================
+// 全局验证器测试
+// ============================================================================
+
+func TestGlobalValidator(t *testing.T) {
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	err := Validate(user, SceneCreate)
+	if err != nil {
+		t.Errorf("全局验证失败: %v", err)
+	}
+}
+
+// ============================================================================
+// 错误收集器测试
+// ============================================================================
+
+func TestErrorCollector(t *testing.T) {
+	collector := NewErrorCollector()
+
+	collector.AddError("Username", "required")
+	collector.AddError("Email", "email", "invalid")
+
+	if !collector.HasErrors() {
+		t.Error("期望有错误，但没有错误")
+	}
+
+	errs := collector.GetErrors()
+	if len(errs) != 2 {
+		t.Errorf("期望2个错误，得到 %d 个", len(errs))
+	}
+
+	collector.Clear()
+	if collector.HasErrors() {
+		t.Error("期望没有错误，但有错误")
+	}
+}
+
+// ============================================================================
+// 场景组合测试
+// ============================================================================
+
+func TestScene_Combination(t *testing.T) {
+	// 测试场景组合
+	scene := SceneCreate | SceneUpdate
+
+	if !scene.Has(SceneCreate) {
+		t.Error("场景应该包含Create")
+	}
+
+	if !scene.Has(SceneUpdate) {
+		t.Error("场景应该包含Update")
+	}
+
+	// 测试场景字符串
+	t.Logf("场景名称: %s", scene.String())
+}
+
+// ============================================================================
+// 性能测试
+// ============================================================================
+
+func BenchmarkValidator_WithCache(b *testing.B) {
+	validator, _ := NewDefaultValidator()
+
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = validator.Validate(user, SceneCreate)
+	}
+}
+
+func BenchmarkValidator_WithoutCache(b *testing.B) {
+	validator, _ := NewSimpleValidator()
+
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = validator.Validate(user, SceneCreate)
+	}
+}
+
+func BenchmarkValidator_WithPool(b *testing.B) {
+	validator, _ := NewValidatorBuilder().
+		WithPool(NewValidatorPool()).
+		Build()
+
+	user := &User{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = validator.Validate(user, SceneCreate)
 	}
 }
