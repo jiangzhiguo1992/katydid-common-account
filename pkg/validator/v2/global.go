@@ -28,6 +28,16 @@ func ValidatePartial(data interface{}, fields ...string) error {
 	return defaultGlobalValidator.ValidatePartial(data, fields...)
 }
 
+// ValidateExcept 使用全局验证器进行排除字段验证
+func ValidateExcept(data interface{}, scene Scene, excludeFields ...string) error {
+	return defaultGlobalValidator.ValidateExcept(data, scene, excludeFields...)
+}
+
+// ValidateFields 使用全局验证器进行场景化的部分字段验证
+func ValidateFields(data interface{}, scene Scene, fields ...string) error {
+	return defaultGlobalValidator.ValidateFields(data, scene, fields...)
+}
+
 // SetGlobalValidator 设置全局验证器
 func SetGlobalValidator(validator Validator) {
 	defaultGlobalValidator = validator
@@ -71,5 +81,41 @@ func Must(data interface{}, scene Scene) {
 func MustPartial(data interface{}, fields ...string) {
 	if err := ValidatePartial(data, fields...); err != nil {
 		panic(err)
+	}
+}
+
+// MustExcept 必须排除字段验证（panic on error）
+func MustExcept(data interface{}, scene Scene, excludeFields ...string) {
+	if err := ValidateExcept(data, scene, excludeFields...); err != nil {
+		panic(err)
+	}
+}
+
+// ============================================================================
+// 全局配置函数
+// ============================================================================
+
+// RegisterAlias 在全局验证器上注册别名（需要重新构建验证器）
+func RegisterAlias(alias, tags string) error {
+	v, err := NewValidatorBuilder().
+		WithCache(NewCacheManager()).
+		WithPool(NewValidatorPool()).
+		WithStrategy(NewDefaultStrategy()).
+		RegisterAlias(alias, tags).
+		Build()
+	if err != nil {
+		return err
+	}
+	SetGlobalValidator(v)
+	return nil
+}
+
+// ClearCache 清除全局验证器的缓存
+func ClearCache() {
+	// 尝试从全局验证器中获取缓存并清理
+	if v, ok := defaultGlobalValidator.(*defaultValidator); ok {
+		if v.cache != nil {
+			v.cache.Clear()
+		}
 	}
 }

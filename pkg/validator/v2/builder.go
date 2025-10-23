@@ -17,6 +17,7 @@ type validatorBuilder struct {
 	tagName        string
 	validate       *validator.Validate
 	customFuncs    map[string]validator.Func
+	aliases        map[string]string
 }
 
 // NewValidatorBuilder 创建验证器构建器
@@ -24,6 +25,7 @@ func NewValidatorBuilder() ValidatorBuilder {
 	return &validatorBuilder{
 		validate:    validator.New(),
 		tagName:     "validate",
+		aliases:     make(map[string]string),
 		customFuncs: make(map[string]validator.Func),
 	}
 }
@@ -61,6 +63,17 @@ func (b *validatorBuilder) WithTagName(tagName string) ValidatorBuilder {
 // RegisterCustomValidation 注册自定义验证函数
 func (b *validatorBuilder) RegisterCustomValidation(tag string, fn validator.Func) ValidatorBuilder {
 	b.customFuncs[tag] = fn
+	return b
+}
+
+// RegisterAlias 注册验证规则别名
+func (b *validatorBuilder) RegisterAlias(alias string, tags string) ValidatorBuilder {
+	// 注册所有别名
+	for alias, tags := range b.aliases {
+		b.validate.RegisterAlias(alias, tags)
+	}
+
+	b.aliases[alias] = tags
 	return b
 }
 

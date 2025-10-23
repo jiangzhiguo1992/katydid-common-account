@@ -58,6 +58,26 @@ func (c *defaultCacheManager) Clear() {
 	c.cache = make(map[cacheKey]map[string]string)
 }
 
+// Remove 移除指定类型的缓存
+func (c *defaultCacheManager) Remove(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 移除所有与该类型相关的缓存
+	for cKey := range c.cache {
+		if cKey.typeName == key {
+			delete(c.cache, cKey)
+		}
+	}
+}
+
+// Size 获取缓存大小
+func (c *defaultCacheManager) Size() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.cache)
+}
+
 // ============================================================================
 // LRU 缓存管理器 - 带容量限制的缓存
 // ============================================================================
@@ -152,6 +172,27 @@ func (c *LRUCacheManager) Clear() {
 	c.cache = make(map[cacheKey]*lruNode)
 	c.head.next = c.tail
 	c.tail.prev = c.head
+}
+
+// Remove 移除指定类型的缓存
+func (c *LRUCacheManager) Remove(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 移除所有与该类型相关的缓存
+	for cKey, node := range c.cache {
+		if cKey.typeName == key {
+			c.removeNode(node)
+			delete(c.cache, cKey)
+		}
+	}
+}
+
+// Size 获取缓存大小
+func (c *LRUCacheManager) Size() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.cache)
 }
 
 // moveToHead 移动节点到头部

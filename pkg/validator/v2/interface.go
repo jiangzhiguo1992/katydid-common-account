@@ -7,11 +7,16 @@ import "github.com/go-playground/validator/v10"
 // ============================================================================
 
 // Validator 验证器核心接口 - 定义验证的基本能力
+// 遵循接口隔离原则(ISP)：接口小而精，职责明确
 type Validator interface {
-	// Validate 执行验证
+	// Validate 执行完整验证
 	Validate(data interface{}, scene Scene) error
-	// ValidatePartial 部分字段验证
+	// ValidatePartial 部分字段验证（只验证指定字段）
 	ValidatePartial(data interface{}, fields ...string) error
+	// ValidateExcept 排除字段验证（验证除指定字段外的所有字段）
+	ValidateExcept(data interface{}, scene Scene, excludeFields ...string) error
+	// ValidateFields 场景化的部分字段验证
+	ValidateFields(data interface{}, scene Scene, fields ...string) error
 }
 
 // RuleProvider 规则提供者接口 - 单一职责：只负责提供验证规则
@@ -55,6 +60,10 @@ type ValidationStrategy interface {
 // CacheManager 缓存管理器接口 - 单一职责：只负责规则缓存
 type CacheManager interface {
 	// Get 获取缓存的规则
+	// Remove 移除指定类型的缓存
+	Remove(key string)
+	// Size 获取缓存大小
+	Size() int
 	Get(key string, scene Scene) (map[string]string, bool)
 	// Set 设置缓存
 	Set(key string, scene Scene, rules map[string]string)
@@ -106,6 +115,7 @@ type ValidatorConfig interface {
 	EnablePool() bool
 	// GetStrategy 获取验证策略
 	GetStrategy() ValidationStrategy
+	// 遵循建造者模式：分离构造过程和表示
 	// GetTagName 获取标签名称
 	GetTagName() string
 }
@@ -115,6 +125,7 @@ type ValidatorConfig interface {
 // ============================================================================
 
 // ValidatorBuilder 验证器构建器接口 - 流式API构建复杂对象
+// 遵循建造者模式：分离构造过程和表示
 type ValidatorBuilder interface {
 	// WithCache 启用缓存
 	WithCache(cache CacheManager) ValidatorBuilder
@@ -128,6 +139,44 @@ type ValidatorBuilder interface {
 	WithTagName(tagName string) ValidatorBuilder
 	// RegisterCustomValidation 注册自定义验证函数
 	RegisterCustomValidation(tag string, fn validator.Func) ValidatorBuilder
+	// RegisterAlias 注册验证规则别名
+	RegisterAlias(alias string, tags string) ValidatorBuilder
 	// Build 构建验证器
 	Build() (Validator, error)
+}
+
+// ============================================================================
+// Map 验证接口 - 支持动态字段验证
+// ============================================================================
+
+// MapValidationRule Map 验证规则
+type MapValidationRule struct {
+	// ParentNameSpace 父命名空间
+	ParentNameSpace string
+	// RequiredKeys 必填键
+	RequiredKeys []string
+	// AllowedKeys 允许的键（白名单）
+	AllowedKeys []string
+	// Rules 字段验证规则
+	Rules map[string]string
+	// KeyValidators 自定义键验证器
+	KeyValidators map[string]func(value interface{}) error
+}
+
+// MapValidators 场景化的 Map 验证器配置
+type MapValidators struct {
+	// Validators 场景到验证规则的映射
+	Validators map[Scene]MapValidationRule
+}
+
+// ============================================================================
+// 嵌套验证接口 - 支持复杂对象结构
+// ============================================================================
+
+// NestedValidator 嵌套验证器接口 - 单一职责：处理嵌套结构验证
+type NestedValidator interface {
+	// ValidateNested 验证嵌套结构
+	ValidateNested(data interface{}, scene Scene, maxDepth int) error
+	// ShouldValidateNested 判断是否应该验证嵌套字段
+	ShouldValidateNested(field interface{}) bool
 }

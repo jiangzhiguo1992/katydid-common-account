@@ -144,6 +144,123 @@ func (v *defaultValidator) ValidatePartial(data interface{}, fields ...string) e
 	return v.validateWithRules(validate, data, partialRules)
 }
 
+// ValidateExcept 排除字段验证（验证除指定字段外的所有字段）
+func (v *defaultValidator) ValidateExcept(data interface{}, scene Scene, excludeFields ...string) error {
+	if data == nil {
+		return fmt.Errorf("验证数据不能为nil")
+	}
+
+	if len(excludeFields) == 0 {
+		// 没有排除字段，执行完整验证
+		return v.Validate(data, scene)
+	}
+
+	// 创建排除字段集合
+	excludeSet := make(map[string]bool, len(excludeFields))
+	for _, field := range excludeFields {
+		if field != "" {
+			excludeSet[field] = true
+		}
+	}
+
+	// 获取类型名称
+	typeName := getTypeName(data)
+
+	// 获取验证规则
+	rules := v.getRules(data, scene, typeName)
+
+	// 过滤掉排除的字段
+	filteredRules := make(map[string]string)
+	for field, rule := range rules {
+		if !excludeSet[field] {
+			filteredRules[field] = rule
+		}
+	}
+
+	// 执行验证
+	var baseErr error
+	if v.usePool && v.pool != nil {
+		validate := v.pool.Get()
+		defer v.pool.Put(validate)
+		baseErr = v.executeValidation(validate, data, filteredRules)
+	} else {
+		baseErr = v.executeValidation(v.validate, data, filteredRules)
+	}
+
+	// 收集错误
+	collector := GetPooledErrorCollector()
+	defer PutPooledErrorCollector(collector)
+
+	// 处理基础验证错误
+	if baseErr != nil {
+		if errs, ok := baseErr.(validator.ValidationErrors); ok {
+			v.processValidationErrors(errs, data, collector)
+		} else {
+			return baseErr
+		}
+	}
+
+	// 执行自定义验证（自定义验证不受字段排除影响）
+	if customValidator, ok := data.(CustomValidator); ok {
+		customValidator.CustomValidate(scene, collector)
+	}
+
+	// 返回错误
+	if collector.HasErrors() {
+		return collector.GetErrors()
+	}
+
+	return nil
+}
+
+// ValidateFields 场景化的部分字段验证
+func (v *defaultValidator) ValidateFields(data interface{}, scene Scene, fields ...string) error {
+	if data == nil {
+		return fmt.Errorf("验证数据不能为nil")
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+
+	// 创建字段集合
+	fieldSet := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		if field != "" {
+			fieldSet[field] = true
+		}
+	}
+
+	// 获取类型名称
+	typeName := getTypeName(data)
+
+	// 获取验证规则
+	rules := v.getRules(data, scene, typeName)
+
+	// 只保留指定的字段
+	partialRules := make(map[string]string)
+	for field, rule := range rules {
+		if fieldSet[field] {
+			partialRules[field] = rule
+		}
+	}
+
+	if len(partialRules) == 0 {
+		return nil
+	}
+
+	// 执行验证
+	var validate *validator.Validate
+	if v.usePool && v.pool != nil {
+		validate = v.pool.Get()
+		defer v.pool.Put(validate)
+	} else {
+		validate = v.validate
+	}
+
+	return v.validateWithRules(validate, data, partialRules)
+}
+
 // getRules 获取验证规则（带缓存）
 func (v *defaultValidator) getRules(data interface{}, scene Scene, typeName string) map[string]string {
 	// 尝试从缓存获取
@@ -303,66 +420,6 @@ func getTypeName(data interface{}) string {
 }
 
 // ============================================================================
-// 多场景验证器 - 支持map数据验证
-// ============================================================================
-
-// MapValidator Map数据验证器
-type MapValidator struct {
-	validate       *validator.Validate
-	cache          CacheManager
-	errorFormatter ErrorFormatter
-}
-
-// NewMapValidator 创建Map验证器
-func NewMapValidator(opts ...ValidatorOption) *MapValidator {
-	mv := &MapValidator{
-		validate: validator.New(),
-	}
-
-	// 应用选项
-	for _, opt := range opts {
-		opt(mv)
-	}
-
-	return mv
-}
-
-// ValidateMap 验证Map数据
-func (v *MapValidator) ValidateMap(data map[string]interface{}, rules map[string]string) error {
-	collector := GetPooledErrorCollector()
-	defer PutPooledErrorCollector(collector)
-
-	for field, rule := range rules {
-		value, exists := data[field]
-
-		// 检查必填字段
-		if strings.Contains(rule, "required") && !exists {
-			collector.AddError(field, "required")
-			continue
-		}
-
-		if !exists {
-			continue
-		}
-
-		// 验证字段
-		if err := v.validate.Var(value, rule); err != nil {
-			if errs, ok := err.(validator.ValidationErrors); ok {
-				for _, e := range errs {
-					collector.AddFieldError(field, e.Tag(), e.Param(), "")
-				}
-			}
-		}
-	}
-
-	if collector.HasErrors() {
-		return collector.GetErrors()
-	}
-
-	return nil
-}
-
-// ============================================================================
 // 验证器选项 - 函数选项模式
 // ============================================================================
 
@@ -376,7 +433,7 @@ func WithValidatorCache(cache CacheManager) ValidatorOption {
 		case *defaultValidator:
 			val.cache = cache
 			val.useCache = true
-		case *MapValidator:
+		case *defaultMapValidator:
 			val.cache = cache
 		}
 	}
@@ -407,7 +464,7 @@ func WithErrorFormatter(formatter ErrorFormatter) ValidatorOption {
 		switch val := v.(type) {
 		case *defaultValidator:
 			val.errorFormatter = formatter
-		case *MapValidator:
+		case *defaultMapValidator:
 			val.errorFormatter = formatter
 		}
 	}
