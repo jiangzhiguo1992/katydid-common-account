@@ -1,460 +1,1251 @@
+// filepath: /Users/jiang/Workspace/Resource/9_katydid/Code/katydid-common-account/pkg/types/status_test.go
 package types
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"testing"
 )
 
-// TestStatusConstants 测试状态常量定义
-func TestStatusConstants(t *testing.T) {
+// ============================================================================
+// 基础功能测试
+// ============================================================================
+
+// TestStatus_Set 测试状态设置
+func TestStatus_Set(t *testing.T) {
 	tests := []struct {
 		name     string
-		status   Status
-		expected int64
+		initial  Status
+		setValue Status
+		want     Status
 	}{
-		{"无状态", StatusNone, 0},
-		{"系统删除", StatusSysDeleted, 1},
-		{"管理员删除", StatusAdmDeleted, 2},
-		{"用户删除", StatusUserDeleted, 4},
-		{"系统禁用", StatusSysDisabled, 8},
-		{"管理员禁用", StatusAdmDisabled, 16},
-		{"用户禁用", StatusUserDisabled, 32},
-		{"系统隐藏", StatusSysHidden, 64},
-		{"管理员隐藏", StatusAdmHidden, 128},
-		{"用户隐藏", StatusUserHidden, 256},
-		{"系统未验证", StatusSysUnverified, 512},
-		{"管理员未验证", StatusAdmUnverified, 1024},
-		{"用户未验证", StatusUserUnverified, 2048},
+		{"零值设置", StatusNone, StatusSysDeleted, StatusSysDeleted},
+		{"覆盖单个状态", StatusSysDeleted, StatusAdmDeleted, StatusAdmDeleted},
+		{"覆盖多个状态", StatusSysDeleted | StatusAdmDeleted, StatusUserDeleted, StatusUserDeleted},
+		{"设置组合状态", StatusNone, StatusAllDeleted, StatusAllDeleted},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if int64(tt.status) != tt.expected {
-				t.Errorf("状态常量 %s 值错误: 期望 %d, 实际 %d", tt.name, tt.expected, int64(tt.status))
+			s := tt.initial
+			s.Set(tt.setValue)
+			if s != tt.want {
+				t.Errorf("Set() = %v, want %v", s, tt.want)
 			}
 		})
 	}
 }
 
-// TestStatusCombinedConstants 测试预定义的组合常量
-func TestStatusCombinedConstants(t *testing.T) {
+// TestStatus_Clear 测试清除所有状态
+func TestStatus_Clear(t *testing.T) {
 	tests := []struct {
-		name     string
-		combined Status
-		includes []Status
+		name    string
+		initial Status
 	}{
-		{
-			"所有删除状态",
-			StatusAllDeleted,
-			[]Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted},
-		},
-		{
-			"所有禁用状态",
-			StatusAllDisabled,
-			[]Status{StatusSysDisabled, StatusAdmDisabled, StatusUserDisabled},
-		},
-		{
-			"所有隐藏状态",
-			StatusAllHidden,
-			[]Status{StatusSysHidden, StatusAdmHidden, StatusUserHidden},
-		},
-		{
-			"所有未验证状态",
-			StatusAllUnverified,
-			[]Status{StatusSysUnverified, StatusAdmUnverified, StatusUserUnverified},
-		},
+		{"清除零值", StatusNone},
+		{"清除单个状态", StatusSysDeleted},
+		{"清除多个状态", StatusAllDeleted},
+		{"清除复杂状态", StatusAllDeleted | StatusAllDisabled | StatusAllHidden},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, include := range tt.includes {
-				if !tt.combined.Contain(include) {
-					t.Errorf("%s 应该包含 %d", tt.name, include)
+			s := tt.initial
+			s.Clear()
+			if s != StatusNone {
+				t.Errorf("Clear() = %v, want StatusNone", s)
+			}
+		})
+	}
+}
+
+// TestStatus_Add 测试添加状态位
+func TestStatus_Add(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		add     Status
+		want    Status
+	}{
+		{"添加到零值", StatusNone, StatusSysDeleted, StatusSysDeleted},
+		{"添加相同状态", StatusSysDeleted, StatusSysDeleted, StatusSysDeleted},
+		{"添加不同状态", StatusSysDeleted, StatusAdmDeleted, StatusSysDeleted | StatusAdmDeleted},
+		{"添加组合状态", StatusSysDeleted, StatusAllDisabled, StatusSysDeleted | StatusAllDisabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.Add(tt.add)
+			if s != tt.want {
+				t.Errorf("Add() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_Del 测试删除状态位
+func TestStatus_Del(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		del     Status
+		want    Status
+	}{
+		{"从零值删除", StatusNone, StatusSysDeleted, StatusNone},
+		{"删除存在的状态", StatusSysDeleted | StatusAdmDeleted, StatusSysDeleted, StatusAdmDeleted},
+		{"删除不存在的状态", StatusSysDeleted, StatusAdmDeleted, StatusSysDeleted},
+		{"删除组合状态", StatusAllDeleted | StatusAllDisabled, StatusAllDeleted, StatusAllDisabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.Del(tt.del)
+			if s != tt.want {
+				t.Errorf("Del() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_AddMultiple 测试批量添加
+func TestStatus_AddMultiple(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		flags   []Status
+		want    Status
+	}{
+		{"添加空列表", StatusNone, []Status{}, StatusNone},
+		{"添加单个", StatusNone, []Status{StatusSysDeleted}, StatusSysDeleted},
+		{"添加多个", StatusNone, []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}, StatusAllDeleted},
+		{"添加重复", StatusSysDeleted, []Status{StatusSysDeleted, StatusAdmDeleted}, StatusSysDeleted | StatusAdmDeleted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.AddMultiple(tt.flags...)
+			if s != tt.want {
+				t.Errorf("AddMultiple() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_DelMultiple 测试批量删除
+func TestStatus_DelMultiple(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		flags   []Status
+		want    Status
+	}{
+		{"删除空列表", StatusAllDeleted, []Status{}, StatusAllDeleted},
+		{"删除单个", StatusAllDeleted, []Status{StatusSysDeleted}, StatusAdmDeleted | StatusUserDeleted},
+		{"删除多个", StatusAllDeleted, []Status{StatusSysDeleted, StatusAdmDeleted}, StatusUserDeleted},
+		{"删除全部", StatusAllDeleted, []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}, StatusNone},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.DelMultiple(tt.flags...)
+			if s != tt.want {
+				t.Errorf("DelMultiple() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_Toggle 测试切换状态位
+func TestStatus_Toggle(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		toggle  Status
+		want    Status
+	}{
+		{"切换零值", StatusNone, StatusSysDeleted, StatusSysDeleted},
+		{"切换已存在", StatusSysDeleted, StatusSysDeleted, StatusNone},
+		{"切换不存在", StatusSysDeleted, StatusAdmDeleted, StatusSysDeleted | StatusAdmDeleted},
+		{"切换组合", StatusSysDeleted | StatusAdmDeleted, StatusAllDeleted, StatusUserDeleted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.Toggle(tt.toggle)
+			if s != tt.want {
+				t.Errorf("Toggle() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_ToggleMultiple 测试批量切换
+func TestStatus_ToggleMultiple(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		flags   []Status
+		want    Status
+	}{
+		{"切换空列表", StatusNone, []Status{}, StatusNone},
+		{"切换单个不存在", StatusNone, []Status{StatusSysDeleted}, StatusSysDeleted},
+		{"切换单个已存在", StatusSysDeleted, []Status{StatusSysDeleted}, StatusNone},
+		{"切换多个混合", StatusSysDeleted | StatusAdmDeleted, []Status{StatusAdmDeleted, StatusUserDeleted}, StatusSysDeleted | StatusUserDeleted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.ToggleMultiple(tt.flags...)
+			if s != tt.want {
+				t.Errorf("ToggleMultiple() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_And 测试状态位与运算
+func TestStatus_And(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		and     Status
+		want    Status
+	}{
+		{"零值与运算", StatusNone, StatusSysDeleted, StatusNone},
+		{"相同状态", StatusSysDeleted, StatusSysDeleted, StatusSysDeleted},
+		{"保留交集", StatusAllDeleted, StatusSysDeleted | StatusAdmDeleted, StatusSysDeleted | StatusAdmDeleted},
+		{"无交集", StatusSysDeleted, StatusAdmDeleted, StatusNone},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.And(tt.and)
+			if s != tt.want {
+				t.Errorf("And() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_AndMultiple 测试批量与运算
+func TestStatus_AndMultiple(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial Status
+		flags   []Status
+		want    Status
+	}{
+		{"空列表", StatusAllDeleted, []Status{}, StatusAllDeleted}, // 空列表时保持不变
+		{"单个", StatusAllDeleted, []Status{StatusSysDeleted}, StatusSysDeleted},
+		{"多个", StatusAllDeleted | StatusAllDisabled, []Status{StatusAllDeleted, StatusSysDisabled}, StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted | StatusSysDisabled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.initial
+			s.AndMultiple(tt.flags...)
+			if s != tt.want {
+				t.Errorf("AndMultiple() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 状态查询测试
+// ============================================================================
+
+// TestStatus_Has 测试单个状态检查
+func TestStatus_Has(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		check  Status
+		want   bool
+	}{
+		{"零值检查零", StatusNone, StatusNone, false}, // 零值特殊处理
+		{"零值检查非零", StatusNone, StatusSysDeleted, false},
+		{"单个匹配", StatusSysDeleted, StatusSysDeleted, true},
+		{"单个不匹配", StatusSysDeleted, StatusAdmDeleted, false},
+		{"多个全匹配", StatusAllDeleted, StatusAllDeleted, true},
+		{"多个部分匹配", StatusAllDeleted, StatusSysDeleted, true},
+		{"检查组合-全匹配", StatusSysDeleted | StatusAdmDeleted, StatusSysDeleted | StatusAdmDeleted, true},
+		{"检查组合-部分匹配", StatusSysDeleted | StatusAdmDeleted, StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.Has(tt.check); got != tt.want {
+				t.Errorf("Has() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_HasAny 测试任意状态检查
+func TestStatus_HasAny(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		flags  []Status
+		want   bool
+	}{
+		{"空列表", StatusSysDeleted, []Status{}, false},
+		{"单个匹配", StatusSysDeleted, []Status{StatusSysDeleted}, true},
+		{"单个不匹配", StatusSysDeleted, []Status{StatusAdmDeleted}, false},
+		{"多个有一个匹配", StatusSysDeleted, []Status{StatusSysDeleted, StatusAdmDeleted}, true},
+		{"多个都不匹配", StatusSysDeleted, []Status{StatusAdmDeleted, StatusUserDeleted}, false},
+		{"零值检查", StatusNone, []Status{StatusSysDeleted}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.HasAny(tt.flags...); got != tt.want {
+				t.Errorf("HasAny() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_HasAll 测试全部状态检查
+func TestStatus_HasAll(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		flags  []Status
+		want   bool
+	}{
+		{"空列表", StatusSysDeleted, []Status{}, true},
+		{"单个匹配", StatusSysDeleted, []Status{StatusSysDeleted}, true},
+		{"单个不匹配", StatusSysDeleted, []Status{StatusAdmDeleted}, false},
+		{"多个全匹配", StatusAllDeleted, []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}, true},
+		{"多个部分匹配", StatusSysDeleted | StatusAdmDeleted, []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}, false},
+		{"零值检查", StatusNone, []Status{StatusSysDeleted}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.HasAll(tt.flags...); got != tt.want {
+				t.Errorf("HasAll() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_ActiveFlags 测试获取活动状态位
+func TestStatus_ActiveFlags(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   []Status
+	}{
+		{"零值", StatusNone, nil},
+		{"单个状态", StatusSysDeleted, []Status{StatusSysDeleted}},
+		{"三个状态", StatusAllDeleted, []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}},
+		{"复杂组合", StatusSysDeleted | StatusAdmDisabled | StatusUserHidden,
+			[]Status{StatusSysDeleted, StatusAdmDisabled, StatusUserHidden}},
+		{"高位状态", StatusExpand51, []Status{StatusExpand51}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.status.ActiveFlags()
+			if len(got) != len(tt.want) {
+				t.Errorf("ActiveFlags() length = %v, want %v", len(got), len(tt.want))
+				return
+			}
+			for i, flag := range got {
+				if flag != tt.want[i] {
+					t.Errorf("ActiveFlags()[%d] = %v, want %v", i, flag, tt.want[i])
 				}
 			}
 		})
 	}
 }
 
-// TestStatusIsValid 测试状态值验证
-func TestStatusIsValid(t *testing.T) {
+// TestStatus_Diff 测试状态差异比较
+func TestStatus_Diff(t *testing.T) {
+	tests := []struct {
+		name        string
+		s1          Status
+		s2          Status
+		wantAdded   Status
+		wantRemoved Status
+	}{
+		{"相同状态", StatusSysDeleted, StatusSysDeleted, StatusNone, StatusNone},
+		{"完全不同", StatusSysDeleted, StatusAdmDeleted, StatusSysDeleted, StatusAdmDeleted},
+		{"添加状态", StatusSysDeleted | StatusAdmDeleted, StatusSysDeleted, StatusAdmDeleted, StatusNone},
+		{"移除状态", StatusSysDeleted, StatusSysDeleted | StatusAdmDeleted, StatusNone, StatusAdmDeleted},
+		{"混合变化", StatusSysDeleted | StatusAdmDeleted, StatusAdmDeleted | StatusUserDeleted,
+			StatusSysDeleted, StatusUserDeleted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAdded, gotRemoved := tt.s1.Diff(tt.s2)
+			if gotAdded != tt.wantAdded {
+				t.Errorf("Diff() added = %v, want %v", gotAdded, tt.wantAdded)
+			}
+			if gotRemoved != tt.wantRemoved {
+				t.Errorf("Diff() removed = %v, want %v", gotRemoved, tt.wantRemoved)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 业务状态检查测试
+// ============================================================================
+
+// TestStatus_IsDeleted 测试删除状态检查
+func TestStatus_IsDeleted(t *testing.T) {
 	tests := []struct {
 		name   string
 		status Status
-		valid  bool
+		want   bool
 	}{
-		{"零值有效", StatusNone, true},
-		{"正常状态有效", StatusUserDisabled, true},
-		{"组合状态有效", StatusUserDisabled | StatusSysHidden, true},
-		{"负数无效", Status(-1), false},
-		{"最大值有效", MaxStatus, true},
-		{"超出最大值无效", MaxStatus + 1, false},
+		{"零值", StatusNone, false},
+		{"系统删除", StatusSysDeleted, true},
+		{"管理员删除", StatusAdmDeleted, true},
+		{"用户删除", StatusUserDeleted, true},
+		{"全部删除", StatusAllDeleted, true},
+		{"其他状态", StatusSysDisabled, false},
+		{"混合状态", StatusSysDeleted | StatusAdmDisabled, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.status.IsValid(); got != tt.valid {
-				t.Errorf("IsValid() = %v, 期望 %v", got, tt.valid)
+			if got := tt.status.IsDeleted(); got != tt.want {
+				t.Errorf("IsDeleted() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestStatusSetAndUnset 测试设置和取消状态位
-func TestStatusSetAndUnset(t *testing.T) {
-	var s Status
-
-	// 测试 Set 方法（应该使用 |= 追加状态）
-	s.Set(StatusUserDisabled)
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Set 后应该包含 StatusUserDisabled")
-	}
-
-	// 追加另一个状态，原有状态应该保留
-	s.Set(StatusSysHidden)
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("追加状态后，原有的 StatusUserDisabled 应该保留")
-	}
-	if !s.Contain(StatusSysHidden) {
-		t.Error("追加状态后，应该包含 StatusSysHidden")
-	}
-
-	// 测试 Unset 方法
-	s.Unset(StatusUserDisabled)
-	if s.Contain(StatusUserDisabled) {
-		t.Error("Unset 后不应该包含 StatusUserDisabled")
-	}
-	if !s.Contain(StatusSysHidden) {
-		t.Error("Unset 后，其他状态应该保留")
-	}
-}
-
-// TestStatusToggle 测试状态切换
-func TestStatusToggle(t *testing.T) {
-	var s Status
-
-	// 首次切换：添加状态
-	s.Toggle(StatusUserDisabled)
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("首次 Toggle 应该添加状态")
-	}
-
-	// 再次切换：移除状态
-	s.Toggle(StatusUserDisabled)
-	if s.Contain(StatusUserDisabled) {
-		t.Error("再次 Toggle 应该移除状态")
-	}
-}
-
-// TestStatusMerge 测试状态过滤
-func TestStatusMerge(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-	s.Merge(StatusUserDisabled | StatusAdmDeleted)
-
-	if !s.Contain(StatusUserDisabled) {
-		t.Error("Merge 后应该保留 StatusUserDisabled")
-	}
-	if !s.Contain(StatusAdmDeleted) {
-		t.Error("Merge 后应该保留 StatusAdmDeleted")
-	}
-	if s.Contain(StatusSysHidden) {
-		t.Error("Merge 后不应该包含 StatusSysHidden")
-	}
-}
-
-// TestStatusContain 测试状态包含检查
-func TestStatusContain(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden
-
+// TestStatus_IsDisable 测试禁用状态检查
+func TestStatus_IsDisable(t *testing.T) {
 	tests := []struct {
 		name   string
-		flag   Status
-		expect bool
+		status Status
+		want   bool
 	}{
-		{"包含单个状态", StatusUserDisabled, true},
-		{"包含所有状态", StatusUserDisabled | StatusSysHidden, true},
-		{"不包含的状态", StatusAdmDeleted, false},
-		{"部分包含", StatusUserDisabled | StatusAdmDeleted, false},
+		{"零值", StatusNone, false},
+		{"系统禁用", StatusSysDisabled, true},
+		{"管理员禁用", StatusAdmDisabled, true},
+		{"用户禁用", StatusUserDisabled, true},
+		{"全部禁用", StatusAllDisabled, true},
+		{"其他状态", StatusSysDeleted, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := s.Contain(tt.flag); got != tt.expect {
-				t.Errorf("Contain(%d) = %v, 期望 %v", tt.flag, got, tt.expect)
+			if got := tt.status.IsDisable(); got != tt.want {
+				t.Errorf("IsDisable() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestStatusHasAnyAndHasAll 测试批量状态检查
-func TestStatusHasAnyAndHasAll(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden
-
-	// 测试 HasAny
-	if !s.HasAny(StatusUserDisabled, StatusAdmDeleted) {
-		t.Error("HasAny: 应该返回 true（包含第一个）")
-	}
-	if s.HasAny(StatusAdmDeleted, StatusSysDeleted) {
-		t.Error("HasAny: 应该返回 false（都不包含）")
-	}
-	if s.HasAny() {
-		t.Error("HasAny: 空参数应该返回 false")
-	}
-
-	// 测试 HasAll
-	if !s.HasAll(StatusUserDisabled, StatusSysHidden) {
-		t.Error("HasAll: 应该返回 true（都包含）")
-	}
-	if s.HasAll(StatusUserDisabled, StatusAdmDeleted) {
-		t.Error("HasAll: 应该返回 false（缺少第二个）")
-	}
-	if !s.HasAll() {
-		t.Error("HasAll: 空参数应该返回 true")
-	}
-}
-
-// TestStatusBatchOperations 测试批量操作
-func TestStatusBatchOperations(t *testing.T) {
-	// 测试 SetMultiple
-	var s Status
-	s.SetMultiple(StatusUserDisabled, StatusSysHidden, StatusAdmUnverified)
-	if !s.HasAll(StatusUserDisabled, StatusSysHidden, StatusAdmUnverified) {
-		t.Error("SetMultiple 后应该包含所有指定的状态")
-	}
-
-	// 测试 UnsetMultiple
-	s.UnsetMultiple(StatusUserDisabled, StatusSysHidden)
-	if s.Contain(StatusUserDisabled) || s.Contain(StatusSysHidden) {
-		t.Error("UnsetMultiple 后不应该包含被移除的状态")
-	}
-	if !s.Contain(StatusAdmUnverified) {
-		t.Error("UnsetMultiple 后应该保留其他状态")
-	}
-}
-
-// TestStatusBusinessLogic 测试业务逻辑方法
-func TestStatusBusinessLogic(t *testing.T) {
+// TestStatus_IsHidden 测试隐藏状态检查
+func TestStatus_IsHidden(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     Status
-		isDeleted  bool
-		isDisable  bool
-		isHidden   bool
-		canEnable  bool
-		canVisible bool
+		name   string
+		status Status
+		want   bool
 	}{
-		{
-			"正常状态",
-			StatusNone,
-			false, false, false, true, true,
-		},
-		{
-			"用户删除",
-			StatusUserDeleted,
-			true, false, false, false, false,
-		},
-		{
-			"系统禁用",
-			StatusSysDisabled,
-			false, true, false, false, false,
-		},
-		{
-			"管理员隐藏",
-			StatusAdmHidden,
-			false, false, true, true, false,
-		},
-		{
-			"删除且禁用",
-			StatusUserDeleted | StatusSysDisabled,
-			true, true, false, false, false,
-		},
+		{"零值", StatusNone, false},
+		{"系统隐藏", StatusSysHidden, true},
+		{"管理员隐藏", StatusAdmHidden, true},
+		{"用户隐藏", StatusUserHidden, true},
+		{"全部隐藏", StatusAllHidden, true},
+		{"其他状态", StatusSysDeleted, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.status.IsDeleted(); got != tt.isDeleted {
-				t.Errorf("IsDeleted() = %v, 期望 %v", got, tt.isDeleted)
-			}
-			if got := tt.status.IsDisable(); got != tt.isDisable {
-				t.Errorf("IsDisable() = %v, 期望 %v", got, tt.isDisable)
-			}
-			if got := tt.status.IsHidden(); got != tt.isHidden {
-				t.Errorf("IsHidden() = %v, 期望 %v", got, tt.isHidden)
-			}
-			if got := tt.status.CanEnable(); got != tt.canEnable {
-				t.Errorf("CanEnable() = %v, 期望 %v", got, tt.canEnable)
-			}
-			if got := tt.status.CanVisible(); got != tt.canVisible {
-				t.Errorf("CanVisible() = %v, 期望 %v", got, tt.canVisible)
+			if got := tt.status.IsHidden(); got != tt.want {
+				t.Errorf("IsHidden() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestStatusDatabaseScan 测试数据库扫描
-func TestStatusDatabaseScan(t *testing.T) {
+// TestStatus_IsReview 测试审核状态检查
+func TestStatus_IsReview(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     interface{}
-		expected  Status
-		shouldErr bool
+		name   string
+		status Status
+		want   bool
 	}{
-		{"int64 类型", int64(5), Status(5), false},
-		{"int 类型", int(10), Status(10), false},
-		{"uint64 类型", uint64(15), Status(15), false},
-		{"[]byte 类型", []byte("20"), Status(20), false},
-		{"nil 值", nil, StatusNone, false},
-		{"负数错误", int64(-1), StatusNone, true},
-		{"uint64 溢出", uint64(MaxStatus) + 1, StatusNone, true},
+		{"零值", StatusNone, false},
+		{"系统审核", StatusSysReview, true},
+		{"管理员审核", StatusAdmReview, true},
+		{"用户审核", StatusUserReview, true},
+		{"全部审核", StatusAllReview, true},
+		{"其他状态", StatusSysDeleted, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsReview(); got != tt.want {
+				t.Errorf("IsReview() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_CanEnable 测试可启用状态检查
+func TestStatus_CanEnable(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   bool
+	}{
+		{"零值", StatusNone, true},
+		{"隐藏状态", StatusSysHidden, true},
+		{"审核状态", StatusSysReview, true},
+		{"删除状态", StatusSysDeleted, false},
+		{"禁用状态", StatusSysDisabled, false},
+		{"删除+禁用", StatusSysDeleted | StatusSysDisabled, false},
+		{"隐藏+审核", StatusSysHidden | StatusSysReview, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanEnable(); got != tt.want {
+				t.Errorf("CanEnable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_CanVisible 测试可见状态检查
+func TestStatus_CanVisible(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   bool
+	}{
+		{"零值", StatusNone, true},
+		{"审核状态", StatusSysReview, true},
+		{"删除状态", StatusSysDeleted, false},
+		{"禁用状态", StatusSysDisabled, false},
+		{"隐藏状态", StatusSysHidden, false},
+		{"删除+禁用+隐藏", StatusSysDeleted | StatusSysDisabled | StatusSysHidden, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanVisible(); got != tt.want {
+				t.Errorf("CanVisible() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_CanActive 测试完全激活状态检查
+func TestStatus_CanActive(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   bool
+	}{
+		{"零值", StatusNone, true},
+		{"删除状态", StatusSysDeleted, false},
+		{"禁用状态", StatusSysDisabled, false},
+		{"隐藏状态", StatusSysHidden, false},
+		{"审核状态", StatusSysReview, false},
+		{"任意组合", StatusSysDeleted | StatusSysDisabled | StatusSysHidden | StatusSysReview, false},
+		{"扩展状态", StatusExpand51, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.CanActive(); got != tt.want {
+				t.Errorf("CanActive() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 格式化测试
+// ============================================================================
+
+// TestStatus_String 测试字符串格式化
+func TestStatus_String(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   string
+	}{
+		{"零值", StatusNone, "Status(0)[0 bits]"},
+		{"单个状态", StatusSysDeleted, "Status(1)[1 bits]"},
+		{"三个状态", StatusAllDeleted, "Status(7)[3 bits]"},
+		{"复杂状态", StatusAllDeleted | StatusAllDisabled, "Status(63)[6 bits]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.String(); got != tt.want {
+				t.Errorf("String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_BitCount 测试位计数
+func TestStatus_BitCount(t *testing.T) {
+	tests := []struct {
+		name   string
+		status Status
+		want   int
+	}{
+		{"零值", StatusNone, 0},
+		{"单位", StatusSysDeleted, 1},
+		{"三位", StatusAllDeleted, 3},
+		{"六位", StatusAllDeleted | StatusAllDisabled, 6},
+		{"十二位", StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview, 12},
+		{"高位", StatusExpand51, 1},
+		{"连续位", Status(0xFF), 8},
+		{"稀疏位", Status(0x101), 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.BitCount(); got != tt.want {
+				t.Errorf("BitCount() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 数据库接口测试
+// ============================================================================
+
+// TestStatus_Value 测试 driver.Valuer 接口
+func TestStatus_Value(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  Status
+		want    driver.Value
+		wantErr bool
+	}{
+		{"零值", StatusNone, int64(0), false},
+		{"正常值", StatusSysDeleted, int64(1), false},
+		{"组合值", StatusAllDeleted, int64(7), false},
+		{"负数", Status(-1), nil, true},
+		{"最大合法值", MaxStatus, int64(MaxStatus), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.status.Value()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Value() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("Value() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_Scan 测试 sql.Scanner 接口
+func TestStatus_Scan(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   interface{}
+		want    Status
+		wantErr bool
+	}{
+		{"nil值", nil, StatusNone, false},
+		{"int64零值", int64(0), StatusNone, false},
+		{"int64正常值", int64(7), StatusAllDeleted, false},
+		{"int类型", int(7), StatusAllDeleted, false},
+		{"uint64类型", uint64(7), StatusAllDeleted, false},
+		{"JSON字节", []byte("7"), StatusAllDeleted, false},
+		{"负数", int64(-1), StatusNone, true},
 		{"不支持的类型", "invalid", StatusNone, true},
+		{"无效JSON", []byte("invalid"), StatusNone, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var s Status
-			err := s.Scan(tt.input)
-
-			if tt.shouldErr {
-				if err == nil {
-					t.Error("期望返回错误，但没有错误")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("不期望错误，但得到: %v", err)
-				}
-				if s != tt.expected {
-					t.Errorf("Scan() = %d, 期望 %d", s, tt.expected)
-				}
+			err := s.Scan(tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && s != tt.want {
+				t.Errorf("Scan() = %v, want %v", s, tt.want)
 			}
 		})
 	}
 }
 
-// TestStatusJSONSerialization 测试 JSON 序列化
-func TestStatusJSONSerialization(t *testing.T) {
-	original := StatusUserDisabled | StatusSysHidden
+// ============================================================================
+// JSON 序列化测试
+// ============================================================================
 
-	// 序列化
-	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("序列化失败: %v", err)
-	}
-
-	// 反序列化
-	var decoded Status
-	err = json.Unmarshal(data, &decoded)
-	if err != nil {
-		t.Fatalf("反序列化失败: %v", err)
-	}
-
-	// 验证
-	if decoded != original {
-		t.Errorf("反序列化后的值 %d 不等于原始值 %d", decoded, original)
-	}
-
-	// 测试负数错误
-	negativeJSON := []byte("-1")
-	var s Status
-	err = s.UnmarshalJSON(negativeJSON)
-	if err == nil {
-		t.Error("反序列化负数应该返回错误")
-	}
-}
-
-// TestStatusValue 测试数据库 Value 方法
-func TestStatusValue(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden
-	val, err := s.Value()
-	if err != nil {
-		t.Fatalf("Value() 返回错误: %v", err)
-	}
-
-	int64Val, ok := val.(int64)
-	if !ok {
-		t.Fatalf("Value() 应该返回 int64 类型，实际返回 %T", val)
-	}
-
-	if int64Val != int64(s) {
-		t.Errorf("Value() = %d, 期望 %d", int64Val, int64(s))
-	}
-}
-
-// TestStatusString 测试字符串表示
-func TestStatusString(t *testing.T) {
+// TestStatus_MarshalJSON 测试 JSON 序列化
+func TestStatus_MarshalJSON(t *testing.T) {
 	tests := []struct {
-		status   Status
-		contains string
+		name    string
+		status  Status
+		want    string
+		wantErr bool
 	}{
-		{StatusNone, "None"},
-		{StatusUserDisabled, "32"},
-		{StatusSysHidden, "64"},
+		{"零值", StatusNone, "0", false},
+		{"单个状态", StatusSysDeleted, "1", false},
+		{"组合状态", StatusAllDeleted, "7", false},
+		{"复杂状态", StatusAllDeleted | StatusAllDisabled, "63", false},
 	}
 
 	for _, tt := range tests {
-		str := tt.status.String()
-		if str == "" {
-			t.Errorf("String() 不应该返回空字符串")
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.status.MarshalJSON()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("MarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && string(got) != tt.want {
+				t.Errorf("MarshalJSON() = %v, want %v", string(got), tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_UnmarshalJSON 测试 JSON 反序列化
+func TestStatus_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		want    Status
+		wantErr bool
+	}{
+		{"零值", "0", StatusNone, false},
+		{"单个状态", "1", StatusSysDeleted, false},
+		{"组合状态", "7", StatusAllDeleted, false},
+		{"null值", "null", StatusNone, false},
+		{"空数据", "", StatusNone, true},
+		{"负数", "-1", StatusNone, true},
+		{"非数字", `"invalid"`, StatusNone, true},
+		{"无效JSON", "invalid", StatusNone, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var s Status
+			err := s.UnmarshalJSON([]byte(tt.data))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && s != tt.want {
+				t.Errorf("UnmarshalJSON() = %v, want %v", s, tt.want)
+			}
+		})
+	}
+}
+
+// TestStatus_JSON_RoundTrip 测试 JSON 往返转换
+func TestStatus_JSON_RoundTrip(t *testing.T) {
+	tests := []Status{
+		StatusNone,
+		StatusSysDeleted,
+		StatusAllDeleted,
+		StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview,
+		StatusExpand51,
+	}
+
+	for _, original := range tests {
+		t.Run(original.String(), func(t *testing.T) {
+			// Marshal
+			data, err := json.Marshal(original)
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+
+			// Unmarshal
+			var decoded Status
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+
+			// Verify
+			if decoded != original {
+				t.Errorf("Round trip failed: got %v, want %v", decoded, original)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// 边界条件测试
+// ============================================================================
+
+// TestStatus_EdgeCases 测试边界条件
+func TestStatus_EdgeCases(t *testing.T) {
+	t.Run("零值特殊处理", func(t *testing.T) {
+		s := StatusNone
+		if s.Has(StatusNone) {
+			t.Error("StatusNone.Has(StatusNone) should return false")
 		}
-	}
+	})
+
+	t.Run("最大状态值", func(t *testing.T) {
+		s := MaxStatus
+		bitCount := s.BitCount()
+		if bitCount != 63 {
+			t.Errorf("MaxStatus bit count = %d, want 63", bitCount)
+		}
+	})
+
+	t.Run("高位状态", func(t *testing.T) {
+		s := Status(1 << 62)
+		if !s.Has(Status(1 << 62)) {
+			t.Error("High bit status check failed")
+		}
+	})
+
+	t.Run("所有预定义状态", func(t *testing.T) {
+		allPredefined := StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview
+		if allPredefined.BitCount() != 12 {
+			t.Errorf("All predefined status bit count = %d, want 12", allPredefined.BitCount())
+		}
+	})
 }
 
-// TestStatusClear 测试清除所有状态
-func TestStatusClear(t *testing.T) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
-	s.Clear()
+// TestStatus_Constants 测试常量定义
+func TestStatus_Constants(t *testing.T) {
+	t.Run("删除状态组", func(t *testing.T) {
+		if StatusAllDeleted != (StatusSysDeleted | StatusAdmDeleted | StatusUserDeleted) {
+			t.Error("StatusAllDeleted constant mismatch")
+		}
+	})
 
-	if s != StatusNone {
-		t.Errorf("Clear() 后状态应该为 StatusNone，实际为 %d", s)
-	}
+	t.Run("禁用状态组", func(t *testing.T) {
+		if StatusAllDisabled != (StatusSysDisabled | StatusAdmDisabled | StatusUserDisabled) {
+			t.Error("StatusAllDisabled constant mismatch")
+		}
+	})
+
+	t.Run("隐藏状态组", func(t *testing.T) {
+		if StatusAllHidden != (StatusSysHidden | StatusAdmHidden | StatusUserHidden) {
+			t.Error("StatusAllHidden constant mismatch")
+		}
+	})
+
+	t.Run("审核状态组", func(t *testing.T) {
+		if StatusAllReview != (StatusSysReview | StatusAdmReview | StatusUserReview) {
+			t.Error("StatusAllReview constant mismatch")
+		}
+	})
+
+	t.Run("扩展起始位", func(t *testing.T) {
+		if StatusExpand51 != Status(1<<12) {
+			t.Error("StatusExpand51 constant mismatch")
+		}
+	})
 }
 
-// TestStatusEqual 测试状态相等性
-func TestStatusEqual(t *testing.T) {
-	s1 := StatusUserDisabled | StatusSysHidden
-	s2 := StatusUserDisabled | StatusSysHidden
-	s3 := StatusUserDisabled
+// ============================================================================
+// 性能基准测试 - 百万级单线程测试
+// ============================================================================
 
-	if !s1.Equal(s2) {
-		t.Error("相同的状态应该相等")
-	}
-
-	if s1.Equal(s3) {
-		t.Error("不同的状态不应该相等")
-	}
-}
-
-// BenchmarkStatus_Set 基准测试：Set 操作
+// BenchmarkStatus_Set 基准测试：设置状态
 func BenchmarkStatus_Set(b *testing.B) {
-	var s Status
+	s := StatusNone
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Set(StatusUserDisabled)
+		s.Set(StatusSysDeleted)
 	}
 }
 
-// BenchmarkStatus_Contain 基准测试：Contain 检查
-func BenchmarkStatus_Contain(b *testing.B) {
-	s := StatusUserDisabled | StatusSysHidden
+// BenchmarkStatus_Add 基准测试：添加状态
+func BenchmarkStatus_Add(b *testing.B) {
+	s := StatusNone
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.Contain(StatusUserDisabled)
+		s.Add(StatusSysDeleted)
 	}
 }
 
-// BenchmarkStatus_HasAll 基准测试：HasAll 检查
+// BenchmarkStatus_Del 基准测试：删除状态
+func BenchmarkStatus_Del(b *testing.B) {
+	s := StatusAllDeleted
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.Del(StatusSysDeleted)
+		s.Add(StatusSysDeleted) // 恢复状态
+	}
+}
+
+// BenchmarkStatus_Has 基准测试：检查单个状态
+func BenchmarkStatus_Has(b *testing.B) {
+	s := StatusAllDeleted
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.Has(StatusSysDeleted)
+	}
+}
+
+// BenchmarkStatus_HasAny 基准测试：检查任意状态
+func BenchmarkStatus_HasAny(b *testing.B) {
+	s := StatusAllDeleted
+	flags := []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.HasAny(flags...)
+	}
+}
+
+// BenchmarkStatus_HasAll 基准测试：检查所有状态
 func BenchmarkStatus_HasAll(b *testing.B) {
-	s := StatusUserDisabled | StatusSysHidden | StatusAdmDeleted
+	s := StatusAllDeleted
+	flags := []Status{StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.HasAll(StatusUserDisabled, StatusSysHidden)
+		_ = s.HasAll(flags...)
 	}
 }
 
-// BenchmarkStatus_JSONMarshal 基准测试：JSON 序列化
-func BenchmarkStatus_JSONMarshal(b *testing.B) {
-	s := StatusUserDisabled | StatusSysHidden
+// BenchmarkStatus_Toggle 基准测试：切换状态
+func BenchmarkStatus_Toggle(b *testing.B) {
+	s := StatusNone
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = json.Marshal(s)
+		s.Toggle(StatusSysDeleted)
+	}
+}
+
+// BenchmarkStatus_BitCount 基准测试：位计数
+func BenchmarkStatus_BitCount(b *testing.B) {
+	s := StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.BitCount()
+	}
+}
+
+// BenchmarkStatus_ActiveFlags 基准测试：获取活动状态
+func BenchmarkStatus_ActiveFlags(b *testing.B) {
+	s := StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.ActiveFlags()
+	}
+}
+
+// BenchmarkStatus_String 基准测试：字符串格式化
+func BenchmarkStatus_String(b *testing.B) {
+	s := StatusAllDeleted | StatusAllDisabled
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.String()
+	}
+}
+
+// BenchmarkStatus_IsDeleted 基准测试：删除状态检查
+func BenchmarkStatus_IsDeleted(b *testing.B) {
+	s := StatusSysDeleted | StatusAdmDisabled
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.IsDeleted()
+	}
+}
+
+// BenchmarkStatus_CanActive 基准测试：激活状态检查
+func BenchmarkStatus_CanActive(b *testing.B) {
+	s := StatusExpand51
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.CanActive()
+	}
+}
+
+// BenchmarkStatus_MarshalJSON 基准测试：JSON 序列化
+func BenchmarkStatus_MarshalJSON(b *testing.B) {
+	s := StatusAllDeleted | StatusAllDisabled
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = s.MarshalJSON()
+	}
+}
+
+// BenchmarkStatus_UnmarshalJSON 基准测试：JSON 反序列化
+func BenchmarkStatus_UnmarshalJSON(b *testing.B) {
+	data := []byte("63")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var s Status
+		_ = s.UnmarshalJSON(data)
+	}
+}
+
+// BenchmarkStatus_Value 基准测试：数据库 Value
+func BenchmarkStatus_Value(b *testing.B) {
+	s := StatusAllDeleted
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = s.Value()
+	}
+}
+
+// BenchmarkStatus_Scan 基准测试：数据库 Scan
+func BenchmarkStatus_Scan(b *testing.B) {
+	value := int64(7)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var s Status
+		_ = s.Scan(value)
+	}
+}
+
+// ============================================================================
+// 百万级复杂场景性能测试
+// ============================================================================
+
+// BenchmarkStatus_MillionOperations_Sequential 百万次顺序操作
+func BenchmarkStatus_MillionOperations_Sequential(b *testing.B) {
+	b.Run("1M-Set", func(b *testing.B) {
+		s := StatusNone
+		b.ResetTimer()
+		for i := 0; i < 1000000; i++ {
+			s.Set(StatusSysDeleted)
+		}
+	})
+
+	b.Run("1M-Add-Del", func(b *testing.B) {
+		s := StatusNone
+		b.ResetTimer()
+		for i := 0; i < 1000000; i++ {
+			s.Add(StatusSysDeleted)
+			s.Del(StatusSysDeleted)
+		}
+	})
+
+	b.Run("1M-Toggle", func(b *testing.B) {
+		s := StatusNone
+		b.ResetTimer()
+		for i := 0; i < 1000000; i++ {
+			s.Toggle(StatusSysDeleted)
+		}
+	})
+
+	b.Run("1M-Has", func(b *testing.B) {
+		s := StatusAllDeleted
+		b.ResetTimer()
+		for i := 0; i < 1000000; i++ {
+			_ = s.Has(StatusSysDeleted)
+		}
+	})
+
+	b.Run("1M-BitCount", func(b *testing.B) {
+		s := StatusAllDeleted | StatusAllDisabled
+		b.ResetTimer()
+		for i := 0; i < 1000000; i++ {
+			_ = s.BitCount()
+		}
+	})
+}
+
+// BenchmarkStatus_MillionOperations_Mixed 百万次混合操作
+func BenchmarkStatus_MillionOperations_Mixed(b *testing.B) {
+	s := StatusNone
+	b.ResetTimer()
+
+	for i := 0; i < 1000000; i++ {
+		// 添加状态
+		s.Add(StatusSysDeleted)
+		s.Add(StatusAdmDisabled)
+
+		// 检查状态
+		_ = s.Has(StatusSysDeleted)
+		_ = s.IsDeleted()
+		_ = s.CanEnable()
+
+		// 修改状态
+		s.Toggle(StatusUserHidden)
+		s.Del(StatusAdmDisabled)
+
+		// 查询位数
+		_ = s.BitCount()
+
+		// 清理
+		s.Clear()
+	}
+}
+
+// BenchmarkStatus_MemoryAllocation 内存分配测试
+func BenchmarkStatus_MemoryAllocation(b *testing.B) {
+	b.Run("Add-NoAlloc", func(b *testing.B) {
+		s := StatusNone
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s.Add(StatusSysDeleted)
+		}
+	})
+
+	b.Run("Has-NoAlloc", func(b *testing.B) {
+		s := StatusAllDeleted
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = s.Has(StatusSysDeleted)
+		}
+	})
+
+	b.Run("ActiveFlags-WithAlloc", func(b *testing.B) {
+		s := StatusAllDeleted | StatusAllDisabled
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = s.ActiveFlags()
+		}
+	})
+
+	b.Run("String-WithAlloc", func(b *testing.B) {
+		s := StatusAllDeleted
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = s.String()
+		}
+	})
+}
+
+// BenchmarkStatus_CompareOperations 操作对比测试
+func BenchmarkStatus_CompareOperations(b *testing.B) {
+	b.Run("SingleAdd-vs-AddMultiple", func(b *testing.B) {
+		b.Run("SingleAdd", func(b *testing.B) {
+			s := StatusNone
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				s.Add(StatusSysDeleted)
+				s.Add(StatusAdmDeleted)
+				s.Add(StatusUserDeleted)
+			}
+		})
+
+		b.Run("AddMultiple", func(b *testing.B) {
+			s := StatusNone
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				s.AddMultiple(StatusSysDeleted, StatusAdmDeleted, StatusUserDeleted)
+			}
+		})
+	})
+
+	b.Run("Has-vs-HasAny-vs-HasAll", func(b *testing.B) {
+		s := StatusAllDeleted
+
+		b.Run("Has", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = s.Has(StatusSysDeleted)
+			}
+		})
+
+		b.Run("HasAny", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = s.HasAny(StatusSysDeleted, StatusAdmDeleted)
+			}
+		})
+
+		b.Run("HasAll", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = s.HasAll(StatusSysDeleted, StatusAdmDeleted)
+			}
+		})
+	})
+}
+
+// BenchmarkStatus_DifferentBitCounts 不同位数性能对比
+func BenchmarkStatus_DifferentBitCounts(b *testing.B) {
+	scenarios := []struct {
+		name   string
+		status Status
+	}{
+		{"1-bit", StatusSysDeleted},
+		{"3-bits", StatusAllDeleted},
+		{"6-bits", StatusAllDeleted | StatusAllDisabled},
+		{"12-bits", StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview},
+		{"Sparse-bits", Status(0x100000001)}, // 第0位和第32位
+	}
+
+	for _, sc := range scenarios {
+		b.Run(sc.name+"-BitCount", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = sc.status.BitCount()
+			}
+		})
+
+		b.Run(sc.name+"-ActiveFlags", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = sc.status.ActiveFlags()
+			}
+		})
+
+		b.Run(sc.name+"-String", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = sc.status.String()
+			}
+		})
+	}
+}
+
+// BenchmarkStatus_JSONRoundTrip 百万次 JSON 往返测试
+func BenchmarkStatus_JSONRoundTrip(b *testing.B) {
+	statuses := []Status{
+		StatusNone,
+		StatusSysDeleted,
+		StatusAllDeleted,
+		StatusAllDeleted | StatusAllDisabled | StatusAllHidden | StatusAllReview,
+	}
+
+	for _, original := range statuses {
+		b.Run(original.String(), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				data, _ := json.Marshal(original)
+				var decoded Status
+				_ = json.Unmarshal(data, &decoded)
+			}
+		})
+	}
+}
+
+// BenchmarkStatus_DatabaseRoundTrip 百万次数据库往返测试
+func BenchmarkStatus_DatabaseRoundTrip(b *testing.B) {
+	s := StatusAllDeleted
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Value
+		val, _ := s.Value()
+
+		// Scan
+		var decoded Status
+		_ = decoded.Scan(val)
 	}
 }
