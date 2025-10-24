@@ -20,12 +20,6 @@ var (
 
 	// parserRegistryOnce 确保解析器注册表只初始化一次
 	parserRegistryOnce sync.Once
-
-	// globalValidatorRegistry 全局验证器注册表实例（单例）
-	globalValidatorRegistry *ValidatorRegistry
-
-	// validatorRegistryOnce 确保验证器注册表只初始化一次
-	validatorRegistryOnce sync.Once
 )
 
 // GetParserRegistry 获取全局解析器注册表

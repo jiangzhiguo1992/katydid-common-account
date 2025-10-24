@@ -3,40 +3,31 @@ package registry
 import (
 	"fmt"
 	"katydid-common-account/pkg/idgen/core"
-	"katydid-common-account/pkg/idgen/snowflake"
 	"log"
+	"sync"
 )
-
-// init 初始化全局工厂注册表
-// 说明：在包加载时自动执行，注册默认的工厂、解析器和验证器
-func init() {
-	// 创建工厂注册表
-	globalFactoryRegistry = &FactoryRegistry{
-		factories: make(map[core.GeneratorType]core.GeneratorFactory),
-	}
-
-	// 注册Snowflake工厂
-	_ = GetFactoryRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewFactory())
-
-	// 注册Snowflake解析器和验证器
-	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
-	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
-
-	log.Println("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
-
-	// ...注册其他的
-}
 
 // FactoryRegistry 工厂注册表
 type FactoryRegistry struct {
 	factories map[core.GeneratorType]core.GeneratorFactory // 工厂映射表
+	mu        sync.RWMutex                                 // 读写锁，保护并发访问
 }
 
-// globalFactoryRegistry 全局工厂注册表实例（单例）
-var globalFactoryRegistry *FactoryRegistry
+var (
+	// globalFactoryRegistry 全局工厂注册表实例（单例）
+	globalFactoryRegistry *FactoryRegistry
+
+	// factoryRegistryOnce 确保工厂注册表只初始化一次
+	factoryRegistryOnce sync.Once
+)
 
 // GetFactoryRegistry 获取全局工厂注册表
 func GetFactoryRegistry() *FactoryRegistry {
+	factoryRegistryOnce.Do(func() {
+		globalFactoryRegistry = &FactoryRegistry{
+			factories: make(map[core.GeneratorType]core.GeneratorFactory),
+		}
+	})
 	return globalFactoryRegistry
 }
 

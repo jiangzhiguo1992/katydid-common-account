@@ -13,6 +13,14 @@ type ValidatorRegistry struct {
 	mu         sync.RWMutex                            // 读写锁，保护并发访问
 }
 
+var (
+	// globalValidatorRegistry 全局验证器注册表实例（单例）
+	globalValidatorRegistry *ValidatorRegistry
+
+	// validatorRegistryOnce 确保验证器注册表只初始化一次
+	validatorRegistryOnce sync.Once
+)
+
 // GetValidatorRegistry 获取全局验证器注册表
 func GetValidatorRegistry() *ValidatorRegistry {
 	validatorRegistryOnce.Do(func() {

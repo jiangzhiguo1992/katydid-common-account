@@ -2,12 +2,28 @@ package registry
 
 import (
 	"fmt"
+	"katydid-common-account/pkg/idgen/snowflake"
 	"log"
 	"regexp"
 	"sync"
 
 	"katydid-common-account/pkg/idgen/core"
 )
+
+// init 初始化全局工厂注册表
+// 说明：在包加载时自动执行，注册默认的工厂、解析器和验证器
+func init() {
+	// 注册Snowflake工厂
+	_ = GetFactoryRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewFactory())
+	// 注册Snowflake解析器
+	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
+	// 注册Snowflake验证器
+	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
+
+	// ...注册其他的
+
+	log.Println("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
+}
 
 const (
 	// defaultMaxGenerators 默认最大生成器数量
