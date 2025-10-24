@@ -235,13 +235,13 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 	}
 
 	// 检查是否实现了 BusinessValidator 接口
-	validator, ok := target.(BusinessValidator)
+	valid, ok := target.(BusinessValidator)
 	if !ok {
 		return nil
 	}
 
 	// 执行业务验证
-	return validator.ValidateBusiness(ctx)
+	return valid.ValidateBusiness(ctx)
 }
 
 // ============================================================================
@@ -337,39 +337,5 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 		}
 	}
 
-	return nil
-}
-
-// ============================================================================
-// ValidationPipeline 验证管道
-// ============================================================================
-
-// ValidationPipeline 验证管道
-// 职责：按顺序执行多个验证器
-// 设计模式：责任链模式
-type ValidationPipeline struct {
-	validators []ValidationStrategy
-}
-
-// NewValidationPipeline 创建验证管道
-func NewValidationPipeline() *ValidationPipeline {
-	return &ValidationPipeline{
-		validators: make([]ValidationStrategy, 0),
-	}
-}
-
-// Add 添加验证器
-func (p *ValidationPipeline) Add(validator ValidationStrategy) *ValidationPipeline {
-	p.validators = append(p.validators, validator)
-	return p
-}
-
-// Execute 执行管道
-func (p *ValidationPipeline) Execute(target any, ctx *ValidationContext) error {
-	for _, v := range p.validators {
-		if err := v.Validate(target, ctx); err != nil {
-			return err
-		}
-	}
 	return nil
 }

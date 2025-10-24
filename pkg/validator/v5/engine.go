@@ -3,7 +3,58 @@ package v5
 import (
 	"fmt"
 	"sort"
+	"sync"
 )
+
+// ============================================================================
+// 全局默认验证器 - 单例模式
+// ============================================================================
+
+var (
+	defaultValidator *ValidatorEngine
+	once             sync.Once
+)
+
+// Default 获取默认验证器实例（单例）
+// 线程安全，延迟初始化
+func Default() *ValidatorEngine {
+	once.Do(func() {
+		factory := NewValidatorFactory()
+		defaultValidator = factory.CreateDefault()
+	})
+	return defaultValidator
+}
+
+// SetDefault 设置默认验证器
+// 用于自定义全局验证器
+func SetDefault(validator *ValidatorEngine) {
+	defaultValidator = validator
+}
+
+// Validate 使用默认验证器验证对象
+func Validate(target any, scene Scene) error {
+	return Default().Validate(target, scene)
+}
+
+// ValidateFields 使用默认验证器验证指定字段
+func ValidateFields(target any, scene Scene, fields ...string) error {
+	return Default().ValidateFields(target, scene, fields...)
+}
+
+// ValidateExcept 使用默认验证器验证排除字段外的所有字段
+func ValidateExcept(target any, scene Scene, excludeFields ...string) error {
+	return Default().ValidateExcept(target, scene, excludeFields...)
+}
+
+// ClearCache 清除默认验证器的缓存
+func ClearCache() {
+	Default().ClearCache()
+}
+
+// Stats 获取默认验证器的统计信息
+func Stats() map[string]any {
+	return Default().Stats()
+}
 
 // ============================================================================
 // ValidatorEngine - 验证引擎
@@ -37,8 +88,8 @@ type ValidatorEngine struct {
 func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 	engine := &ValidatorEngine{
 		strategies:     make([]ValidationStrategy, 0),
-		typeRegistry:   NewDefaultTypeRegistry(),
-		sceneMatcher:   NewDefaultSceneMatcher(),
+		typeRegistry:   NewTypeCacheRegistry(),
+		sceneMatcher:   NewSceneBitMatcher(),
 		listeners:      make([]ValidationListener, 0),
 		errorFormatter: NewDefaultErrorFormatter(),
 		maxDepth:       100,

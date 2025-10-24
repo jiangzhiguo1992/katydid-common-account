@@ -1,98 +1,37 @@
 package v5
 
-import (
-	"sync"
-)
-
 // ============================================================================
-// 对象池 - 内存优化
+// ValidationPipeline 验证管道
 // ============================================================================
 
-var (
-	// validationContextPool 验证上下文对象池
-	validationContextPool = sync.Pool{
-		New: func() interface{} {
-			return &ValidationContext{
-				Metadata: make(map[string]any),
-			}
-		},
+// ValidationPipeline 验证管道
+// 职责：按顺序执行多个验证器
+// 设计模式：责任链模式
+type ValidationPipeline struct {
+	validators []ValidationStrategy
+}
+
+// NewValidationPipeline 创建验证管道
+func NewValidationPipeline() *ValidationPipeline {
+	return &ValidationPipeline{
+		validators: make([]ValidationStrategy, 0),
 	}
+}
 
-	// errorCollectorPool 错误收集器对象池
-	errorCollectorPool = sync.Pool{
-		New: func() interface{} {
-			return NewDefaultErrorCollector()
-		},
-	}
-)
+// Add 添加验证器
+func (p *ValidationPipeline) Add(validator ValidationStrategy) *ValidationPipeline {
+	p.validators = append(p.validators, validator)
+	return p
+}
 
-// AcquireValidationContext 从对象池获取验证上下文
-func AcquireValidationContext(scene Scene, target any) *ValidationContext {
-	ctx := validationContextPool.Get().(*ValidationContext)
-	ctx.Scene = scene
-	ctx.Target = target
-	ctx.Depth = 0
-
-	if ctx.Metadata == nil {
-		ctx.Metadata = make(map[string]any)
-	} else {
-		// 清空 metadata
-		for k := range ctx.Metadata {
-			delete(ctx.Metadata, k)
+// Execute 执行管道
+func (p *ValidationPipeline) Execute(target any, ctx *ValidationContext) error {
+	for _, v := range p.validators {
+		if err := v.Validate(target, ctx); err != nil {
+			return err
 		}
 	}
-
-	// 获取错误收集器
-	ctx.errorCollector = AcquireErrorCollector()
-
-	return ctx
-}
-
-// ReleaseValidationContext 归还验证上下文到对象池
-func ReleaseValidationContext(ctx *ValidationContext) {
-	if ctx == nil {
-		return
-	}
-
-	// 归还错误收集器
-	if ctx.errorCollector != nil {
-		ReleaseErrorCollector(ctx.errorCollector)
-		ctx.errorCollector = nil
-	}
-
-	// 清空字段
-	ctx.Context = nil
-	ctx.Scene = SceneNone
-	ctx.Target = nil
-	ctx.Depth = 0
-
-	// 清空 metadata
-	if ctx.Metadata != nil {
-		for k := range ctx.Metadata {
-			delete(ctx.Metadata, k)
-		}
-	}
-
-	validationContextPool.Put(ctx)
-}
-
-// AcquireErrorCollector 从对象池获取错误收集器
-func AcquireErrorCollector() ErrorCollector {
-	collector := errorCollectorPool.Get().(*DefaultErrorCollector)
-	collector.Clear()
-	return collector
-}
-
-// ReleaseErrorCollector 归还错误收集器到对象池
-func ReleaseErrorCollector(collector ErrorCollector) {
-	if collector == nil {
-		return
-	}
-
-	if dc, ok := collector.(*DefaultErrorCollector); ok {
-		dc.Clear()
-		errorCollectorPool.Put(dc)
-	}
+	return nil
 }
 
 // ============================================================================
@@ -194,4 +133,95 @@ func (m *MetricsListener) Reset() {
 	m.validationCount = 0
 	m.errorCount = 0
 	m.mu.Unlock()
+}
+
+// ============================================================================
+// 对象池 - 内存优化
+// ============================================================================
+
+var (
+	// validationContextPool 验证上下文对象池
+	validationContextPool = sync.Pool{
+		New: func() interface{} {
+			return &ValidationContext{
+				Metadata: make(map[string]any),
+			}
+		},
+	}
+
+	// errorCollectorPool 错误收集器对象池
+	errorCollectorPool = sync.Pool{
+		New: func() interface{} {
+			return NewDefaultErrorCollector()
+		},
+	}
+)
+
+// AcquireValidationContext 从对象池获取验证上下文
+func AcquireValidationContext(scene Scene, target any) *ValidationContext {
+	ctx := validationContextPool.Get().(*ValidationContext)
+	ctx.Scene = scene
+	ctx.Target = target
+	ctx.Depth = 0
+
+	if ctx.Metadata == nil {
+		ctx.Metadata = make(map[string]any)
+	} else {
+		// 清空 metadata
+		for k := range ctx.Metadata {
+			delete(ctx.Metadata, k)
+		}
+	}
+
+	// 获取错误收集器
+	ctx.errorCollector = AcquireErrorCollector()
+
+	return ctx
+}
+
+// ReleaseValidationContext 归还验证上下文到对象池
+func ReleaseValidationContext(ctx *ValidationContext) {
+	if ctx == nil {
+		return
+	}
+
+	// 归还错误收集器
+	if ctx.errorCollector != nil {
+		ReleaseErrorCollector(ctx.errorCollector)
+		ctx.errorCollector = nil
+	}
+
+	// 清空字段
+	ctx.Context = nil
+	ctx.Scene = SceneNone
+	ctx.Target = nil
+	ctx.Depth = 0
+
+	// 清空 metadata
+	if ctx.Metadata != nil {
+		for k := range ctx.Metadata {
+			delete(ctx.Metadata, k)
+		}
+	}
+
+	validationContextPool.Put(ctx)
+}
+
+// AcquireErrorCollector 从对象池获取错误收集器
+func AcquireErrorCollector() ErrorCollector {
+	collector := errorCollectorPool.Get().(*DefaultErrorCollector)
+	collector.Clear()
+	return collector
+}
+
+// ReleaseErrorCollector 归还错误收集器到对象池
+func ReleaseErrorCollector(collector ErrorCollector) {
+	if collector == nil {
+		return
+	}
+
+	if dc, ok := collector.(*DefaultErrorCollector); ok {
+		dc.Clear()
+		errorCollectorPool.Put(dc)
+	}
 }
