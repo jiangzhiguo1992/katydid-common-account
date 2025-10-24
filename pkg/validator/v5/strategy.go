@@ -143,17 +143,13 @@ func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
 
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		ctx.AddError(NewFieldError("", "", "validation_error").
+		ctx.AddError(NewFieldError("", "validation_error").
 			WithMessage(err.Error()))
 		return
 	}
 
 	for _, e := range validationErrors {
-		ctx.AddError(NewFieldError(
-			e.Namespace(),
-			e.Field(),
-			e.Tag(),
-		).WithParam(e.Param()).WithValue(e.Value()))
+		ctx.AddError(NewFieldError(e.Namespace(), e.Tag()).WithParam(e.Param()).WithValue(e.Value()))
 	}
 }
 
@@ -280,7 +276,7 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 
 	// 检查嵌套深度
 	if ctx.Depth >= s.maxDepth {
-		ctx.AddError(NewFieldError("", "", "max_depth").
+		ctx.AddError(NewFieldError("", "max_depth").
 			WithMessage(fmt.Sprintf("nested validation depth exceeds maximum limit %d", s.maxDepth)))
 		return nil
 	}

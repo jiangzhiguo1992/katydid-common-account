@@ -124,7 +124,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 	// 防御性编程：参数校验
 	if target == nil {
 		return NewValidationError([]*FieldError{
-			NewFieldError("", "target", "required").
+			NewFieldError("", "required").
 				WithMessage("validation target cannot be nil"),
 		})
 	}
@@ -153,7 +153,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 		// 执行策略，捕获 panic
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 策略执行失败，记录错误但继续执行其他策略
-			ctx.AddError(NewFieldError("", "strategy_error", strategy.Name()).
+			ctx.AddError(NewFieldError("", strategy.Name()).
 				WithMessage(fmt.Sprintf("strategy %s failed: %v", strategy.Name(), err)))
 		}
 	}
@@ -187,7 +187,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	for _, strategy := range e.strategies {
 		if strategy.Name() == "rule" {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
-				ctx.AddError(NewFieldError("", "strategy_error", strategy.Name()).
+				ctx.AddError(NewFieldError("", strategy.Name()).
 					WithMessage(err.Error()))
 			}
 			break

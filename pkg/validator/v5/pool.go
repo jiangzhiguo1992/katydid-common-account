@@ -139,7 +139,7 @@ func (l *LoggingListener) OnValidationEnd(ctx *ValidationContext) {
 // OnError 发生错误
 func (l *LoggingListener) OnError(ctx *ValidationContext, err *FieldError) {
 	if l.logger != nil {
-		l.logger.Debug("validation error", "field", err.Field, "tag", err.Tag)
+		l.logger.Debug("validation error", "field", err.Namespace, "tag", err.Tag)
 	}
 }
 

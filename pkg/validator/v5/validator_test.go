@@ -8,6 +8,15 @@ import (
 // 测试用例
 // ============================================================================
 
+const (
+	SceneCreate Scene = 1 << iota
+	SceneUpdate
+	SceneDelete
+	SceneQuery
+	SceneImport
+	SceneExport
+)
+
 // 测试用的模型
 type TestUser struct {
 	Username string `json:"username"`

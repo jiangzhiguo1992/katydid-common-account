@@ -50,7 +50,7 @@ func (r *DefaultTypeRegistry) Register(target any) *TypeInfo {
 	if provider, ok := target.(RuleProvider); ok {
 		info.Rules = make(map[Scene]map[string]string)
 		// 预加载常用场景的规则
-		for _, scene := range []Scene{SceneCreate, SceneUpdate, SceneDelete, SceneQuery} {
+		for _, scene := range []Scene{SceneNone, SceneAll} {
 			rules := provider.GetRules(scene)
 			if len(rules) > 0 {
 				info.Rules[scene] = rules
@@ -264,10 +264,10 @@ func (f *DefaultErrorFormatter) Format(err *FieldError) string {
 	}
 
 	if err.Param != "" {
-		return "field '" + err.Field + "' failed validation on tag '" + err.Tag + "' with param '" + err.Param + "'"
+		return "field '" + err.Namespace + "' failed validation on tag '" + err.Tag + "' with param '" + err.Param + "'"
 	}
 
-	return "field '" + err.Field + "' failed validation on tag '" + err.Tag + "'"
+	return "field '" + err.Namespace + "' failed validation on tag '" + err.Tag + "'"
 }
 
 // FormatAll 格式化所有错误
