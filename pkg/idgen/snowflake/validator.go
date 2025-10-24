@@ -10,6 +10,11 @@ import (
 // Validator Snowflake ID验证器
 type Validator struct{}
 
+// ValidateID 全局验证函数
+func ValidateID(id int64) error {
+	return NewValidator().Validate(id)
+}
+
 // NewValidator 创建新的验证器实例
 // 说明：验证器是无状态的，可以创建多个实例或共享单个实例
 func NewValidator() *Validator {
@@ -71,9 +76,4 @@ func (v *Validator) ValidateBatch(ids []int64) error {
 	}
 
 	return nil
-}
-
-// ValidateSnowflakeID 全局验证函数
-func ValidateSnowflakeID(id int64) error {
-	return NewValidator().Validate(id)
 }

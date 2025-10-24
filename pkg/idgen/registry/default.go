@@ -35,7 +35,7 @@ func GetDefaultGenerator() (core.IDGenerator, error) {
 		}
 
 		// 从工厂创建生成器
-		factory := NewSnowflakeFactory()
+		factory := snowflake.NewFactory()
 		defaultGenerator, defaultGeneratorErr = factory.Create(config)
 
 		if defaultGeneratorErr != nil {

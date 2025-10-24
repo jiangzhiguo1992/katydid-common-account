@@ -37,8 +37,8 @@ type MonitorableGenerator interface {
 	GetIDCount() uint64
 }
 
-// ParseableGenerator 可解析的生成器接口
-type ParseableGenerator interface {
+// ValidaParseableGenerator 可验证+解析的生成器接口
+type ValidaParseableGenerator interface {
 	// ParseID 解析ID，提取其中的时间戳、机器ID等元信息
 	ParseID(id int64) (*IDInfo, error)
 
@@ -52,7 +52,7 @@ type FullFeaturedGenerator interface {
 	BatchGenerator
 	ConfigurableGenerator
 	MonitorableGenerator
-	ParseableGenerator
+	ValidaParseableGenerator
 }
 
 // GeneratorFactory 生成器工厂接口

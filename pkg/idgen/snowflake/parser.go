@@ -12,6 +12,23 @@ type Parser struct {
 	validator core.IDValidator // 验证器，用于解析前验证ID有效性
 }
 
+// ParseID 全局解析函数
+func ParseID(id int64) (timestamp int64, datacenterID int64, workerID int64, sequence int64) {
+	if id <= 0 {
+		return 0, -1, -1, -1
+	}
+	timestamp = (id >> TimestampShift) + Epoch
+	datacenterID = (id >> DatacenterIDShift) & MaxDatacenterID
+	workerID = (id >> WorkerIDShift) & MaxWorkerID
+	sequence = id & MaxSequence
+	return
+}
+
+// GetTimestamp 全局时间戳提取函数
+func GetTimestamp(id int64) time.Time {
+	return NewParser().ExtractTimestampAsTime(id)
+}
+
 // NewParser 创建新的解析器实例
 func NewParser() *Parser {
 	return &Parser{
@@ -104,21 +121,4 @@ func (p *Parser) ExtractSequence(id int64) int64 {
 	}
 	// 位运算提取序列号（取低12位）
 	return id & MaxSequence
-}
-
-// ParseSnowflakeID 全局解析函数
-func ParseSnowflakeID(id int64) (timestamp int64, datacenterID int64, workerID int64, sequence int64) {
-	if id <= 0 {
-		return 0, -1, -1, -1
-	}
-	timestamp = (id >> TimestampShift) + Epoch
-	datacenterID = (id >> DatacenterIDShift) & MaxDatacenterID
-	workerID = (id >> WorkerIDShift) & MaxWorkerID
-	sequence = id & MaxSequence
-	return
-}
-
-// GetTimestamp 全局时间戳提取函数
-func GetTimestamp(id int64) time.Time {
-	return NewParser().ExtractTimestampAsTime(id)
 }

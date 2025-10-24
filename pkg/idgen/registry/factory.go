@@ -16,36 +16,15 @@ func init() {
 	}
 
 	// 注册Snowflake工厂
-	_ = globalFactoryRegistry.Register(core.GeneratorTypeSnowflake, NewSnowflakeFactory())
+	_ = GetFactoryRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewFactory())
 
 	// 注册Snowflake解析器和验证器
 	_ = GetParserRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewParser())
 	_ = GetValidatorRegistry().Register(core.GeneratorTypeSnowflake, snowflake.NewValidator())
 
 	log.Println("ID生成器工厂初始化完成", "registered_types", []string{"snowflake"})
-}
 
-// SnowflakeFactory Snowflake生成器工厂
-type SnowflakeFactory struct{}
-
-// NewSnowflakeFactory 创建Snowflake工厂实例
-// 说明：工厂本身是无状态的，可以创建多个实例或共享单个实例
-func NewSnowflakeFactory() *SnowflakeFactory {
-	return &SnowflakeFactory{}
-}
-
-// Create 创建Snowflake生成器实例
-// 实现core.GeneratorFactory接口
-func (f *SnowflakeFactory) Create(config any) (core.IDGenerator, error) {
-	// 类型断言：将通用配置转换为Snowflake配置
-	sfConfig, ok := config.(*snowflake.Config)
-	if !ok {
-		return nil, fmt.Errorf("invalid config type: expected *snowflake.Config, got %T", config)
-	}
-
-	// 使用snowflake包创建生成器
-	// 注意：NewWithConfig内部会验证配置
-	return snowflake.NewWithConfig(sfConfig)
+	// ...注册其他的
 }
 
 // FactoryRegistry 工厂注册表
