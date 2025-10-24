@@ -60,6 +60,13 @@
 
 **理论性能**: 单机每秒可生成409.6万个ID（4096 × 1000）
 
+#### 性能优化
+
+- **预计算优化**: datacenterID和workerID在初始化时预先计算并缓存为`precomputedPart`
+- **零内存分配**: 单个ID生成过程无任何内存分配
+- **原子操作**: 监控指标使用`atomic.Uint64`，无锁开销
+- **批量优化**: 批量生成复用时间戳获取，减少系统调用
+
 ### 2. 时钟回拨保护
 
 提供三种策略应对时钟回拨问题：
@@ -86,18 +93,46 @@ type Metrics struct {
 
 ### 4. 注册表管理
 
-- **生成器注册表**: 统一管理多个生成器实例
+- **生成器注册表**: 统一管理多个生成器实例，支持键值对方式访问
+  - 提供`Create`、`Get`、`GetOrCreate`、`Has`、`Remove`等完整CRUD操作
+  - 支持数量限制（默认100，绝对上限100,000），防止内存泄漏
+  - 键格式验证（支持字母、数字、下划线、连字符、点，最大256字符）
 - **工厂注册表**: 支持插件式扩展新的生成器类型
+  - 使用工厂模式动态创建生成器实例
+  - 初始化时自动注册Snowflake工厂
 - **解析器注册表**: 统一管理ID解析器
+  - 支持多种生成器类型的解析器注册
+  - Domain层通过注册表获取对应解析器
 - **验证器注册表**: 统一管理ID验证器
+  - 支持多种生成器类型的验证器注册
+  - Domain层通过注册表获取对应验证器
 
 ### 5. 领域类型增强
 
 提供丰富的领域类型和工具：
 
 - **ID类型**: 封装int64，提供类型安全和便捷方法
+  - 多进制解析：支持十进制、十六进制(0x)、二进制(0b)格式
+  - 多进制输出：`String()`、`Hex()`、`Binary()`方法
+  - JSON安全：自动序列化为字符串，避免JavaScript精度丢失
+  - 验证与解析：`Validate()`、`Parse()`、`ValidateWithType()`、`ParseWithType()`
+  - 安全检查：`IsValid()`、`IsZero()`、`IsSafeForJavaScript()`
+  - **DoS防护**: 限制解析字符串最大长度100字符，防止资源耗尽攻击
+  
 - **IDSlice**: ID切片工具，支持去重、过滤、验证
+  - 类型转换：`Int64Slice()`、`StringSlice()`
+  - 集合操作：`Contains()`、`Filter()`、`Deduplicate()`
+  - 访问方法：`First()`、`Last()`、`Len()`、`IsEmpty()`
+  - 批量验证：`ValidateAll()`一次性验证所有ID
+  - **DoS防护**: 限制切片最大长度1,000,000，防止内存耗尽
+  
 - **IDSet**: ID集合工具，支持并集、交集、差集操作
+  - 基础操作：`Add()`、`Remove()`、`Contains()`、`Clear()`
+  - 集合运算：`Union()`、`Intersect()`、`Difference()`、`Equal()`
+  - 转换方法：`ToSlice()`、`Clone()`
+  - 查询方法：`Size()`、`IsEmpty()`
+  - **DoS防护**: 限制集合最大容量1,000,000，防止内存耗尽
+  - **性能优化**: 使用map[ID]struct{}实现，O(1)查找复杂度
 
 ---
 
@@ -121,6 +156,10 @@ type Metrics struct {
 │  ├───────────────────────────────────────────┤                  │
 │  │ Configurable + Monitorable + Parseable    │                  │
 │  └───────────────────────────────────────────┘                  │
+│                                                                 │
+│  ┌────────────────┐  ┌─────────────────┐  ┌────────────────┐    │
+│  │  IDParser      │  │  IDValidator    │  │ GeneratorType  │    │
+│  └────────────────┘  └─────────────────┘  └────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ 实现
@@ -139,6 +178,7 @@ type Metrics struct {
 │  │ - metrics        *Metrics                        │           │
 │  │ - validator      *Validator                      │           │
 │  │ - parser         *Parser                         │           │
+│  │ - precomputedPart int64  (性能优化)               │           │
 │  ├──────────────────────────────────────────────────┤           │
 │  │ +NextID() int64                                  │           │
 │  │ +NextIDBatch(n int) []int64                      │           │
@@ -159,12 +199,12 @@ type Metrics struct {
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Registry 注册层                             │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────┐    │
-│  │    Registry    │  │FactoryRegistry │  │ParserRegistry   │    │
-│  │  (生成器注册表)  │  │  (工厂注册表)    │  │  (解析器注册表)   │    │
-│  └────────────────┘  └────────────────┘  └─────────────────┘    │
+│  ┌─────────────────┐  ┌────────────────┐  ┌─────────────────┐   │
+│  │ValidatorRegistry│  │FactoryRegistry │  │ ParserRegistry  │   │
+│  │  (验证器注册表)   │  │  (工厂注册表)    │  │  (解析器注册表)   │   │
+│  └─────────────────┘  └────────────────┘  └─────────────────┘   │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              ValidatorRegistry (验证器注册表)             │    │
+│  │              Registry (生成器注册表)                      │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -173,14 +213,23 @@ type Metrics struct {
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Domain 领域层                               │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │     ID       │    │   IDSlice    │    │    IDSet     │       │
-│  ├──────────────┤    ├──────────────┤    ├──────────────┤       │
-│  │ +String()    │    │ +Contains()  │    │ +Union()     │       │
-│  │ +Hex()       │    │ +Filter()    │    │ +Intersect() │       │
-│  │ +Validate()  │    │ +Deduplicate │    │ +Difference()│       │
-│  │ +Parse()     │    │ +ValidateAll │    │ +Equal()     │       │
-│  └──────────────┘    └──────────────┘    └──────────────┘       │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────┐   │
+│  │       ID         │  │    IDSlice       │  │    IDSet     │   │
+│  ├──────────────────┤  ├──────────────────┤  ├──────────────┤   │
+│  │ +String()        │  │ +Contains()      │  │ +Union()     │   │
+│  │ +Hex()           │  │ +Filter()        │  │ +Intersect() │   │
+│  │ +Binary()        │  │ +Deduplicate()   │  │ +Difference()│   │
+│  │ +Int64()         │  │ +ValidateAll()   │  │ +Equal()     │   │
+│  │ +Validate()      │  │ +First()         │  │ +Contains()  │   │
+│  │ +Parse()         │  │ +Last()          │  │ +Add()       │   │
+│  │ +IsValid()       │  │ +Len()           │  │ +Remove()    │   │
+│  │ +IsZero()        │  │ +IsEmpty()       │  │ +Size()      │   │
+│  │ +IsSafeForJS()   │  │ +Int64Slice()    │  │ +IsEmpty()   │   │
+│  │ +ExtractTime()   │  │ +StringSlice()   │  │ +Clear()     │   │
+│  │ +MarshalJSON()   │  │ (DoS防护)         │  │ +ToSlice()   │   │
+│  │ +UnmarshalJSON() │  └──────────────────┘  │ +Clone()     │   │
+│  │ (DoS防护)         │                        └──────────────┘   │
+│  └──────────────────┘                                           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -215,7 +264,7 @@ package main
 
 import (
     "fmt"
-    "github.com/katydid/idgen/snowflake"
+    "katydid-common-account/pkg/idgen/snowflake"
 )
 
 func main() {
@@ -247,8 +296,8 @@ func main() {
 package main
 
 import (
-    "github.com/katydid/idgen/core"
-    "github.com/katydid/idgen/snowflake"
+    "katydid-common-account/pkg/idgen/core"
+    "katydid-common-account/pkg/idgen/snowflake"
 )
 
 func main() {
@@ -282,9 +331,9 @@ func main() {
 package main
 
 import (
-    "github.com/katydid/idgen/core"
-    "github.com/katydid/idgen/registry"
-    "github.com/katydid/idgen/snowflake"
+    "katydid-common-account/pkg/idgen/core"
+    "katydid-common-account/pkg/idgen/registry"
+    "katydid-common-account/pkg/idgen/snowflake"
 )
 
 func main() {
@@ -402,7 +451,7 @@ gen.ResetMetrics()
 #### ID类型
 
 ```go
-import "github.com/katydid/idgen/domain"
+import "katydid-common-account/pkg/idgen/domain"
 
 // 创建ID
 id := domain.NewID(123456789)
@@ -413,93 +462,149 @@ hex := id.Hex()              // "0x75bcd15"
 bin := id.Binary()           // "0b111010110111100110100010101"
 i64 := id.Int64()            // 123456789
 
-// 解析ID
+// 解析ID（支持多种进制格式）
 id, err := domain.ParseID("123456789")       // 十进制
 id, err := domain.ParseID("0x75bcd15")       // 十六进制
 id, err := domain.ParseID("0b111010110...")  // 二进制
 
-// ID验证
+// DoS防护：超长字符串会被拒绝
+id, err := domain.ParseID(strings.Repeat("1", 101))  // 错误：超过100字符限制
+
+// ID验证与解析
 if id.IsValid() {
-    // ID有效
+    // ID有效（ID > 0）
 }
 
-// JavaScript安全性检查
+if id.IsZero() {
+    // ID为零值
+}
+
+// 使用默认生成器类型（Snowflake）验证和解析
+err := id.Validate()
+info, err := id.Parse()
+
+// 使用指定生成器类型验证和解析
+err := id.ValidateWithType(core.GeneratorTypeSnowflake)
+info, err := id.ParseWithType(core.GeneratorTypeSnowflake)
+
+// 提取时间戳
+timeObj := id.ExtractTime()  // 使用默认类型
+timeObj := id.ExtractTimeWithType(core.GeneratorTypeSnowflake)
+
+// JavaScript安全性检查（检查是否在 ±(2^53-1) 范围内）
 if id.IsSafeForJavaScript() {
-    // 可安全用于JavaScript
+    // 可安全用于JavaScript，不会丢失精度
 }
 
 // JSON序列化（自动转为字符串，避免精度丢失）
 data, _ := json.Marshal(id)  // "123456789"
+
+// JSON反序列化（支持字符串和数字格式）
+var id domain.ID
+json.Unmarshal([]byte(`"123456789"`), &id)  // 从字符串
+json.Unmarshal([]byte(`123456789`), &id)    // 从数字
 ```
 
 #### IDSlice工具
 
 ```go
-import "github.com/katydid/idgen/domain"
+import "katydid-common-account/pkg/idgen/domain"
 
-// 创建ID切片
+// 创建ID切片（自动复制并限制长度）
 ids := domain.NewIDSlice(id1, id2, id3)
 
-// 类型转换
-int64Slice := ids.Int64Slice()
-stringSlice := ids.StringSlice()
+// DoS防护：超长切片会被截断到1,000,000
+largeSlice := make([]domain.ID, 2000000)
+safeSlice := domain.NewIDSlice(largeSlice...)  // 只保留前1,000,000个
 
-// 查找
+// 类型转换
+int64Slice := ids.Int64Slice()    // 转为[]int64
+stringSlice := ids.StringSlice()  // 转为[]string
+
+// 查找（O(n)时间复杂度）
 if ids.Contains(id1) {
     // 包含该ID
 }
 
-// 去重
+// 访问元素
+first, ok := ids.First()  // 获取第一个元素
+last, ok := ids.Last()    // 获取最后一个元素
+length := ids.Len()       // 获取长度
+isEmpty := ids.IsEmpty()  // 检查是否为空
+
+// 去重（返回新切片）
 uniqueIDs := ids.Deduplicate()
 
-// 过滤
+// 过滤（返回新切片）
 validIDs := ids.Filter(func(id domain.ID) bool {
     return id.IsValid()
 })
 
-// 批量验证
+// nil-safe：predicate为nil时返回原切片副本
+copiedIDs := ids.Filter(nil)
+
+// 批量验证（任何一个无效则返回错误）
 err := ids.ValidateAll()
+if err != nil {
+    // 返回第一个无效ID的索引和错误
+}
 ```
 
 #### IDSet集合
 
 ```go
-import "github.com/katydid/idgen/domain"
+import "katydid-common-account/pkg/idgen/domain"
 
-// 创建集合
+// 创建集合（自动去重）
 set1 := domain.NewIDSet(id1, id2, id3)
 set2 := domain.NewIDSet(id2, id3, id4)
 
-// 集合操作
-set1.Add(id5)
-set1.Remove(id1)
-exists := set1.Contains(id2)
+// DoS防护：超长集合会被截断到1,000,000
+largeIDs := make([]domain.ID, 2000000)
+safeSet := domain.NewIDSet(largeIDs...)  // 只保留前1,000,000个
 
-// 并集
+// 基础操作
+set1.Add(id5)              // 添加元素（达到上限时忽略）
+set1.Remove(id1)           // 移除元素
+exists := set1.Contains(id2)  // 检查是否存在（O(1)复杂度）
+size := set1.Size()        // 获取大小
+isEmpty := set1.IsEmpty()  // 检查是否为空
+set1.Clear()               // 清空所有元素（使用Go 1.21+的clear函数）
+
+// 并集（返回新集合）
 union := set1.Union(set2)
 
-// 交集
+// nil-safe：other为nil时返回当前集合的副本
+safeCopy := set1.Union(nil)
+
+// 交集（返回新集合，自动选择较小集合遍历以优化性能）
 intersection := set1.Intersect(set2)
 
-// 差集
+// nil-safe：other为nil时返回空集合
+emptySet := set1.Intersect(nil)
+
+// 差集（返回新集合）
 difference := set1.Difference(set2)
 
 // 相等性检查
 if set1.Equal(set2) {
-    // 集合相等
+    // 集合相等（大小相同且元素相同）
 }
 
 // 转换为切片
 slice := set1.ToSlice()
+
+// 克隆集合（深拷贝）
+cloned := set1.Clone()
 ```
 
 ### 6. 注册表高级功能
 
 ```go
 import (
-    "github.com/katydid/idgen/registry"
-    "github.com/katydid/idgen/core"
-    "github.com/katydid/idgen/snowflake"
+    "katydid-common-account/pkg/idgen/registry"
+    "katydid-common-account/pkg/idgen/core"
+    "katydid-common-account/pkg/idgen/snowflake"
 )
 
 reg := registry.GetRegistry()
