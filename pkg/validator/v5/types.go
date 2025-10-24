@@ -71,13 +71,13 @@ type RuleValidator interface {
 	ValidateRule() map[Scene]map[string]string
 }
 
-// CustomValidator 自定义验证器接口
+// BusinessValidator 自定义验证器接口
 // 职责：执行复杂的业务逻辑验证（跨字段、数据库检查等）
 // 设计原则：单一职责 - 只负责业务逻辑验证
-type CustomValidator interface {
-	// ValidateCustom 执行业务验证
+type BusinessValidator interface {
+	// ValidateBusiness 执行业务验证
 	// 通过 ctx.AddError 添加错误
-	ValidateCustom(ctx *ValidationContext) error
+	ValidateBusiness(ctx *ValidationContext) error
 }
 
 // LifecycleHooks 生命周期钩子接口
@@ -275,8 +275,8 @@ func (vc *ValidationContext) GetMetadata(key string) (any, bool) {
 type TypeInfo struct {
 	// IsRuleValidator 是否实现了 RuleValidator
 	IsRuleValidator bool
-	// IsCustomValidator 是否实现了 CustomValidator
-	IsCustomValidator bool
+	// IsBusinessValidator 是否实现了 BusinessValidator
+	IsBusinessValidator bool
 	// IsLifecycleHooks 是否实现了 LifecycleHooks
 	IsLifecycleHooks bool
 	// Rules 缓存的规则（如果实现了 RuleValidator）

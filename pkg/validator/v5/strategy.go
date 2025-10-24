@@ -234,14 +234,14 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 检查是否实现了 CustomValidator 接口
-	validator, ok := target.(CustomValidator)
+	// 检查是否实现了 BusinessValidator 接口
+	validator, ok := target.(BusinessValidator)
 	if !ok {
 		return nil
 	}
 
 	// 执行业务验证
-	return validator.ValidateCustom(ctx)
+	return validator.ValidateBusiness(ctx)
 }
 
 // ============================================================================

@@ -47,8 +47,8 @@ func (u *TestUser) ValidateRule() map[Scene]map[string]string {
 	}
 }
 
-// 实现 CustomValidator 接口
-func (u *TestUser) ValidateCustom(ctx *ValidationContext) error {
+// 实现 BusinessValidator 接口
+func (u *TestUser) ValidateBusiness(ctx *ValidationContext) error {
 	// 业务规则：用户名不能是 admin
 	if u.Username == "admin" {
 		ctx.AddError(NewFieldError("TestUser.Username", "Username", "reserved").

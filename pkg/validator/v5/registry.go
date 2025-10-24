@@ -44,7 +44,7 @@ func (r *DefaultTypeRegistry) Register(target any) *TypeInfo {
 
 	// 检查接口实现
 	ruleProvider, info.IsRuleValidator = target.(RuleValidator)
-	_, info.IsCustomValidator = target.(CustomValidator)
+	_, info.IsBusinessValidator = target.(BusinessValidator)
 	_, info.IsLifecycleHooks = target.(LifecycleHooks)
 
 	// 如果实现了 RuleValidator，缓存所有场景的规则
