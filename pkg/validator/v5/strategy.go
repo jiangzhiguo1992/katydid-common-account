@@ -18,10 +18,11 @@ import (
 type RuleStrategy struct {
 	validate     *validator.Validate
 	sceneMatcher SceneMatcher
+	typeRegistry TypeRegistry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(sceneMatcher SceneMatcher) *RuleStrategy {
+func NewRuleStrategy(sceneMatcher SceneMatcher, typeRegistry TypeRegistry) *RuleStrategy {
 	v := validator.New()
 
 	// 注册自定义标签名函数，使用 json tag 作为字段名
@@ -36,6 +37,7 @@ func NewRuleStrategy(sceneMatcher SceneMatcher) *RuleStrategy {
 	return &RuleStrategy{
 		validate:     v,
 		sceneMatcher: sceneMatcher,
+		typeRegistry: typeRegistry,
 	}
 }
 
@@ -55,27 +57,59 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 检查是否实现了 RuleValidator 接口
-	provider, ok := target.(RuleValidator)
-	if !ok {
-		// 没有实现接口，使用 struct tag 验证
-		return s.validateByTags(target, ctx)
-	}
-
-	// 使用 RuleValidator 提供的规则验证
-	return s.validateByRules(target, provider, ctx)
-}
-
-// validateByRules 使用 RuleValidator 提供的规则验证
-func (s *RuleStrategy) validateByRules(target any, provider RuleValidator, ctx *ValidationContext) error {
 	// 获取场景规则
-	sceneRules := provider.ValidateRule()
-	if len(sceneRules) == 0 {
-		return nil
+	var sceneRules map[Scene]map[string]string
+	if s.typeRegistry != nil {
+		// 从缓存中获取类型信息，直接使用
+		if typeInfo := s.typeRegistry.Register(target); typeInfo != nil {
+			sceneRules = typeInfo.Rules
+		}
+	} else {
+		// 回退到传统方式：检查是否实现了 RuleValidation 接口
+		if provider, ok := target.(RuleValidation); ok {
+			sceneRules = provider.ValidateRules()
+		}
 	}
 
 	// 匹配当前场景的规则
 	rules := s.sceneMatcher.MatchRules(ctx.Scene, sceneRules)
+	if len(rules) == 0 {
+		return nil
+	}
+
+	// 是否需要特定规则
+	var partial bool
+
+	// 检查是否是部分字段验证
+	if fields, ok := ctx.GetMetadata("validate_fields"); ok {
+		if fieldList, ok := fields.([]string); ok && (len(fieldList) > 0) {
+			partial = true
+			rules = s.filterRulesByFields(rules, fieldList)
+		}
+	}
+
+	// 检查是否需要排除字段
+	if excludeFields, ok := ctx.GetMetadata("exclude_fields"); ok {
+		if fieldList, ok := excludeFields.([]string); ok && (len(fieldList) > 0) {
+			partial = true
+			rules = s.excludeRulesFields(rules, fieldList)
+		}
+	}
+
+	if len(rules) > 0 {
+		return s.validateByRules(target, rules, ctx)
+	}
+
+	// 没有实现接口，使用 struct tag 验证
+	if partial {
+		return s.validateByTags(target, rules, ctx)
+	} else {
+		return s.validateByTags(target, nil, ctx)
+	}
+}
+
+// validateByRules 使用 RuleValidation 提供的规则验证
+func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx *ValidationContext) error {
 	if len(rules) == 0 {
 		return nil
 	}
@@ -96,6 +130,11 @@ func (s *RuleStrategy) validateByRules(target any, provider RuleValidator, ctx *
 
 	// 获取对象的反射值
 	val := reflect.ValueOf(target)
+	if !val.IsValid() {
+		return nil
+	}
+
+	// 处理指针类型
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
 			return nil
@@ -103,13 +142,14 @@ func (s *RuleStrategy) validateByRules(target any, provider RuleValidator, ctx *
 		val = val.Elem()
 	}
 
+	// 只处理结构体类型
 	if val.Kind() != reflect.Struct {
 		return nil
 	}
 
 	// 逐个字段验证
 	for fieldName, rule := range rules {
-		if rule == "" {
+		if len(fieldName) == 0 || len(rule) == 0 {
 			continue
 		}
 
@@ -134,8 +174,22 @@ func (s *RuleStrategy) validateByRules(target any, provider RuleValidator, ctx *
 }
 
 // validateByTags 使用 struct tag 验证
-func (s *RuleStrategy) validateByTags(target any, ctx *ValidationContext) error {
-	if err := s.validate.Struct(target); err != nil {
+func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *ValidationContext) error {
+	if len(rules) == 0 {
+		// 没有排除字段，执行完整验证
+		if err := s.validate.Struct(target); err != nil {
+			s.addValidationErrors(err, ctx)
+		}
+		return nil
+	}
+
+	// 使用底层验证器的 StructPartial 方法
+	partialFields := make([]string, 0, len(rules))
+	for fieldName := range rules {
+		partialFields = append(partialFields, fieldName)
+	}
+
+	if err := s.validate.StructPartial(target, partialFields...); err != nil {
 		s.addValidationErrors(err, ctx)
 	}
 	return nil
@@ -194,13 +248,25 @@ func (s *RuleStrategy) excludeRulesFields(rules map[string]string, excludeFields
 // findFieldByJSONTag 通过 JSON tag 查找字段
 func (s *RuleStrategy) findFieldByJSONTag(val reflect.Value, jsonTag string) reflect.Value {
 	typ := val.Type()
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		tag := strings.SplitN(field.Tag.Get("json"), ",", 2)[0]
+	if typ == nil {
+		return reflect.Value{}
+	}
+
+	numField := typ.NumField()
+	for i := 0; i < numField; i++ {
+		fieldType := typ.Field(i)
+		// 提取 json tag 的第一部分（逗号前）
+		tag := strings.SplitN(fieldType.Tag.Get("json"), ",", 2)[0]
 		if tag == jsonTag {
-			return val.Field(i)
+			field := val.Field(i)
+			// 确保字段可访问
+			if field.CanInterface() {
+				return field
+			}
 		}
 	}
+
+	// 未找到，返回零值
 	return reflect.Value{}
 }
 
@@ -234,8 +300,8 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 检查是否实现了 BusinessValidator 接口
-	valid, ok := target.(BusinessValidator)
+	// 检查是否实现了 BusinessValidation 接口
+	valid, ok := target.(BusinessValidation)
 	if !ok {
 		return nil
 	}

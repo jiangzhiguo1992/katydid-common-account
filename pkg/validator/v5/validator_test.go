@@ -25,8 +25,8 @@ type TestUser struct {
 	Age      int    `json:"age"`
 }
 
-// 实现 RuleValidator 接口
-func (u *TestUser) ValidateRule() map[Scene]map[string]string {
+// 实现 RuleValidation 接口
+func (u *TestUser) ValidateRules() map[Scene]map[string]string {
 	return map[Scene]map[string]string{
 		SceneCreate: {
 			"Username": "required,min=3,max=20",
@@ -43,7 +43,7 @@ func (u *TestUser) ValidateRule() map[Scene]map[string]string {
 	}
 }
 
-// 实现 BusinessValidator 接口
+// 实现 BusinessValidation 接口
 func (u *TestUser) ValidateBusiness(ctx *ValidationContext) error {
 	// 业务规则：用户名不能是 admin
 	if u.Username == "admin" {

@@ -34,19 +34,19 @@ const (
 // 业务层接口 - 由模型实现
 // ============================================================================
 
-// RuleValidator 规则验证器接口
+// RuleValidation 规则验证器接口
 // 职责：提供字段级别的验证规则（required, min, max等）
 // 设计原则：单一职责 - 只负责提供规则，不执行验证
-type RuleValidator interface {
-	// ValidateRule 获取指定场景的验证规则
+type RuleValidation interface {
+	// ValidateRules 获取指定场景的验证规则
 	// 返回格式：map[场景]map[字段名]规则字符串
-	ValidateRule() map[Scene]map[string]string
+	ValidateRules() map[Scene]map[string]string
 }
 
-// BusinessValidator 自定义验证器接口
+// BusinessValidation 自定义验证器接口
 // 职责：执行复杂的业务逻辑验证（跨字段、数据库检查等）
 // 设计原则：单一职责 - 只负责业务逻辑验证
-type BusinessValidator interface {
+type BusinessValidation interface {
 	// ValidateBusiness 执行业务验证
 	// 通过 ctx.AddError 添加错误
 	ValidateBusiness(ctx *ValidationContext) error
@@ -149,12 +149,12 @@ type CacheStrategy interface {
 // TypeInfo 类型信息
 // 职责：缓存类型的验证能力信息
 type TypeInfo struct {
-	// IsRuleValidator 是否实现了 RuleValidator
+	// IsRuleValidator 是否实现了 RuleValidation
 	IsRuleValidator bool
-	// IsBusinessValidator 是否实现了 BusinessValidator
+	// IsBusinessValidator 是否实现了 BusinessValidation
 	IsBusinessValidator bool
 	// IsLifecycleHooks 是否实现了 LifecycleHooks
 	IsLifecycleHooks bool
-	// Rules 缓存的规则（如果实现了 RuleValidator）
+	// Rules 缓存的规则（如果实现了 RuleValidation）
 	Rules map[Scene]map[string]string
 }

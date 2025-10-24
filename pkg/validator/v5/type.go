@@ -40,20 +40,17 @@ func (r *TypeCacheRegistry) Register(target any) *TypeInfo {
 
 	// 缓存未命中，创建新的缓存项（冷路径）
 	info := &TypeInfo{}
-	var ruleProvider RuleValidator
 
 	// 检查接口实现
-	ruleProvider, info.IsRuleValidator = target.(RuleValidator)
-	_, info.IsBusinessValidator = target.(BusinessValidator)
+	var ruleProvider RuleValidation
+	if ruleProvider, info.IsRuleValidator = target.(RuleValidation); info.IsRuleValidator {
+		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
+		info.Rules = ruleProvider.ValidateRules()
+	}
+	_, info.IsBusinessValidator = target.(BusinessValidation)
 	_, info.IsLifecycleHooks = target.(LifecycleHooks)
 
-	// 如果实现了 RuleValidator，缓存所有场景的规则
-	if info.IsRuleValidator {
-		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
-		info.Rules = ruleProvider.ValidateRule()
-	}
-
-	// 存入缓存
+	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := r.cache.LoadOrStore(typ, info)
 	return actual.(*TypeInfo)
 }

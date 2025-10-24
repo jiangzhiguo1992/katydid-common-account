@@ -22,16 +22,14 @@ func (f *ValidatorFactory) Create(opts ...EngineOption) *ValidatorEngine {
 // CreateDefault 创建默认验证器
 // 包含所有标准验证策略
 func (f *ValidatorFactory) CreateDefault() *ValidatorEngine {
-	sceneMatcher := NewSceneBitMatcher()
 
 	engine := NewValidatorEngine(
-		WithSceneMatcher(sceneMatcher),
 		WithMaxDepth(100),
 		WithMaxErrors(100),
 	)
 
 	// 添加标准策略
-	engine.AddStrategy(NewRuleStrategy(sceneMatcher))
+	engine.AddStrategy(NewRuleStrategy(engine.sceneMatcher, engine.typeRegistry))
 	engine.AddStrategy(NewBusinessStrategy())
 	engine.AddStrategy(NewNestedStrategy(engine, engine.maxDepth))
 
@@ -41,13 +39,9 @@ func (f *ValidatorFactory) CreateDefault() *ValidatorEngine {
 // CreateMinimal 创建最小验证器
 // 只包含规则验证策略
 func (f *ValidatorFactory) CreateMinimal() *ValidatorEngine {
-	sceneMatcher := NewSceneBitMatcher()
-
-	return NewValidatorEngine(
-		WithStrategies(NewRuleStrategy(sceneMatcher)),
-		WithSceneMatcher(sceneMatcher),
-		WithMaxErrors(100),
-	)
+	engine := NewValidatorEngine()
+	engine.AddStrategy(NewRuleStrategy(engine.sceneMatcher, engine.typeRegistry))
+	return engine
 }
 
 //

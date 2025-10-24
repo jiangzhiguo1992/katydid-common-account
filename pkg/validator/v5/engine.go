@@ -93,7 +93,7 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 		listeners:      make([]ValidationListener, 0),
 		errorFormatter: NewDefaultErrorFormatter(),
 		maxDepth:       100,
-		maxErrors:      1000,
+		maxErrors:      100,
 	}
 
 	// 应用选项
@@ -183,20 +183,20 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 	// 1. 创建验证上下文
 	ctx := NewValidationContext(scene, target)
 
-	// 2. 触发验证开始事件
+	// 2. 触发验证开始事件 TODO:GG 干嘛的
 	e.notifyValidationStart(ctx)
 
 	// 3. 注册类型信息（首次使用时）
 	e.typeRegistry.Register(target)
 
-	// 4. 执行生命周期前钩子
+	// 4. 执行生命周期前钩子 TODO:GG 干嘛的
 	if err := e.executeBeforeHooks(target, ctx); err != nil {
 		return err
 	}
 
 	// 5. 按优先级执行所有验证策略
 	for _, strategy := range e.strategies {
-		// 检查是否超过最大错误数
+		// 检查是否超过最大错误数 TODO:GG 应该在errAdd的时候加
 		if ctx.ErrorCount() >= e.maxErrors {
 			break
 		}
@@ -225,7 +225,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 	return nil
 }
 
-// ValidateFields 只验证指定字段
+// ValidateFields 只验证指定字段 TODO:GG 多余?
 func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) error {
 	if len(fields) == 0 {
 		return nil
