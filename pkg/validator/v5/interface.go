@@ -49,7 +49,7 @@ type RuleValidation interface {
 type BusinessValidation interface {
 	// ValidateBusiness 执行业务验证
 	// 通过 ctx.AddError 添加错误
-	ValidateBusiness(ctx *ValidationContext) error
+	ValidateBusiness(scene Scene, ctx *ValidationContext) error
 }
 
 // LifecycleHooks 生命周期钩子接口

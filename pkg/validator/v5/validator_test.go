@@ -44,7 +44,7 @@ func (u *TestUser) ValidateRules() map[Scene]map[string]string {
 }
 
 // 实现 BusinessValidation 接口
-func (u *TestUser) ValidateBusiness(ctx *ValidationContext) error {
+func (u *TestUser) ValidateBusiness(scene Scene, ctx *ValidationContext) error {
 	// 业务规则：用户名不能是 admin
 	if u.Username == "admin" {
 		ctx.AddError(NewFieldError("TestUser.Username", "Username").

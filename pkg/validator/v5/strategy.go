@@ -192,6 +192,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 	if err := s.validate.StructPartial(target, partialFields...); err != nil {
 		s.addValidationErrors(err, ctx)
 	}
+
 	return nil
 }
 
@@ -306,8 +307,8 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 执行业务验证
-	return valid.ValidateBusiness(ctx)
+	// 执行业务验证 (外部利用ctx来AddError)
+	return valid.ValidateBusiness(ctx.Scene, ctx)
 }
 
 // ============================================================================
@@ -355,6 +356,10 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 
 	// 获取反射值
 	val := reflect.ValueOf(target)
+	if !val.IsValid() {
+		return nil
+	}
+
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
 			return nil
@@ -368,12 +373,14 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 
 	// 遍历所有字段
 	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
+	numField := val.NumField()
+
+	for i := 0; i < numField; i++ {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
 		// 跳过不可访问的字段
-		if !field.CanInterface() {
+		if !field.CanInterface() || !field.IsValid() {
 			continue
 		}
 
@@ -388,17 +395,24 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 			fieldKind = field.Elem().Kind()
 		}
 
+		// 只处理匿名（嵌入）的结构体字段
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
 			// 创建子上下文
-			subCtx := NewValidationContext(ctx.Scene, field.Interface())
+			fieldValue := field.Interface()
+
+			// TODO:GG 没用到?
+			subCtx := NewValidationContext(ctx.Scene, fieldValue)
 			subCtx.Depth = ctx.Depth + 1
 			subCtx.Context = ctx.Context
 
 			// 递归验证
-			if err := s.engine.Validate(field.Interface(), ctx.Scene); err != nil {
+			if err := s.engine.Validate(fieldValue, ctx.Scene); err != nil {
 				if ve, ok := err.(*ValidationError); ok {
 					ctx.AddErrors(ve.Errors)
+					continue
 				}
+				// 中断返回err
+				return err
 			}
 		}
 	}
