@@ -55,21 +55,27 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 检查是否实现了 RuleProvider 接口
-	provider, ok := target.(RuleProvider)
+	// 检查是否实现了 RuleValidator 接口
+	provider, ok := target.(RuleValidator)
 	if !ok {
 		// 没有实现接口，使用 struct tag 验证
 		return s.validateByTags(target, ctx)
 	}
 
-	// 使用 RuleProvider 提供的规则验证
+	// 使用 RuleValidator 提供的规则验证
 	return s.validateByRules(target, provider, ctx)
 }
 
-// validateByRules 使用 RuleProvider 提供的规则验证
-func (s *RuleStrategy) validateByRules(target any, provider RuleProvider, ctx *ValidationContext) error {
+// validateByRules 使用 RuleValidator 提供的规则验证
+func (s *RuleStrategy) validateByRules(target any, provider RuleValidator, ctx *ValidationContext) error {
 	// 获取场景规则
-	rules := provider.GetRules(ctx.Scene)
+	sceneRules := provider.ValidateRule()
+	if len(sceneRules) == 0 {
+		return nil
+	}
+
+	// 匹配当前场景的规则
+	rules := s.sceneMatcher.MatchRules(ctx.Scene, sceneRules)
 	if len(rules) == 0 {
 		return nil
 	}
@@ -228,14 +234,14 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 检查是否实现了 BusinessValidator 接口
-	validator, ok := target.(BusinessValidator)
+	// 检查是否实现了 CustomValidator 接口
+	validator, ok := target.(CustomValidator)
 	if !ok {
 		return nil
 	}
 
 	// 执行业务验证
-	return validator.ValidateBusiness(ctx)
+	return validator.ValidateCustom(ctx)
 }
 
 // ============================================================================

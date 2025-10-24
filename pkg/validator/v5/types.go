@@ -10,18 +10,6 @@ import (
 	"unsafe"
 )
 
-// ============================================================================
-// 核心类型定义
-// ============================================================================
-
-// Scene 验证场景，使用位运算支持场景组合
-type Scene int64
-
-const (
-	SceneNone Scene = 0  // 无场景
-	SceneAll  Scene = -1 // 所有场景
-)
-
 // 预估的错误消息平均长度，用于优化字符串构建时的内存分配
 // 通过预分配减少内存重新分配次数，提升性能
 const (
@@ -50,6 +38,18 @@ const (
 	maxValueSize = 4096
 )
 
+// ============================================================================
+// 核心类型定义
+// ============================================================================
+
+// Scene 验证场景，使用位运算支持场景组合
+type Scene int64
+
+const (
+	SceneNone Scene = 0  // 无场景
+	SceneAll  Scene = -1 // 所有场景
+)
+
 // Match 判断当前场景是否匹配目标场景
 func (s Scene) Match(target Scene) bool {
 	if target == SceneAll || s == SceneAll {
@@ -62,22 +62,22 @@ func (s Scene) Match(target Scene) bool {
 // 业务层接口 - 由模型实现
 // ============================================================================
 
-// RuleProvider 规则提供者接口
+// RuleValidator 规则验证器接口
 // 职责：提供字段级别的验证规则（required, min, max等）
 // 设计原则：单一职责 - 只负责提供规则，不执行验证
-type RuleProvider interface {
-	// GetRules 获取指定场景的验证规则
-	// 返回格式：map[字段名]规则字符串
-	GetRules(scene Scene) map[string]string
+type RuleValidator interface {
+	// ValidateRule 获取指定场景的验证规则
+	// 返回格式：map[场景]map[字段名]规则字符串
+	ValidateRule() map[Scene]map[string]string
 }
 
-// BusinessValidator 业务验证器接口
+// CustomValidator 自定义验证器接口
 // 职责：执行复杂的业务逻辑验证（跨字段、数据库检查等）
 // 设计原则：单一职责 - 只负责业务逻辑验证
-type BusinessValidator interface {
-	// ValidateBusiness 执行业务验证
+type CustomValidator interface {
+	// ValidateCustom 执行业务验证
 	// 通过 ctx.AddError 添加错误
-	ValidateBusiness(ctx *ValidationContext) error
+	ValidateCustom(ctx *ValidationContext) error
 }
 
 // LifecycleHooks 生命周期钩子接口
@@ -273,13 +273,13 @@ func (vc *ValidationContext) GetMetadata(key string) (any, bool) {
 // TypeInfo 类型信息
 // 职责：缓存类型的验证能力信息
 type TypeInfo struct {
-	// IsRuleProvider 是否实现了 RuleProvider
-	IsRuleProvider bool
-	// IsBusinessValidator 是否实现了 BusinessValidator
-	IsBusinessValidator bool
+	// IsRuleValidator 是否实现了 RuleValidator
+	IsRuleValidator bool
+	// IsCustomValidator 是否实现了 CustomValidator
+	IsCustomValidator bool
 	// IsLifecycleHooks 是否实现了 LifecycleHooks
 	IsLifecycleHooks bool
-	// Rules 缓存的规则（如果实现了 RuleProvider）
+	// Rules 缓存的规则（如果实现了 RuleValidator）
 	Rules map[Scene]map[string]string
 }
 

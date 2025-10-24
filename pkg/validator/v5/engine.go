@@ -124,7 +124,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 	// 防御性编程：参数校验
 	if target == nil {
 		return NewValidationError([]*FieldError{
-			NewFieldError("", "required").
+			NewFieldError("struct", "required").
 				WithMessage("validation target cannot be nil"),
 		})
 	}

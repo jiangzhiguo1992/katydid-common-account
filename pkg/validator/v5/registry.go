@@ -33,29 +33,24 @@ func (r *DefaultTypeRegistry) Register(target any) *TypeInfo {
 		return &TypeInfo{}
 	}
 
-	// 尝试从缓存获取
+	// 尝试从缓存获取（热路径）
 	if cached, ok := r.cache.Load(typ); ok {
 		return cached.(*TypeInfo)
 	}
 
-	// 创建类型信息
+	// 缓存未命中，创建新的缓存项（冷路径）
 	info := &TypeInfo{}
+	var ruleProvider RuleValidator
 
 	// 检查接口实现
-	_, info.IsRuleProvider = target.(RuleProvider)
-	_, info.IsBusinessValidator = target.(BusinessValidator)
+	ruleProvider, info.IsRuleValidator = target.(RuleValidator)
+	_, info.IsCustomValidator = target.(CustomValidator)
 	_, info.IsLifecycleHooks = target.(LifecycleHooks)
 
-	// 如果实现了 RuleProvider，缓存所有场景的规则
-	if provider, ok := target.(RuleProvider); ok {
-		info.Rules = make(map[Scene]map[string]string)
-		// 预加载常用场景的规则
-		for _, scene := range []Scene{SceneNone, SceneAll} {
-			rules := provider.GetRules(scene)
-			if len(rules) > 0 {
-				info.Rules[scene] = rules
-			}
-		}
+	// 如果实现了 RuleValidator，缓存所有场景的规则
+	if info.IsRuleValidator {
+		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
+		info.Rules = ruleProvider.ValidateRule()
 	}
 
 	// 存入缓存
