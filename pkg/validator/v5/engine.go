@@ -12,12 +12,12 @@ import (
 type ValidatorEngine struct {
 	// validate 第三方验证器实例
 	validator *validator.Validate
-	// strategies 验证策略列表
-	strategies []ValidationStrategy
-	// registry 类型注册表
-	registry Registry
 	// sceneMatcher 场景匹配器
 	sceneMatcher SceneMatcher
+	// registry 类型注册表
+	registry Registry
+	// strategies 验证策略列表
+	strategies []ValidationStrategy
 	// listeners 验证监听器
 	listeners []ValidationListener
 	// errorFormatter 错误格式化器
@@ -34,9 +34,9 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 	v := validator.New()
 	engine := &ValidatorEngine{
 		validator:      v,
-		strategies:     make([]ValidationStrategy, 0),
-		registry:       NewTypeCacheRegistry(v),
 		sceneMatcher:   NewSceneBitMatcher(),
+		registry:       NewTypeCacheRegistry(v),
+		strategies:     make([]ValidationStrategy, 0),
 		listeners:      make([]ValidationListener, 0),
 		errorFormatter: NewDefaultErrorFormatter(),
 		maxDepth:       100,
