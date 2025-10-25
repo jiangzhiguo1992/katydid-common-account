@@ -3,98 +3,19 @@ package v5
 import (
 	"fmt"
 	"sort"
-	"sync"
+
+	"github.com/go-playground/validator/v10"
 )
-
-// ============================================================================
-// 全局默认验证器 - 单例模式
-// ============================================================================
-
-var (
-	defaultValidator *ValidatorEngine
-	once             sync.Once
-)
-
-// Default 获取默认验证器实例（单例）
-// 线程安全，延迟初始化
-func Default() *ValidatorEngine {
-	once.Do(func() {
-		factory := NewValidatorFactory()
-		defaultValidator = factory.CreateDefault()
-	})
-	return defaultValidator
-}
-
-// SetDefault 设置默认验证器
-// 用于自定义全局验证器
-func SetDefault(validator *ValidatorEngine) {
-	defaultValidator = validator
-}
-
-// Validate 使用默认验证器验证对象
-func Validate(target any, scene Scene) error {
-	return Default().Validate(target, scene)
-}
-
-// ValidateFields 使用默认验证器验证指定字段
-func ValidateFields(target any, scene Scene, fields ...string) error {
-	return Default().ValidateFields(target, scene, fields...)
-}
-
-// ValidateExcept 使用默认验证器验证排除字段外的所有字段
-func ValidateExcept(target any, scene Scene, excludeFields ...string) error {
-	return Default().ValidateExcept(target, scene, excludeFields...)
-}
-
-// ClearCache 清除默认验证器的缓存
-func ClearCache() {
-	Default().ClearCache()
-}
-
-// Stats 获取默认验证器的统计信息
-func Stats() map[string]any {
-	return Default().Stats()
-}
-
-// RegisterAlias 注册验证标签别名
-// 用途：创建自定义标签别名，简化常用的复杂验证规则
-//
-// 示例：
-//
-//	validator.Default().RegisterAlias("password", "required,min=8,max=50,containsany=!@#$%^&*()")
-//
-//	// 在 RuleValidator 中使用别名
-//	func (u *User) RuleValidation() map[ValidateScene]map[string]string {
-//	    return map[ValidateScene]map[string]string{
-//	        SceneCreate: {"Password": "password"},  // 使用别名
-//	    }
-//	}
-//
-// 参数：
-//   - alias: 别名标签名
-//   - tags: 实际的验证规则字符串
-func RegisterAlias(alias, tags string) {
-	if len(alias) == 0 || len(tags) == 0 {
-		return
-	}
-	Default().typeRegistry.GetValidator().RegisterAlias(alias, tags)
-}
-
-// ============================================================================
-// ValidatorEngine - 验证引擎
-// ============================================================================
 
 // ValidatorEngine 验证引擎
 // 职责：协调验证流程，编排各个组件
-// 设计原则：
-//   - 单一职责：只负责流程编排
-//   - 依赖倒置：依赖抽象接口，不依赖具体实现
-//   - 开放封闭：通过策略扩展功能
 type ValidatorEngine struct {
+	// validate 第三方验证器实例
+	validator *validator.Validate
 	// strategies 验证策略列表
 	strategies []ValidationStrategy
-	// typeRegistry 类型注册表
-	typeRegistry TypeRegistry
+	// registry 类型注册表
+	registry Registry
 	// sceneMatcher 场景匹配器
 	sceneMatcher SceneMatcher
 	// listeners 验证监听器
@@ -110,9 +31,11 @@ type ValidatorEngine struct {
 // NewValidatorEngine 创建验证引擎
 // 工厂方法，确保对象正确初始化
 func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
+	v := validator.New()
 	engine := &ValidatorEngine{
+		validator:      v,
 		strategies:     make([]ValidationStrategy, 0),
-		typeRegistry:   NewTypeCacheRegistry(),
+		registry:       NewTypeCacheRegistry(v),
 		sceneMatcher:   NewSceneBitMatcher(),
 		listeners:      make([]ValidationListener, 0),
 		errorFormatter: NewDefaultErrorFormatter(),
@@ -144,10 +67,10 @@ func WithStrategies(strategies ...ValidationStrategy) EngineOption {
 	}
 }
 
-// WithTypeRegistry 设置类型注册表
-func WithTypeRegistry(registry TypeRegistry) EngineOption {
+// WithRegistry 设置类型注册表
+func WithRegistry(registry Registry) EngineOption {
 	return func(e *ValidatorEngine) {
-		e.typeRegistry = registry
+		e.registry = registry
 	}
 }
 
@@ -186,62 +109,37 @@ func WithMaxErrors(maxErrors int) EngineOption {
 	}
 }
 
+// GetValidator 获取底层 validator 实例
+func (e *ValidatorEngine) GetValidator() *validator.Validate {
+	return e.validator
+}
+
 // Validate 执行验证
 // 职责：编排整个验证流程
-// 流程：
-//  1. 创建验证上下文
-//  2. 触发验证前钩子
-//  3. 注册类型信息
-//  4. 按优先级执行验证策略
-//  5. 触发验证后钩子
-//  6. 返回验证结果
 func (e *ValidatorEngine) Validate(target any, scene Scene) error {
-	// 防御性编程：参数校验
 	if target == nil {
 		return NewValidationError([]*FieldError{
-			NewFieldError("struct", "required").
+			NewFieldError("Struct", "required").
 				WithMessage("validation target cannot be nil"),
 		})
 	}
 
-	// 1. 创建验证上下文
+	// 创建验证上下文
 	ctx := NewValidationContext(scene, target)
+	defer ctx.Release()
 
-	// 2. 触发验证开始事件 TODO:GG 干嘛的
+	// 触发验证开始事件
 	e.notifyValidationStart(ctx)
 
-	// 3. 注册类型信息（首次使用时）
-	e.typeRegistry.Register(target)
-
-	// 4. 执行生命周期前钩子 TODO:GG 干嘛的
-	if err := e.executeBeforeHooks(target, ctx); err != nil {
+	// 执行验证
+	if err := e.validateWithContext(target, ctx); err != nil {
 		return err
 	}
 
-	// 5. 按优先级执行所有验证策略
-	for _, strategy := range e.strategies {
-		// 检查是否超过最大错误数 TODO:GG 应该在errAdd的时候加
-		if ctx.ErrorCount() >= e.maxErrors {
-			break
-		}
-
-		// 执行策略，捕获 panic
-		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
-			// 策略执行失败，记录错误但继续执行其他策略
-			ctx.AddError(NewFieldError("", strategy.Name()).
-				WithMessage(fmt.Sprintf("strategy %s failed: %v", strategy.Name(), err)))
-		}
-	}
-
-	// 6. 执行生命周期后钩子
-	if err := e.executeAfterHooks(target, ctx); err != nil {
-		return err
-	}
-
-	// 7. 触发验证结束事件
+	// 触发验证结束事件
 	e.notifyValidationEnd(ctx)
 
-	// 8. 返回验证结果
+	// 返回验证结果
 	if ctx.HasErrors() {
 		return NewValidationError(ctx.GetErrors())
 	}
@@ -250,14 +148,10 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 }
 
 // validateWithContext 使用已有上下文执行验证（内部方法）
-// 用于嵌套验证场景，保持上下文连续性（如深度信息）
+// 还可用于嵌套验证场景，保持上下文连续性（如深度信息）
 func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) error {
-	if target == nil || ctx == nil {
-		return nil
-	}
-
 	// 注册类型信息（首次使用时）
-	e.typeRegistry.Register(target)
+	e.registry.Register(target)
 
 	// 执行生命周期前钩子
 	if err := e.executeBeforeHooks(target, ctx); err != nil {
@@ -266,8 +160,8 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 
 	// 按优先级执行所有验证策略
 	for _, strategy := range e.strategies {
-		// 检查是否超过最大错误数 TODO:GG 应该在errAdd的时候加
-		if ctx.ErrorCount() >= e.maxErrors {
+		// 检查是否超过最大错误数
+		if !ctx.CanAddError() {
 			break
 		}
 
@@ -275,8 +169,7 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 		// TODO:GG 嵌套的字段里面，rule+custom还要触发吗，或者是会正确触发吗？
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 策略执行失败，记录错误但继续执行其他策略
-			ctx.AddError(NewFieldError("", strategy.Name()).
-				WithMessage(fmt.Sprintf("strategy %s failed: %v", strategy.Name(), err)))
+			ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 		}
 	}
 
@@ -288,40 +181,66 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 	return nil
 }
 
-// ValidateFields 只验证指定字段 TODO:GG 多余?
+// ValidateFields 只验证指定字段
 func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) error {
-	if len(fields) == 0 {
+	if target == nil || len(fields) == 0 {
 		return nil
 	}
 
+	// 创建验证上下文
 	ctx := NewValidationContext(scene, target)
+	defer ctx.Release()
+
+	// 设置需要验证的字段
 	ctx.WithMetadata("validate_fields", fields)
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
 		if strategy.Name() == "rule" {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
-				ctx.AddError(NewFieldError("", strategy.Name()).
-					WithMessage(err.Error()))
+				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 			}
 			break
 		}
 	}
 
+	// 返回验证结果
 	if ctx.HasErrors() {
 		return NewValidationError(ctx.GetErrors())
 	}
+
 	return nil
 }
 
-// ValidateExcept 验证除指定字段外的所有字段
-func (e *ValidatorEngine) ValidateExcept(target any, scene Scene, excludeFields ...string) error {
-	ctx := NewValidationContext(scene, target)
-	if len(excludeFields) > 0 {
-		ctx.WithMetadata("exclude_fields", excludeFields)
+// ValidateFieldsExcept 验证除指定字段外的所有字段
+func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) error {
+	if target == nil || len(fields) == 0 {
+		return nil
 	}
 
-	return e.Validate(target, scene)
+	// 创建验证上下文
+	ctx := NewValidationContext(scene, target)
+	defer ctx.Release()
+
+	// 设置排除验证的字段
+	ctx.WithMetadata("exclude_fields", fields)
+
+	// 只执行规则验证策略
+	for _, strategy := range e.strategies {
+		if strategy.Name() == "rule" {
+			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
+				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
+			}
+			break
+		}
+	}
+
+	// 返回验证结果
+	if ctx.HasErrors() {
+		return NewValidationError(ctx.GetErrors())
+	}
+
+	return nil
 }
 
 // AddStrategy 添加验证策略
@@ -341,8 +260,8 @@ func (e *ValidatorEngine) AddListener(listener ValidationListener) {
 
 // ClearCache 清除缓存
 func (e *ValidatorEngine) ClearCache() {
-	if e.typeRegistry != nil {
-		e.typeRegistry.Clear()
+	if e.registry != nil {
+		e.registry.Clear()
 	}
 }
 
@@ -351,8 +270,8 @@ func (e *ValidatorEngine) Stats() map[string]any {
 	stats := make(map[string]any)
 	stats["strategy_count"] = len(e.strategies)
 	stats["listener_count"] = len(e.listeners)
-	if e.typeRegistry != nil {
-		stats["type_cache_count"] = e.typeRegistry.Stats()
+	if e.registry != nil {
+		stats["register_count"] = e.registry.Stats()
 	}
 	return stats
 }

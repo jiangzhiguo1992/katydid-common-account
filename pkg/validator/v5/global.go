@@ -41,9 +41,9 @@ func ValidateFields(target any, scene Scene, fields ...string) error {
 	return Default().ValidateFields(target, scene, fields...)
 }
 
-// ValidateExcept 使用默认验证器验证排除字段外的所有字段
-func ValidateExcept(target any, scene Scene, fields ...string) error {
-	return Default().ValidateExcept(target, scene, fields...)
+// ValidateFieldsExcept 使用默认验证器验证排除字段外的所有字段
+func ValidateFieldsExcept(target any, scene Scene, fields ...string) error {
+	return Default().ValidateFieldsExcept(target, scene, fields...)
 }
 
 // ClearCache 清除默认验证器的缓存
@@ -77,5 +77,5 @@ func RegisterAlias(alias, tags string) {
 	if len(alias) == 0 || len(tags) == 0 {
 		return
 	}
-	Default().typeRegistry.GetValidator().RegisterAlias(alias, tags)
+	Default().GetValidator().RegisterAlias(alias, tags)
 }

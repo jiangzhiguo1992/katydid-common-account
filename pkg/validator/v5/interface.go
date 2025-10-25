@@ -2,8 +2,6 @@
 // 特性：高内聚低耦合、可扩展、可测试、可维护
 package v5
 
-import "github.com/go-playground/validator/v10"
-
 // 预估的错误消息平均长度，用于优化字符串构建时的内存分配
 // 通过预分配减少内存重新分配次数，提升性能
 const (
@@ -109,8 +107,6 @@ type TypeInfo struct {
 // 职责：管理类型信息缓存
 // 设计原则：依赖倒置 - 高层模块依赖抽象
 type Registry interface {
-	// GetValidator 获取原生validator
-	GetValidator() *validator.Validate
 	// Register 注册类型信息
 	Register(target any) *TypeInfo
 	// Get 获取类型信息
