@@ -2,10 +2,7 @@ package v5
 
 import "sync"
 
-// ============================================================================
-// 全局默认验证器 - 单例模式
-// ============================================================================
-
+// 全局默认验证器实例（单例）
 var (
 	defaultValidator *ValidatorEngine
 	once             sync.Once
@@ -15,8 +12,10 @@ var (
 // 线程安全，延迟初始化
 func Default() *ValidatorEngine {
 	once.Do(func() {
-		factory := NewValidatorFactory()
-		defaultValidator = factory.CreateDefault()
+		if defaultValidator == nil {
+			factory := NewValidatorFactory()
+			defaultValidator = factory.CreateDefault()
+		}
 	})
 	return defaultValidator
 }
@@ -25,6 +24,11 @@ func Default() *ValidatorEngine {
 // 用于自定义全局验证器
 func SetDefault(validator *ValidatorEngine) {
 	defaultValidator = validator
+}
+
+// SetDefaultFormater 设置默认错误格式化器
+func SetDefaultFormater(errorFormatter ErrorFormatter) {
+	Default().errorFormatter = errorFormatter
 }
 
 // Validate 使用默认验证器验证对象

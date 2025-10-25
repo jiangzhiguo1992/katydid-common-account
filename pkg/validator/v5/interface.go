@@ -80,10 +80,10 @@ type ValidationStrategy interface {
 	Priority() int
 }
 
-// ErrorCollector 错误收集器接口
+// ErrorHandler 错误收集器接口
 // 职责：收集和管理验证错误
 // 设计原则：单一职责、接口隔离
-type ErrorCollector interface {
+type ErrorHandler interface {
 	AddError(err *FieldError)
 	AddErrors(errs []*FieldError)
 	GetErrors() []*FieldError
@@ -92,10 +92,23 @@ type ErrorCollector interface {
 	ErrorCount() int
 }
 
-// TypeRegistry 类型注册表接口
+// TypeInfo 类型信息
+// 职责：缓存类型的验证能力信息
+type TypeInfo struct {
+	// IsRuleValidator 是否实现了 RuleValidation
+	IsRuleValidator bool
+	// IsBusinessValidator 是否实现了 BusinessValidation
+	IsBusinessValidator bool
+	// IsLifecycleHooks 是否实现了 LifecycleHooks
+	IsLifecycleHooks bool
+	// Rules 缓存的规则（如果实现了 RuleValidation）
+	Rules map[Scene]map[string]string
+}
+
+// Registry 类型注册表接口
 // 职责：管理类型信息缓存
 // 设计原则：依赖倒置 - 高层模块依赖抽象
-type TypeRegistry interface {
+type Registry interface {
 	// GetValidator 获取原生validator
 	GetValidator() *validator.Validate
 	// Register 注册类型信息
@@ -138,27 +151,4 @@ type ValidationListener interface {
 	OnValidationEnd(ctx *ValidationContext)
 	// OnError 发生错误
 	OnError(ctx *ValidationContext, err *FieldError)
-}
-
-// CacheStrategy 缓存策略接口
-// 职责：定义缓存行为
-// 设计原则：策略模式 - 支持不同缓存实现
-type CacheStrategy interface {
-	Get(key any) (value any, ok bool)
-	Set(key, value any)
-	Delete(key any)
-	Clear()
-}
-
-// TypeInfo 类型信息
-// 职责：缓存类型的验证能力信息
-type TypeInfo struct {
-	// IsRuleValidator 是否实现了 RuleValidation
-	IsRuleValidator bool
-	// IsBusinessValidator 是否实现了 BusinessValidation
-	IsBusinessValidator bool
-	// IsLifecycleHooks 是否实现了 LifecycleHooks
-	IsLifecycleHooks bool
-	// Rules 缓存的规则（如果实现了 RuleValidation）
-	Rules map[Scene]map[string]string
 }
