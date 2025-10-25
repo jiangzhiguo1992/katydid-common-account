@@ -225,6 +225,45 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 	return nil
 }
 
+// validateWithContext 使用已有上下文执行验证（内部方法）
+// 用于嵌套验证场景，保持上下文连续性（如深度信息）
+func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) error {
+	if target == nil || ctx == nil {
+		return nil
+	}
+
+	// 注册类型信息（首次使用时）
+	e.typeRegistry.Register(target)
+
+	// 执行生命周期前钩子
+	if err := e.executeBeforeHooks(target, ctx); err != nil {
+		return err
+	}
+
+	// 按优先级执行所有验证策略
+	for _, strategy := range e.strategies {
+		// 检查是否超过最大错误数 TODO:GG 应该在errAdd的时候加
+		if ctx.ErrorCount() >= e.maxErrors {
+			break
+		}
+
+		// 执行策略，捕获 panic
+		// TODO:GG 嵌套的字段里面，rule+custom还要触发吗，或者是会正确触发吗？
+		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
+			// 策略执行失败，记录错误但继续执行其他策略
+			ctx.AddError(NewFieldError("", strategy.Name()).
+				WithMessage(fmt.Sprintf("strategy %s failed: %v", strategy.Name(), err)))
+		}
+	}
+
+	// 执行生命周期后钩子
+	if err := e.executeAfterHooks(target, ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // ValidateFields 只验证指定字段 TODO:GG 多余?
 func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) error {
 	if len(fields) == 0 {
