@@ -16,17 +16,14 @@ import (
 // 职责：执行基于规则的字段验证（required, min, max等）
 // 设计原则：单一职责 - 只负责规则验证
 type RuleStrategy struct {
-	validate     *validator.Validate
 	sceneMatcher SceneMatcher
 	typeRegistry TypeRegistry
 }
 
 // NewRuleStrategy 创建规则验证策略
 func NewRuleStrategy(sceneMatcher SceneMatcher, typeRegistry TypeRegistry) *RuleStrategy {
-	v := validator.New()
-
 	// 注册自定义标签名函数，使用 json tag 作为字段名
-	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+	typeRegistry.GetValidator().RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		if name == "-" || name == "" {
 			return fld.Name
@@ -35,7 +32,7 @@ func NewRuleStrategy(sceneMatcher SceneMatcher, typeRegistry TypeRegistry) *Rule
 	})
 
 	return &RuleStrategy{
-		validate:     v,
+
 		sceneMatcher: sceneMatcher,
 		typeRegistry: typeRegistry,
 	}
@@ -165,7 +162,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		}
 
 		// 验证字段
-		if err := s.validate.Var(field.Interface(), rule); err != nil {
+		if err := s.typeRegistry.GetValidator().Var(field.Interface(), rule); err != nil {
 			s.addValidationErrors(err, ctx)
 		}
 	}
@@ -177,7 +174,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *ValidationContext) error {
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
-		if err := s.validate.Struct(target); err != nil {
+		if err := s.typeRegistry.GetValidator().Struct(target); err != nil {
 			s.addValidationErrors(err, ctx)
 		}
 		return nil
@@ -189,7 +186,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 		partialFields = append(partialFields, fieldName)
 	}
 
-	if err := s.validate.StructPartial(target, partialFields...); err != nil {
+	if err := s.typeRegistry.GetValidator().StructPartial(target, partialFields...); err != nil {
 		s.addValidationErrors(err, ctx)
 	}
 

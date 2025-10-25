@@ -26,6 +26,7 @@ type ValidationContext struct {
 
 // NewValidationContext 创建验证上下文
 func NewValidationContext(scene Scene, target any) *ValidationContext {
+	// TODO:GG 使用对象池优化
 	return &ValidationContext{
 		Context:        context.Background(),
 		Scene:          scene,
@@ -38,6 +39,7 @@ func NewValidationContext(scene Scene, target any) *ValidationContext {
 
 // AddError 添加错误
 func (vc *ValidationContext) AddError(err *FieldError) {
+	// TODO:GG 控制max
 	if vc.errorCollector != nil {
 		vc.errorCollector.AddError(err)
 	}
@@ -45,6 +47,7 @@ func (vc *ValidationContext) AddError(err *FieldError) {
 
 // AddErrors 批量添加错误
 func (vc *ValidationContext) AddErrors(errs []*FieldError) {
+	// TODO:GG 控制max
 	if vc.errorCollector != nil {
 		vc.errorCollector.AddErrors(errs)
 	}

@@ -3,6 +3,8 @@ package v5
 import (
 	"reflect"
 	"sync"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // ============================================================================
@@ -13,13 +15,21 @@ import (
 // 职责：管理类型信息缓存
 // 设计原则：单一职责、线程安全
 type TypeCacheRegistry struct {
-	cache sync.Map // key: reflect.Type, value: *TypeInfo
-	mu    sync.RWMutex
+	validate *validator.Validate
+	cache    sync.Map // key: reflect.Type, value: *TypeInfo
+	mu       sync.RWMutex
 }
 
 // NewTypeCacheRegistry 创建默认类型注册表
 func NewTypeCacheRegistry() *TypeCacheRegistry {
-	return &TypeCacheRegistry{}
+	return &TypeCacheRegistry{
+		validate: validator.New(),
+		cache:    sync.Map{},
+	}
+}
+
+func (r *TypeCacheRegistry) GetValidator() *validator.Validate {
+	return r.validate
 }
 
 // Register 注册类型信息
@@ -47,7 +57,18 @@ func (r *TypeCacheRegistry) Register(target any) *TypeInfo {
 		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
 		info.Rules = ruleProvider.ValidateRules()
 	}
-	_, info.IsBusinessValidator = target.(BusinessValidation)
+	if _, info.IsBusinessValidator = target.(BusinessValidation); info.IsBusinessValidator {
+		// 注册到底层验证器（用于缓存优化）
+		// 注意：这里提供空回调，实际验证在步骤4执行
+		// 原因：
+		//   1. 避免 scene 被闭包捕获（类型只注册一次，但 scene 每次可能不同）
+		//   2. 确保验证逻辑在步骤4统一执行，使用正确的 scene
+		//   3. 让底层验证器缓存类型元数据，提升性能
+		r.validate.RegisterStructValidation(func(sl validator.StructLevel) {
+			// 空回调：仅用于类型注册和缓存优化
+			// 实际的 CustomValidation 在步骤4中调用
+		}, target)
+	}
 	_, info.IsLifecycleHooks = target.(LifecycleHooks)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）

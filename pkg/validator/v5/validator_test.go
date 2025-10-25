@@ -259,3 +259,152 @@ func BenchmarkValidateParallel(b *testing.B) {
 		}
 	})
 }
+
+const SceneTest Scene = 1 << 0
+
+// Base 基础结构体（嵌入使用）
+type Base struct {
+	ID int `json:"id" validate:"required,gte=1"`
+}
+
+// User 嵌入 Base
+type User struct {
+	Base
+	Email string `json:"email" validate:"required,email"`
+}
+
+// 测试嵌套验证的深度传递和上下文使用
+func TestNestedValidation_ContextUsage(t *testing.T) {
+	factory := NewValidatorFactory()
+	validator := factory.CreateDefault()
+
+	// 测试：嵌套字段验证应该生效
+	t.Run("nested field validation with correct context", func(t *testing.T) {
+		user := &User{
+			Base:  Base{ID: 0}, // 违反规则：应该 >= 1
+			Email: "test@example.com",
+		}
+
+		err := validator.Validate(user, SceneTest)
+		if err == nil {
+			t.Error("expected validation error for nested field ID, got nil")
+		} else {
+			t.Logf("Got expected error: %v", err)
+			if ve, ok := err.(*ValidationError); ok {
+				t.Logf("Error count: %d", len(ve.Errors))
+				for _, e := range ve.Errors {
+					t.Logf("  Field: %s, Tag: %s", e.Namespace, e.Tag)
+				}
+			}
+		}
+	})
+
+	// 测试：正确的数据应该通过
+	t.Run("valid nested data", func(t *testing.T) {
+		user := &User{
+			Base:  Base{ID: 1},
+			Email: "test@example.com",
+		}
+
+		err := validator.Validate(user, SceneTest)
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		} else {
+			t.Log("Validation passed as expected")
+		}
+	})
+}
+
+// 性能测试用的类型定义
+const SceneBench Scene = 1
+
+type BenchTestStruct struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Age   int    `json:"age"`
+}
+
+func (t *BenchTestStruct) ValidateRules() map[Scene]map[string]string {
+	return map[Scene]map[string]string{
+		SceneBench: {
+			"Name":  "required,min=3,max=20",
+			"Email": "required,email",
+			"Age":   "required,gte=18,lte=100",
+		},
+	}
+}
+
+type BenchUser struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Age      int    `json:"age"`
+}
+
+func (u *BenchUser) ValidateRules() map[Scene]map[string]string {
+	return map[Scene]map[string]string{
+		SceneBench: {
+			"Username": "required,min=3,max=20",
+			"Email":    "required,email",
+			"Password": "required,min=6",
+			"Age":      "required,gte=18",
+		},
+	}
+}
+
+// BenchmarkValidation 测试验证器性能
+// 验证 registerStructValidator 的缓存优化效果
+func BenchmarkValidation(b *testing.B) {
+	factory := NewValidatorFactory()
+	validator := factory.CreateDefault()
+
+	data := &BenchTestStruct{
+		Name:  "John Doe",
+		Email: "john@example.com",
+		Age:   25,
+	}
+
+	// 预热：触发类型注册
+	_ = validator.Validate(data, SceneBench)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = validator.Validate(data, SceneBench)
+		}
+	})
+}
+
+// BenchmarkValidationWithCache 测试缓存的效果
+func BenchmarkValidationWithCache(b *testing.B) {
+	factory := NewValidatorFactory()
+	validator := factory.CreateDefault()
+
+	user := &BenchUser{
+		Username: "testuser",
+		Email:    "test@example.com",
+		Password: "password123",
+		Age:      25,
+	}
+
+	// 第一次调用会注册类型
+	b.Run("first_call", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// 每次创建新验证器（模拟冷启动）
+			factory := NewValidatorFactory()
+			validator := factory.CreateDefault()
+			_ = validator.Validate(user, SceneBench)
+		}
+	})
+
+	// 后续调用会命中缓存
+	b.Run("cached_calls", func(b *testing.B) {
+		// 预热
+		_ = validator.Validate(user, SceneBench)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = validator.Validate(user, SceneBench)
+		}
+	})
+}

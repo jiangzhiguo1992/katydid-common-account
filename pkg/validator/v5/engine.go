@@ -56,6 +56,30 @@ func Stats() map[string]any {
 	return Default().Stats()
 }
 
+// RegisterAlias 注册验证标签别名
+// 用途：创建自定义标签别名，简化常用的复杂验证规则
+//
+// 示例：
+//
+//	validator.Default().RegisterAlias("password", "required,min=8,max=50,containsany=!@#$%^&*()")
+//
+//	// 在 RuleValidator 中使用别名
+//	func (u *User) RuleValidation() map[ValidateScene]map[string]string {
+//	    return map[ValidateScene]map[string]string{
+//	        SceneCreate: {"Password": "password"},  // 使用别名
+//	    }
+//	}
+//
+// 参数：
+//   - alias: 别名标签名
+//   - tags: 实际的验证规则字符串
+func RegisterAlias(alias, tags string) {
+	if len(alias) == 0 || len(tags) == 0 {
+		return
+	}
+	Default().typeRegistry.GetValidator().RegisterAlias(alias, tags)
+}
+
 // ============================================================================
 // ValidatorEngine - 验证引擎
 // ============================================================================
