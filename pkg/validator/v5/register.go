@@ -7,33 +7,23 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// ============================================================================
-// TypeRegistry 实现 - 类型注册表
-// ============================================================================
-
-// TypeCacheRegistry 默认类型注册表实现
-// 职责：管理类型信息缓存
-// 设计原则：单一职责、线程安全
-type TypeCacheRegistry struct {
-	validate *validator.Validate
-	cache    sync.Map // key: reflect.Type, value: *TypeInfo
-	mu       sync.RWMutex
+// TypeRegistry 默认类型注册表实现
+type TypeRegistry struct {
+	validator *validator.Validate
+	cache     sync.Map // key: reflect.Type, value: *TypeInfo
+	mu        sync.RWMutex
 }
 
-// NewTypeCacheRegistry 创建默认类型注册表
-func NewTypeCacheRegistry() *TypeCacheRegistry {
-	return &TypeCacheRegistry{
-		validate: validator.New(),
-		cache:    sync.Map{},
+// NewTypeRegistry 创建默认类型注册表
+func NewTypeRegistry(validator *validator.Validate) *TypeRegistry {
+	return &TypeRegistry{
+		validator: validator,
+		cache:     sync.Map{},
 	}
 }
 
-func (r *TypeCacheRegistry) GetValidator() *validator.Validate {
-	return r.validate
-}
-
 // Register 注册类型信息
-func (r *TypeCacheRegistry) Register(target any) *TypeInfo {
+func (r *TypeRegistry) Register(target any) *TypeInfo {
 	if target == nil {
 		return &TypeInfo{}
 	}
@@ -64,7 +54,7 @@ func (r *TypeCacheRegistry) Register(target any) *TypeInfo {
 		//   1. 避免 scene 被闭包捕获（类型只注册一次，但 scene 每次可能不同）
 		//   2. 确保验证逻辑在步骤4统一执行，使用正确的 scene
 		//   3. 让底层验证器缓存类型元数据，提升性能
-		r.validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		r.validator.RegisterStructValidation(func(sl validator.StructLevel) {
 			// 空回调：仅用于类型注册和缓存优化
 			// 实际的 CustomValidation 在步骤4中调用
 		}, target)
@@ -77,7 +67,7 @@ func (r *TypeCacheRegistry) Register(target any) *TypeInfo {
 }
 
 // Get 获取类型信息
-func (r *TypeCacheRegistry) Get(target any) (*TypeInfo, bool) {
+func (r *TypeRegistry) Get(target any) (*TypeInfo, bool) {
 	if target == nil {
 		return nil, false
 	}
@@ -95,12 +85,12 @@ func (r *TypeCacheRegistry) Get(target any) (*TypeInfo, bool) {
 }
 
 // Clear 清除缓存
-func (r *TypeCacheRegistry) Clear() {
+func (r *TypeRegistry) Clear() {
 	r.cache = sync.Map{}
 }
 
 // Stats 获取统计信息
-func (r *TypeCacheRegistry) Stats() int {
+func (r *TypeRegistry) Stats() int {
 	count := 0
 	r.cache.Range(func(key, value interface{}) bool {
 		count++

@@ -35,7 +35,7 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 	engine := &ValidatorEngine{
 		validator:      v,
 		sceneMatcher:   NewSceneBitMatcher(),
-		registry:       NewTypeCacheRegistry(v),
+		registry:       NewTypeRegistry(v),
 		strategies:     make([]ValidationStrategy, 0),
 		listeners:      make([]ValidationListener, 0),
 		errorFormatter: NewDefaultErrorFormatter(),
