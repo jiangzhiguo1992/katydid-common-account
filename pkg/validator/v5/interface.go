@@ -27,3 +27,14 @@ type LifecycleHooks interface {
 	// AfterValidation 验证后执行
 	AfterValidation(ctx *ValidationContext) error
 }
+
+// ValidationListener 验证监听器接口
+// 职责：监听验证过程中的事件（观察者模式）
+type ValidationListener interface {
+	// OnValidationStart 验证开始
+	OnValidationStart(ctx *ValidationContext)
+	// OnValidationEnd 验证结束
+	OnValidationEnd(ctx *ValidationContext)
+	// OnError 发生错误
+	OnError(ctx *ValidationContext, err *FieldError)
+}

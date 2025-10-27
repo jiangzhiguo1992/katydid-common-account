@@ -378,25 +378,19 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 
 		// 只处理匿名（嵌入）的结构体字段
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
-			// 创建子上下文，保持深度和上下文信息
-			subCtx := NewValidationContext(ctx.Scene).WithContext(ctx.Context).WithErrors(ctx.errors)
-			subCtx.Depth = ctx.Depth + 1
-			// 复制元数据
-			if ctx.Metadata != nil {
-				subCtx.Metadata = make(map[string]any)
-				for k, v := range ctx.Metadata {
-					subCtx.Metadata[k] = v
-				}
-			}
-
 			// 超过最大深度，记录错误并停止验证
-			if ctx.Depth > s.maxDepth {
+			if ctx.Depth >= s.maxDepth {
 				ctx.AddError(
 					NewFieldError("Struct", "max_depth").
 						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
 				)
 				break
 			}
+
+			// 创建子上下文，保持深度和上下文信息
+			subCtx := NewValidationContext(ctx.Scene).WithContext(ctx.Context).WithErrors(ctx.errors)
+			subCtx.Depth = ctx.Depth + 1
+			subCtx.Metadata = ctx.Metadata
 
 			// 使用子上下文进行递归验证
 			fieldValue := field.Interface()
