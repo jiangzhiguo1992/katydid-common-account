@@ -4,13 +4,22 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"unsafe"
+)
+
+const (
+	// errorMessageEstimatedLength 预估的错误消息平均长度，用于优化字符串构建时的内存分配
+	errorMessageEstimatedLength = 80
+
+	// maxErrorsCapacity TODO:GG 错误列表的最大容量，防止恶意数据导致内存溢出
+	maxErrorsCapacity = 1000
+
+	// maxParamLength TODO:GG 最大参数长度，防止超长参数攻击
+	maxParamLength = 256
 )
 
 // FieldError 字段错误
 // 职责：描述单个字段的验证错误
-// TODO:GG 检查所有构造函数params
 type FieldError struct {
 	// Namespace 字段的完整命名空间路径（如 User.Profile.Email）
 	// 用于嵌套结构体的错误定位，支持复杂对象的精确错误追踪
@@ -34,13 +43,16 @@ type FieldError struct {
 
 // NewFieldError 创建字段错误
 func NewFieldError(namespace, tag string) *FieldError {
-	// 防御性编程：安全检查并截断超长字段
-	namespace = truncateString(namespace, maxNamespaceLength)
-	tag = truncateString(tag, maxTagLength)
-
 	return &FieldError{
 		Namespace: namespace,
 		Tag:       tag,
+	}
+}
+
+// NewFieldErrorWithMsg 创建仅带消息的字段错误
+func NewFieldErrorWithMsg(message string) *FieldError {
+	return &FieldError{
+		Message: message,
 	}
 }
 
@@ -52,8 +64,8 @@ func (fe *FieldError) WithParam(param string) *FieldError {
 
 // WithValue 设置值
 func (fe *FieldError) WithValue(value any) *FieldError {
-	// 安全检查：值大小限制
-	if estimateValueSize(value) > maxValueSize {
+	// 最大值大小（字节），防止存储过大的值导致内存问题
+	if estimateValueSize(value) > 4096 {
 		fe.Value = nil
 		return fe
 	}
@@ -63,8 +75,7 @@ func (fe *FieldError) WithValue(value any) *FieldError {
 
 // WithMessage 设置消息
 func (fe *FieldError) WithMessage(message string) *FieldError {
-	// 安全检查：截断超长消息
-	fe.Message = truncateString(message, maxMessageLength)
+	fe.Message = truncateString(message, 2048)
 	return fe
 }
 
@@ -98,33 +109,6 @@ func (fe *FieldError) Error() string {
 	}
 
 	return "field validation failed"
-}
-
-// ValidationError 验证错误集合
-// 职责：包装多个字段错误
-type ValidationError struct {
-	Errors []*FieldError
-}
-
-// NewValidationError 创建验证错误
-func NewValidationError(errs []*FieldError) *ValidationError {
-	return &ValidationError{Errors: errs}
-}
-
-// Error 实现 error 接口
-func (ve *ValidationError) Error() string {
-	if len(ve.Errors) == 0 {
-		return "validation passed"
-	}
-	if len(ve.Errors) == 1 {
-		return ve.Errors[0].Error()
-	}
-	return "validation failed with " + string(rune(len(ve.Errors))) + " errors"
-}
-
-// HasErrors 是否有错误
-func (ve *ValidationError) HasErrors() bool {
-	return len(ve.Errors) > 0
 }
 
 // truncateString 安全截断字符串，防止超长攻击
@@ -171,113 +155,52 @@ func estimateValueSize(v any) int {
 	}
 }
 
-// ============================================================================
-// ErrorCollector 实现 - 错误收集器
-// ============================================================================
-
-// DefaultErrorCollector 默认错误收集器
-// 职责：收集和管理验证错误
-// 设计原则：单一职责、线程安全
-type DefaultErrorCollector struct {
-	errors   []*FieldError
-	mu       sync.RWMutex
-	maxCount int
+// ValidationError 验证错误集合
+// 职责：包装多个字段错误
+type ValidationError struct {
+	msg    string
+	errors []*FieldError
 }
 
-// NewDefaultErrorCollector 创建默认错误收集器
-func NewDefaultErrorCollector() *DefaultErrorCollector {
-	return &DefaultErrorCollector{
-		errors:   make([]*FieldError, 0, 8),
-		maxCount: 1000,
-	}
+// NewValidationError 创建验证错误
+func NewValidationError(errs []*FieldError) *ValidationError {
+	return &ValidationError{errors: errs}
 }
 
-// NewErrorCollectorWithLimit 创建带限制的错误收集器
-func NewErrorCollectorWithLimit(maxCount int) *DefaultErrorCollector {
-	return &DefaultErrorCollector{
-		errors:   make([]*FieldError, 0, 8),
-		maxCount: maxCount,
-	}
+// NewValidationErrorWithMsg 创建验证错误
+func NewValidationErrorWithMsg(msg string) *ValidationError {
+	return &ValidationError{msg: msg}
 }
 
-// AddError 添加错误
-func (c *DefaultErrorCollector) AddError(err *FieldError) {
-	if err == nil {
-		return
+// Error 实现 error 接口
+func (ve *ValidationError) Error() string {
+	if len(ve.errors) == 0 {
+		if len(ve.msg) > 0 {
+			return ve.msg
+		}
+		return "validation passed"
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// 检查是否达到上限
-	if len(c.errors) >= c.maxCount {
-		return
+	if len(ve.errors) == 1 {
+		return ve.errors[0].Error()
 	}
-
-	c.errors = append(c.errors, err)
-}
-
-// AddErrors 批量添加错误
-func (c *DefaultErrorCollector) AddErrors(errs []*FieldError) {
-	if len(errs) == 0 {
-		return
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// 计算可添加的数量
-	remaining := c.maxCount - len(c.errors)
-	if remaining <= 0 {
-		return
-	}
-
-	if len(errs) > remaining {
-		errs = errs[:remaining]
-	}
-
-	c.errors = append(c.errors, errs...)
-}
-
-// GetErrors 获取所有错误
-func (c *DefaultErrorCollector) GetErrors() []*FieldError {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// 返回副本，避免外部修改
-	result := make([]*FieldError, len(c.errors))
-	copy(result, c.errors)
-	return result
+	return "validation failed with " + string(rune(len(ve.errors))) + " errors"
 }
 
 // HasErrors 是否有错误
-func (c *DefaultErrorCollector) HasErrors() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.errors) > 0
+func (ve *ValidationError) HasErrors() bool {
+	return len(ve.errors) > 0
 }
 
-// Clear 清除错误
-func (c *DefaultErrorCollector) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.errors = c.errors[:0]
+// ErrorFormatter 错误格式化器接口
+// 职责：格式化错误信息
+type ErrorFormatter interface {
+	// Format 格式化单个错误
+	Format(err *FieldError) string
+	// FormatAll 格式化所有错误
+	FormatAll(errs []*FieldError) string
 }
-
-// ErrorCount 错误数量
-func (c *DefaultErrorCollector) ErrorCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.errors)
-}
-
-// ============================================================================
-// ErrorFormatter 实现 - 错误格式化器
-// ============================================================================
 
 // DefaultErrorFormatter 默认错误格式化器
-// 职责：格式化错误信息
-// 设计原则：单一职责
 type DefaultErrorFormatter struct{}
 
 // NewDefaultErrorFormatter 创建默认错误格式化器
@@ -291,44 +214,113 @@ func (f *DefaultErrorFormatter) Format(err *FieldError) string {
 		return ""
 	}
 
-	if err.Message != "" {
+	// 优先使用自定义消息
+	if len(err.Message) > 0 {
 		return err.Message
 	}
 
-	if err.Param != "" {
-		return "field '" + err.Namespace + "' failed validation on tag '" + err.Tag + "' with param '" + err.Param + "'"
+	// 生成默认消息
+	var builder strings.Builder
+	builder.Grow(errorMessageEstimatedLength)
+
+	if len(err.Namespace) > 0 {
+		builder.WriteString("字段 '")
+		builder.WriteString(err.Namespace)
+		builder.WriteString("' ")
 	}
 
-	return "field '" + err.Namespace + "' failed validation on tag '" + err.Tag + "'"
+	builder.WriteString("验证失败")
+
+	if len(err.Tag) > 0 {
+		builder.WriteString("，规则: ")
+		builder.WriteString(err.Tag)
+	}
+
+	if len(err.Param) > 0 {
+		builder.WriteString("，参数: ")
+		builder.WriteString(err.Param)
+	}
+
+	if err.Value != nil {
+		builder.WriteString("，值: ")
+		builder.WriteString(fmt.Sprintf("%v", err.Value))
+	}
+
+	return builder.String()
 }
 
 // FormatAll 格式化所有错误
 func (f *DefaultErrorFormatter) FormatAll(errs []*FieldError) string {
 	if len(errs) == 0 {
-		return "validation passed"
+		return "验证通过"
 	}
 
 	if len(errs) == 1 {
 		return f.Format(errs[0])
 	}
 
-	var result string
-	maxDisplay := 10
-	displayCount := len(errs)
-	if displayCount > maxDisplay {
-		displayCount = maxDisplay
+	var builder strings.Builder
+	builder.Grow(len(errs) * errorMessageEstimatedLength)
+
+	builder.WriteString(fmt.Sprintf("验证失败，共 %d 个错误:\n", len(errs)))
+
+	for i, err := range errs {
+		builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, f.Format(err)))
 	}
 
-	for i := 0; i < displayCount; i++ {
-		if i > 0 {
-			result += "; "
-		}
-		result += f.Format(errs[i])
-	}
-
-	if len(errs) > maxDisplay {
-		result += "; ... and more errors"
-	}
-
-	return result
+	return builder.String()
 }
+
+// JSONErrorFormatter JSON错误格式化器
+// 职责：将错误格式化为JSON格式
+type JSONErrorFormatter struct{}
+
+// NewJSONErrorFormatter 创建JSON错误格式化器
+func NewJSONErrorFormatter() *JSONErrorFormatter {
+	return &JSONErrorFormatter{}
+}
+
+// Format 格式化单个错误为JSON字符串
+func (f *JSONErrorFormatter) Format(err *FieldError) string {
+	if err == nil {
+		return "{}"
+	}
+
+	var builder strings.Builder
+	builder.WriteString("{")
+	builder.WriteString(fmt.Sprintf(`"namespace":"%s"`, err.Namespace))
+	builder.WriteString(fmt.Sprintf(`,"tag":"%s"`, err.Tag))
+
+	if len(err.Param) > 0 {
+		builder.WriteString(fmt.Sprintf(`,"param":"%s"`, err.Param))
+	}
+
+	if len(err.Message) > 0 {
+		builder.WriteString(fmt.Sprintf(`,"message":"%s"`, err.Message))
+	}
+
+	builder.WriteString("}")
+	return builder.String()
+}
+
+// FormatAll 格式化所有错误为JSON数组
+func (f *JSONErrorFormatter) FormatAll(errs []*FieldError) string {
+	if len(errs) == 0 {
+		return "[]"
+	}
+
+	var builder strings.Builder
+	builder.WriteString("[")
+
+	for i, err := range errs {
+		if i > 0 {
+			builder.WriteString(",")
+		}
+		builder.WriteString(f.Format(err))
+	}
+
+	builder.WriteString("]")
+	return builder.String()
+}
+
+// TODO:GG 再来个国际化fomteer，外部注册?
