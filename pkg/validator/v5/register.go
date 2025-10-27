@@ -35,7 +35,6 @@ type Registry interface {
 type TypeRegistry struct {
 	validator *validator.Validate
 	cache     sync.Map // key: reflect.Type, value: *TypeInfo
-	mu        sync.RWMutex
 }
 
 // NewTypeRegistry 创建默认类型注册表

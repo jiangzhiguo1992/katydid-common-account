@@ -8,22 +8,38 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// ============================================================================
-// 验证策略实现
-// ============================================================================
+type StrategyType int8
+
+const (
+	StrategyTypeRule StrategyType = iota + 1
+	StrategyTypeBusiness
+	StrategyTypeNested
+)
+
+// ValidationStrategy 验证策略接口
+// 职责：定义具体的验证策略
+// 设计原则：策略模式 - 支持不同的验证策略
+type ValidationStrategy interface {
+	// Type 策略类型
+	Type() StrategyType
+	// Priority 优先级（数字越小优先级越高）
+	Priority() int8
+	// Validate 执行验证
+	Validate(target any, ctx *ValidationContext) error
+}
 
 // RuleStrategy 规则验证策略
 // 职责：执行基于规则的字段验证（required, min, max等）
-// 设计原则：单一职责 - 只负责规则验证
 type RuleStrategy struct {
+	validator    *validator.Validate
 	sceneMatcher SceneMatcher
-	typeRegistry TypeRegistry
+	registry     Registry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(sceneMatcher SceneMatcher, typeRegistry TypeRegistry) *RuleStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher SceneMatcher, registry Registry) *RuleStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
-	typeRegistry.GetValidator().RegisterTagNameFunc(func(fld reflect.StructField) string {
+	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		if name == "-" || name == "" {
 			return fld.Name
@@ -32,19 +48,19 @@ func NewRuleStrategy(sceneMatcher SceneMatcher, typeRegistry TypeRegistry) *Rule
 	})
 
 	return &RuleStrategy{
-
+		validator:    validator,
 		sceneMatcher: sceneMatcher,
-		typeRegistry: typeRegistry,
+		registry:     registry,
 	}
 }
 
-// Name 策略名称
-func (s *RuleStrategy) Name() string {
-	return "rule"
+// Type 策略类型
+func (s *RuleStrategy) Type() StrategyType {
+	return StrategyTypeRule
 }
 
 // Priority 优先级（最高）
-func (s *RuleStrategy) Priority() int {
+func (s *RuleStrategy) Priority() int8 {
 	return 10
 }
 
@@ -56,9 +72,9 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 
 	// 获取场景规则
 	var sceneRules map[Scene]map[string]string
-	if s.typeRegistry != nil {
+	if s.registry != nil {
 		// 从缓存中获取类型信息，直接使用
-		if typeInfo := s.typeRegistry.Register(target); typeInfo != nil {
+		if typeInfo := s.registry.Register(target); typeInfo != nil {
 			sceneRules = typeInfo.Rules
 		}
 	} else {
@@ -74,35 +90,22 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 		return nil
 	}
 
-	// 是否需要特定规则
-	var partial bool
-
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata("validate_fields"); ok {
+	if fields, ok := ctx.GetMetadata(metadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok && (len(fieldList) > 0) {
-			partial = true
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata("exclude_fields"); ok {
+	if excludeFields, ok := ctx.GetMetadata(metadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok && (len(fieldList) > 0) {
-			partial = true
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
 	}
 
-	if len(rules) > 0 {
-		return s.validateByRules(target, rules, ctx)
-	}
-
-	// 没有实现接口，使用 struct tag 验证
-	if partial {
-		return s.validateByTags(target, rules, ctx)
-	} else {
-		return s.validateByTags(target, nil, ctx)
-	}
+	// 没必要validateByTags了，直接走 validateByRules(性能更好)
+	return s.validateByRules(target, rules, ctx)
 }
 
 // validateByRules 使用 RuleValidation 提供的规则验证
@@ -112,14 +115,14 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata("validate_fields"); ok {
+	if fields, ok := ctx.GetMetadata(metadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata("exclude_fields"); ok {
+	if excludeFields, ok := ctx.GetMetadata(metadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -162,7 +165,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		}
 
 		// 验证字段
-		if err := s.typeRegistry.GetValidator().Var(field.Interface(), rule); err != nil {
+		if err := s.validator.Var(field.Interface(), rule); err != nil {
 			s.addValidationErrors(err, ctx)
 		}
 	}
@@ -174,7 +177,8 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *ValidationContext) error {
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
-		if err := s.typeRegistry.GetValidator().Struct(target); err != nil {
+		// Struct()内部本质还是validator.Var()
+		if err := s.validator.Struct(target); err != nil {
 			s.addValidationErrors(err, ctx)
 		}
 		return nil
@@ -186,7 +190,8 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 		partialFields = append(partialFields, fieldName)
 	}
 
-	if err := s.typeRegistry.GetValidator().StructPartial(target, partialFields...); err != nil {
+	// StructPartial()内部本质还是validator.Var()
+	if err := s.validator.StructPartial(target, partialFields...); err != nil {
 		s.addValidationErrors(err, ctx)
 	}
 
@@ -274,7 +279,6 @@ func (s *RuleStrategy) findFieldByJSONTag(val reflect.Value, jsonTag string) ref
 
 // BusinessStrategy 业务验证策略
 // 职责：执行业务逻辑验证
-// 设计原则：单一职责
 type BusinessStrategy struct{}
 
 // NewBusinessStrategy 创建业务验证策略
@@ -282,13 +286,13 @@ func NewBusinessStrategy() *BusinessStrategy {
 	return &BusinessStrategy{}
 }
 
-// Name 策略名称
-func (s *BusinessStrategy) Name() string {
-	return "business"
+// Type 策略类型
+func (s *BusinessStrategy) Type() StrategyType {
+	return StrategyTypeBusiness
 }
 
 // Priority 优先级
-func (s *BusinessStrategy) Priority() int {
+func (s *BusinessStrategy) Priority() int8 {
 	return 30
 }
 
@@ -314,7 +318,6 @@ func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
 
 // NestedStrategy 嵌套验证策略
 // 职责：递归验证嵌套的结构体
-// 设计原则：单一职责、递归处理
 type NestedStrategy struct {
 	engine   *ValidatorEngine
 	maxDepth int
@@ -328,13 +331,13 @@ func NewNestedStrategy(engine *ValidatorEngine, maxDepth int) *NestedStrategy {
 	}
 }
 
-// Name 策略名称
-func (s *NestedStrategy) Name() string {
-	return "nested"
+// Type 策略类型
+func (s *NestedStrategy) Type() StrategyType {
+	return StrategyTypeNested
 }
 
 // Priority 优先级
-func (s *NestedStrategy) Priority() int {
+func (s *NestedStrategy) Priority() int8 {
 	return 20
 }
 

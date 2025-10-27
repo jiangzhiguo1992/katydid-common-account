@@ -191,7 +191,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	defer ctx.Release()
 
 	// 设置需要验证的字段
-	ctx.WithMetadata("validate_fields", fields)
+	ctx.WithMetadata(metadataKeyValidateFields, fields)
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
@@ -222,7 +222,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 	defer ctx.Release()
 
 	// 设置排除验证的字段
-	ctx.WithMetadata("exclude_fields", fields)
+	ctx.WithMetadata(metadataKeyExcludeFields, fields)
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
