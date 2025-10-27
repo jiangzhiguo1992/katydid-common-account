@@ -166,7 +166,6 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 		}
 
 		// 执行策略，捕获 panic
-		// TODO:GG 嵌套的字段里面，rule+custom还要触发吗，或者是会正确触发吗？
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 策略执行失败，记录错误但继续执行其他策略
 			ctx.AddError(NewFieldErrorWithMsg(err.Error()))
@@ -196,7 +195,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
-		if strategy.Name() == "rule" {
+		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 			}
@@ -227,7 +226,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
-		if strategy.Name() == "rule" {
+		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 			}

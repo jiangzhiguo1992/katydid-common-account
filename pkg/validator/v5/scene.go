@@ -24,6 +24,14 @@ func (s Scene) Remove(scene Scene) Scene {
 	return s &^ scene
 }
 
+// SceneMatcher 场景匹配器接口
+type SceneMatcher interface {
+	// Match 判断场景是否匹配
+	Match(current, target Scene) bool
+	// MatchRules 匹配并合并规则
+	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
+}
+
 // SceneBitMatcher 位运算场景匹配器
 type SceneBitMatcher struct{}
 

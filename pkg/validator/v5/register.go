@@ -7,6 +7,30 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// TypeInfo 类型信息，缓存类型的验证能力信息
+type TypeInfo struct {
+	// IsRuleValidator 是否实现了 RuleValidation
+	IsRuleValidator bool
+	// IsBusinessValidator 是否实现了 BusinessValidation
+	IsBusinessValidator bool
+	// IsLifecycleHooks 是否实现了 LifecycleHooks
+	IsLifecycleHooks bool
+	// Rules 缓存的规则（如果实现了 RuleValidation）
+	Rules map[Scene]map[string]string
+}
+
+// Registry 类型注册表接口
+type Registry interface {
+	// Register 注册类型信息
+	Register(target any) *TypeInfo
+	// Get 获取类型信息
+	Get(target any) (*TypeInfo, bool)
+	// Clear 清除缓存
+	Clear()
+	// Stats 获取统计信息
+	Stats() (count int)
+}
+
 // TypeRegistry 默认类型注册表实现
 type TypeRegistry struct {
 	validator *validator.Validate

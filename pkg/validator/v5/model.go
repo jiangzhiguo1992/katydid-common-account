@@ -1,0 +1,29 @@
+package v5
+
+// RuleValidation 规则验证器接口
+// 职责：提供字段级别的验证规则（required, min, max等）
+// 设计原则：单一职责 - 只负责提供规则，不执行验证
+type RuleValidation interface {
+	// ValidateRules 获取指定场景的验证规则
+	// 返回格式：map[场景]map[字段名]规则字符串
+	ValidateRules() map[Scene]map[string]string
+}
+
+// BusinessValidation 自定义验证器接口
+// 职责：执行复杂的业务逻辑验证（跨字段、数据库检查等）
+// 设计原则：单一职责 - 只负责业务逻辑验证
+type BusinessValidation interface {
+	// ValidateBusiness 执行业务验证
+	// 通过 ctx.AddError 添加错误
+	ValidateBusiness(scene Scene, ctx *ValidationContext) error
+}
+
+// LifecycleHooks 生命周期钩子接口
+// 职责：在验证前后执行自定义逻辑
+// 设计原则：开放封闭 - 通过钩子扩展功能
+type LifecycleHooks interface {
+	// BeforeValidation 验证前执行
+	BeforeValidation(ctx *ValidationContext) error
+	// AfterValidation 验证后执行
+	AfterValidation(ctx *ValidationContext) error
+}

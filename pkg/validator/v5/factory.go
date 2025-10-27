@@ -20,7 +20,7 @@ func (f *ValidatorFactory) CreateDefault() *ValidatorEngine {
 	engine := NewValidatorEngine()
 
 	// 添加标准策略
-	engine.AddStrategy(NewRuleStrategy(engine.sceneMatcher, engine.registry))
+	engine.AddStrategy(NewRuleStrategy(engine.validator, engine.sceneMatcher, engine.registry))
 	engine.AddStrategy(NewBusinessStrategy())
 	engine.AddStrategy(NewNestedStrategy(engine, engine.maxDepth))
 
@@ -33,7 +33,7 @@ func (f *ValidatorFactory) CreateMinimal() *ValidatorEngine {
 	engine := NewValidatorEngine()
 
 	// 只包含规则验证策略
-	engine.AddStrategy(NewRuleStrategy(engine.sceneMatcher, engine.registry))
+	engine.AddStrategy(NewRuleStrategy(engine.validator, engine.sceneMatcher, engine.registry))
 
 	return engine
 }
