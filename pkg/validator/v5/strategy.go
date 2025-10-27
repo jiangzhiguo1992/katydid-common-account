@@ -378,12 +378,9 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 
 		// 只处理匿名（嵌入）的结构体字段
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
-			fieldValue := field.Interface()
-
 			// 创建子上下文，保持深度和上下文信息
-			subCtx := NewValidationContext(ctx.Scene, fieldValue)
+			subCtx := NewValidationContext(ctx.Scene).WithContext(ctx.Context).WithErrors(ctx.errors)
 			subCtx.Depth = ctx.Depth + 1
-			subCtx.Context = ctx.Context
 			// 复制元数据
 			if ctx.Metadata != nil {
 				subCtx.Metadata = make(map[string]any)
@@ -402,6 +399,7 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 			}
 
 			// 使用子上下文进行递归验证
+			fieldValue := field.Interface()
 			if err := s.engine.validateWithContext(fieldValue, subCtx); err != nil {
 				// 如果返回错误，直接中断
 				return err

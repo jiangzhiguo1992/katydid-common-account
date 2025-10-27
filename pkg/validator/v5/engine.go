@@ -123,7 +123,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene, target)
+	ctx := NewValidationContext(scene)
 	defer ctx.Release()
 
 	// 触发验证开始事件
@@ -184,7 +184,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene, target)
+	ctx := NewValidationContext(scene)
 	defer ctx.Release()
 
 	// 设置需要验证的字段
@@ -219,7 +219,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene, target)
+	ctx := NewValidationContext(scene)
 	defer ctx.Release()
 
 	// 设置排除验证的字段
