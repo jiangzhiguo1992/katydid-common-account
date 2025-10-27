@@ -3,6 +3,7 @@ package v5
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // ErrorFormatter 错误格式化器接口
@@ -34,7 +35,9 @@ func (f *DefaultErrorFormatter) Format(err *FieldError) string {
 	}
 
 	// 生成默认消息
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.Grow(errorMessageEstimatedLength)
 
 	if len(err.Namespace) > 0 {
@@ -73,7 +76,9 @@ func (f *DefaultErrorFormatter) FormatAll(errs []*FieldError) string {
 		return f.Format(errs[0])
 	}
 
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.Grow(len(errs) * errorMessageEstimatedLength)
 
 	builder.WriteString(fmt.Sprintf("验证失败，共 %d 个错误:\n", len(errs)))
@@ -100,7 +105,9 @@ func (f *JSONErrorFormatter) Format(err *FieldError) string {
 		return "{}"
 	}
 
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.WriteString("{")
 	builder.WriteString(fmt.Sprintf(`"namespace":"%s"`, err.Namespace))
 	builder.WriteString(fmt.Sprintf(`,"tag":"%s"`, err.Tag))
@@ -123,7 +130,9 @@ func (f *JSONErrorFormatter) FormatAll(errs []*FieldError) string {
 		return "[]"
 	}
 
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.WriteString("[")
 
 	for i, err := range errs {
@@ -153,7 +162,9 @@ func (f *LocalizesErrorFormatter) Format(err *FieldError) string {
 	}
 
 	// 生成国际化模板消息
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.Grow(errorMessageEstimatedLength / 2)
 
 	if len(err.Namespace) > 0 && len(err.Tag) > 0 {
@@ -177,7 +188,9 @@ func (f *LocalizesErrorFormatter) FormatAll(errs []*FieldError) string {
 		return ""
 	}
 
-	var builder strings.Builder
+	builder := acquireStringBuilder()
+	releaseStringBuilder(builder)
+
 	builder.Grow(len(errs) * (errorMessageEstimatedLength / 2))
 
 	for i, err := range errs {
@@ -188,4 +201,32 @@ func (f *LocalizesErrorFormatter) FormatAll(errs []*FieldError) string {
 	}
 
 	return builder.String()
+}
+
+var stringBuilderPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
+
+// acquireStringBuilder 从对象池获取字符串构建器
+func acquireStringBuilder() *strings.Builder {
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
+	return sb
+}
+
+// releaseStringBuilder 归还字符串构建器到对象池
+func releaseStringBuilder(sb *strings.Builder) {
+	if sb == nil {
+		return
+	}
+
+	// 防止内存泄漏：不归还过大的Builder
+	if sb.Cap() > 10*1024 { // 超过10KB
+		return
+	}
+
+	sb.Reset()
+	stringBuilderPool.Put(sb)
 }
