@@ -270,41 +270,6 @@ func (s *RuleStrategy) findFieldByJSONTag(val reflect.Value, jsonTag string) ref
 }
 
 // ============================================================================
-// BusinessStrategy 业务验证策略
-// ============================================================================
-
-// BusinessStrategy 业务验证策略
-// 职责：执行业务逻辑验证
-type BusinessStrategy struct{}
-
-// NewBusinessStrategy 创建业务验证策略
-func NewBusinessStrategy() *BusinessStrategy {
-	return &BusinessStrategy{}
-}
-
-// Type 策略类型
-func (s *BusinessStrategy) Type() StrategyType {
-	return StrategyTypeBusiness
-}
-
-// Priority 优先级
-func (s *BusinessStrategy) Priority() int8 {
-	return 30
-}
-
-// Validate 执行业务验证
-func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
-	// 检查是否实现了 BusinessValidation 接口
-	valid, ok := target.(BusinessValidation)
-	if !ok {
-		return nil
-	}
-
-	// 执行业务验证 (外部利用ctx来AddError)
-	return valid.ValidateBusiness(ctx.Scene, ctx)
-}
-
-// ============================================================================
 // NestedStrategy 嵌套验证策略
 // ============================================================================
 
@@ -407,4 +372,39 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 	}
 
 	return nil
+}
+
+// ============================================================================
+// BusinessStrategy 业务验证策略
+// ============================================================================
+
+// BusinessStrategy 业务验证策略
+// 职责：执行业务逻辑验证
+type BusinessStrategy struct{}
+
+// NewBusinessStrategy 创建业务验证策略
+func NewBusinessStrategy() *BusinessStrategy {
+	return &BusinessStrategy{}
+}
+
+// Type 策略类型
+func (s *BusinessStrategy) Type() StrategyType {
+	return StrategyTypeBusiness
+}
+
+// Priority 优先级
+func (s *BusinessStrategy) Priority() int8 {
+	return 30
+}
+
+// Validate 执行业务验证
+func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
+	// 检查是否实现了 BusinessValidation 接口
+	valid, ok := target.(BusinessValidation)
+	if !ok {
+		return nil
+	}
+
+	// 执行业务验证 (外部利用ctx来AddError)
+	return valid.ValidateBusiness(ctx.Scene, ctx)
 }
