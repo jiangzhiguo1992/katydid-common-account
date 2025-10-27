@@ -1,6 +1,7 @@
 package v5
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -197,7 +198,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		ctx.AddError(NewFieldErrorWithMsg(err.Error()))
+		ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 		return
 	}
 
@@ -389,6 +390,15 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 				for k, v := range ctx.Metadata {
 					subCtx.Metadata[k] = v
 				}
+			}
+
+			// 超过最大深度，记录错误并停止验证
+			if ctx.Depth > s.maxDepth {
+				ctx.AddError(
+					NewFieldError("Struct", "max_depth").
+						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
+				)
+				break
 			}
 
 			// 使用子上下文进行递归验证

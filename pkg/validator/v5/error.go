@@ -43,8 +43,8 @@ func NewFieldError(namespace, tag string) *FieldError {
 	}
 }
 
-// NewFieldErrorWithMsg 创建仅带消息的字段错误
-func NewFieldErrorWithMsg(message string) *FieldError {
+// NewFieldErrorWithMessage 创建仅带消息的字段错误
+func NewFieldErrorWithMessage(message string) *FieldError {
 	return &FieldError{
 		Message: message,
 	}
@@ -152,25 +152,54 @@ func estimateValueSize(v any) int {
 // ValidationError 验证错误集合
 // 职责：包装多个字段错误
 type ValidationError struct {
-	msg    string
-	errors []*FieldError
+	formatter ErrorFormatter
+	message   string
+	errors    []*FieldError
 }
 
 // NewValidationError 创建验证错误
-func NewValidationError(errs []*FieldError) *ValidationError {
-	return &ValidationError{errors: errs}
+func NewValidationError(formatter ErrorFormatter) *ValidationError {
+	return &ValidationError{formatter: formatter}
 }
 
-// NewValidationErrorWithMsg 创建验证错误
-func NewValidationErrorWithMsg(msg string) *ValidationError {
-	return &ValidationError{msg: msg}
+// WithMessage 设置消息
+func (ve *ValidationError) WithMessage(message string) *ValidationError {
+	ve.message = message
+	return ve
+}
+
+// WithError 添加单个错误
+func (ve *ValidationError) WithError(err *FieldError) *ValidationError {
+	ve.errors = append(ve.errors, err)
+	return ve
+}
+
+// WithErrors 添加多个错误
+func (ve *ValidationError) WithErrors(errs []*FieldError) *ValidationError {
+	ve.errors = errs
+	return ve
+}
+
+// FormatterAll 格式化所有错误
+func (ve *ValidationError) FormatterAll() []string {
+	var formatters []string
+
+	for _, err := range ve.errors {
+		if err == nil {
+			continue
+		}
+		format := ve.formatter.Format(err)
+		formatters = append(formatters, format)
+	}
+
+	return formatters
 }
 
 // Error 实现 error 接口
 func (ve *ValidationError) Error() string {
 	if len(ve.errors) == 0 {
-		if len(ve.msg) > 0 {
-			return ve.msg
+		if len(ve.message) > 0 {
+			return ve.message
 		}
 		return "validation passed"
 	}

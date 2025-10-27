@@ -118,7 +118,8 @@ func (e *ValidatorEngine) GetValidator() *validator.Validate {
 // 职责：编排整个验证流程
 func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	if target == nil {
-		return NewValidationError([]*FieldError{NewFieldError("Struct", "required")})
+		return NewValidationError(e.errorFormatter).
+			WithError(NewFieldError("Struct", "required"))
 	}
 
 	// 创建验证上下文
@@ -129,14 +130,16 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	e.notifyValidationStart(ctx)
 
 	// 执行验证
-	_ = e.validateWithContext(target, ctx)
+	err := e.validateWithContext(target, ctx)
 
 	// 触发验证结束事件
 	e.notifyValidationEnd(ctx)
 
 	// 返回验证结果
-	if ctx.HasErrors() {
-		return NewValidationError(ctx.GetErrors())
+	if err != nil {
+		return err
+	} else if ctx.HasErrors() {
+		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil
@@ -145,21 +148,12 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 // validateWithContext 使用已有上下文执行验证（内部方法）
 // 还可用于嵌套验证场景，保持上下文连续性（如深度信息）
 func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) *ValidationError {
-	// 超过最大深度，记录错误并停止验证
-	if ctx.Depth > e.maxDepth {
-		ctx.AddError(
-			NewFieldError("Struct", "max_depth").
-				WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", e.maxDepth)),
-		)
-		return NewValidationError(ctx.GetErrors())
-	}
-
 	// 注册类型信息（首次使用时）
 	e.registry.Register(target)
 
 	// 执行生命周期前钩子
 	if err := e.executeBeforeHooks(target, ctx); err != nil {
-		return NewValidationErrorWithMsg(err.Error())
+		return NewValidationError(e.errorFormatter).WithMessage(err.Error())
 	}
 
 	// 按优先级执行所有验证策略
@@ -171,13 +165,13 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 				break
 			}
 			// 策略执行失败，记录错误但继续执行其他策略
-			ctx.AddError(NewFieldErrorWithMsg(err.Error()))
+			ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 		}
 	}
 
 	// 执行生命周期后钩子
 	if err := e.executeAfterHooks(target, ctx); err != nil {
-		return NewValidationErrorWithMsg(err.Error())
+		return NewValidationError(e.errorFormatter).WithMessage(err.Error())
 	}
 
 	return nil
@@ -204,7 +198,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 				if ctx.ErrorCount() > e.maxErrors {
 					break
 				}
-				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
+				ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 			}
 			break
 		}
@@ -212,7 +206,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return NewValidationError(ctx.GetErrors())
+		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil
@@ -239,7 +233,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 				if ctx.ErrorCount() > e.maxErrors {
 					break
 				}
-				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
+				ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 			}
 			break
 		}
@@ -247,7 +241,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return NewValidationError(ctx.GetErrors())
+		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil
