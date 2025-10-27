@@ -32,17 +32,17 @@ func SetDefaultFormater(errorFormatter ErrorFormatter) {
 }
 
 // Validate 使用默认验证器验证对象
-func Validate(target any, scene Scene) error {
+func Validate(target any, scene Scene) *ValidationError {
 	return Default().Validate(target, scene)
 }
 
 // ValidateFields 使用默认验证器验证指定字段
-func ValidateFields(target any, scene Scene, fields ...string) error {
+func ValidateFields(target any, scene Scene, fields ...string) *ValidationError {
 	return Default().ValidateFields(target, scene, fields...)
 }
 
 // ValidateFieldsExcept 使用默认验证器验证排除字段外的所有字段
-func ValidateFieldsExcept(target any, scene Scene, fields ...string) error {
+func ValidateFieldsExcept(target any, scene Scene, fields ...string) *ValidationError {
 	return Default().ValidateFieldsExcept(target, scene, fields...)
 }
 

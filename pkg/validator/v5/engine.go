@@ -116,12 +116,9 @@ func (e *ValidatorEngine) GetValidator() *validator.Validate {
 
 // Validate 执行验证
 // 职责：编排整个验证流程
-func (e *ValidatorEngine) Validate(target any, scene Scene) error {
+func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	if target == nil {
-		return NewValidationError([]*FieldError{
-			NewFieldError("Struct", "required").
-				WithMessage("validation target cannot be nil"),
-		})
+		return NewValidationError([]*FieldError{NewFieldError("Struct", "required")})
 	}
 
 	// 创建验证上下文
@@ -149,13 +146,13 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) error {
 
 // validateWithContext 使用已有上下文执行验证（内部方法）
 // 还可用于嵌套验证场景，保持上下文连续性（如深度信息）
-func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) error {
+func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) *ValidationError {
 	// 注册类型信息（首次使用时）
 	e.registry.Register(target)
 
 	// 执行生命周期前钩子
 	if err := e.executeBeforeHooks(target, ctx); err != nil {
-		return err
+		return NewValidationErrorWithMsg(err.Error())
 	}
 
 	// 按优先级执行所有验证策略
@@ -174,14 +171,14 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 
 	// 执行生命周期后钩子
 	if err := e.executeAfterHooks(target, ctx); err != nil {
-		return err
+		return NewValidationErrorWithMsg(err.Error())
 	}
 
 	return nil
 }
 
 // ValidateFields 只验证指定字段
-func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) error {
+func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) *ValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}
@@ -212,7 +209,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 }
 
 // ValidateFieldsExcept 验证除指定字段外的所有字段
-func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) error {
+func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) *ValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}

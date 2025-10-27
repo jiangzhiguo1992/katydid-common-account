@@ -28,6 +28,8 @@ type ValidationStrategy interface {
 	Validate(target any, ctx *ValidationContext) error
 }
 
+// TODO:GG err会处理吗？和FieldError的区别
+
 // RuleStrategy 规则验证策略
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
@@ -199,6 +201,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 }
 
 // addValidationErrors 添加验证错误
+// TODO:GG max错误数控制
 func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
 	if err == nil {
 		return
@@ -206,13 +209,17 @@ func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
 
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		ctx.AddError(NewFieldError("", "validation_error").
-			WithMessage(err.Error()))
+		ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 		return
 	}
 
 	for _, e := range validationErrors {
-		ctx.AddError(NewFieldError(e.Namespace(), e.Tag()).WithParam(e.Param()).WithValue(e.Value()))
+		ctx.AddError(
+			NewFieldError(e.Namespace(), e.Tag()).
+				WithParam(e.Param()).
+				WithValue(e.Value()).
+				WithMessage(e.Error()),
+		)
 	}
 }
 
@@ -348,9 +355,12 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 	}
 
 	// 检查嵌套深度
+	// TODO:GG 要在这里检查吗？还是在engine里检查就行了？
 	if ctx.Depth >= s.maxDepth {
-		ctx.AddError(NewFieldError("", "max_depth").
-			WithMessage(fmt.Sprintf("nested validation depth exceeds maximum limit %d", s.maxDepth)))
+		ctx.AddError(
+			NewFieldError("Struct", "max_depth").
+				WithValue(s.maxDepth).
+				WithMessage(fmt.Sprintf("nested validation depth exceeds maximum limit %d", s.maxDepth)))
 		return nil
 	}
 
