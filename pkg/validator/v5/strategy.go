@@ -1,7 +1,6 @@
 package v5
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 
@@ -27,8 +26,6 @@ type ValidationStrategy interface {
 	// Validate 执行验证
 	Validate(target any, ctx *ValidationContext) error
 }
-
-// TODO:GG err会处理吗？和FieldError的区别
 
 // RuleStrategy 规则验证策略
 // 职责：执行基于规则的字段验证（required, min, max等）
@@ -68,10 +65,6 @@ func (s *RuleStrategy) Priority() int8 {
 
 // Validate 执行规则验证
 func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
-	if target == nil || ctx == nil {
-		return nil
-	}
-
 	// 获取场景规则
 	var sceneRules map[Scene]map[string]string
 	if s.registry != nil {
@@ -201,12 +194,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 }
 
 // addValidationErrors 添加验证错误
-// TODO:GG max错误数控制
 func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
-	if err == nil {
-		return
-	}
-
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
 		ctx.AddError(NewFieldErrorWithMsg(err.Error()))
@@ -305,10 +293,6 @@ func (s *BusinessStrategy) Priority() int8 {
 
 // Validate 执行业务验证
 func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
-	if target == nil || ctx == nil {
-		return nil
-	}
-
 	// 检查是否实现了 BusinessValidation 接口
 	valid, ok := target.(BusinessValidation)
 	if !ok {
@@ -350,20 +334,6 @@ func (s *NestedStrategy) Priority() int8 {
 
 // Validate 执行嵌套验证
 func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
-	if target == nil || ctx == nil {
-		return nil
-	}
-
-	// 检查嵌套深度
-	// TODO:GG 要在这里检查吗？还是在engine里检查就行了？
-	if ctx.Depth >= s.maxDepth {
-		ctx.AddError(
-			NewFieldError("Struct", "max_depth").
-				WithValue(s.maxDepth).
-				WithMessage(fmt.Sprintf("nested validation depth exceeds maximum limit %d", s.maxDepth)))
-		return nil
-	}
-
 	// 获取反射值
 	val := reflect.ValueOf(target)
 	if !val.IsValid() {

@@ -129,9 +129,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	e.notifyValidationStart(ctx)
 
 	// 执行验证
-	if err := e.validateWithContext(target, ctx); err != nil {
-		return err
-	}
+	_ = e.validateWithContext(target, ctx)
 
 	// 触发验证结束事件
 	e.notifyValidationEnd(ctx)
@@ -147,6 +145,15 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 // validateWithContext 使用已有上下文执行验证（内部方法）
 // 还可用于嵌套验证场景，保持上下文连续性（如深度信息）
 func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) *ValidationError {
+	// 超过最大深度，记录错误并停止验证
+	if ctx.Depth > e.maxDepth {
+		ctx.AddError(
+			NewFieldError("Struct", "max_depth").
+				WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", e.maxDepth)),
+		)
+		return NewValidationError(ctx.GetErrors())
+	}
+
 	// 注册类型信息（首次使用时）
 	e.registry.Register(target)
 
@@ -157,13 +164,12 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 
 	// 按优先级执行所有验证策略
 	for _, strategy := range e.strategies {
-		// 检查是否超过最大错误数
-		if !ctx.CanAddError() {
-			break
-		}
-
 		// 执行策略，捕获 panic
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
+			// 检查是否超过最大错误数
+			if ctx.ErrorCount() > e.maxErrors {
+				break
+			}
 			// 策略执行失败，记录错误但继续执行其他策略
 			ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 		}
@@ -194,6 +200,10 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	for _, strategy := range e.strategies {
 		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
+				// 检查是否超过最大错误数
+				if ctx.ErrorCount() > e.maxErrors {
+					break
+				}
 				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 			}
 			break
@@ -225,6 +235,10 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 	for _, strategy := range e.strategies {
 		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
+				// 检查是否超过最大错误数
+				if ctx.ErrorCount() > e.maxErrors {
+					break
+				}
 				ctx.AddError(NewFieldErrorWithMsg(err.Error()))
 			}
 			break
