@@ -2,8 +2,7 @@ package formatter
 
 import (
 	"fmt"
-	v5 "katydid-common-account/pkg/validator/v5"
-	error2 "katydid-common-account/pkg/validator/v5/error"
+	"katydid-common-account/pkg/validator/v5/core"
 )
 
 // JSONErrorFormatter JSON错误格式化器
@@ -11,29 +10,29 @@ import (
 type JSONErrorFormatter struct{}
 
 // NewJSONErrorFormatter 创建JSON错误格式化器
-func NewJSONErrorFormatter() *JSONErrorFormatter {
+func NewJSONErrorFormatter() core.IErrorFormatter {
 	return &JSONErrorFormatter{}
 }
 
 // Format 格式化单个错误为JSON字符串
-func (f *JSONErrorFormatter) Format(err *error2.FieldError) string {
+func (f *JSONErrorFormatter) Format(err core.IFieldError) string {
 	if err == nil {
 		return "{}"
 	}
 
-	builder := v5.acquireStringBuilder()
-	v5.releaseStringBuilder(builder)
+	builder := core.AcquireStringBuilder()
+	core.ReleaseStringBuilder(builder)
 
 	builder.WriteString("{")
-	builder.WriteString(fmt.Sprintf(`"namespace":"%s"`, err.Namespace))
-	builder.WriteString(fmt.Sprintf(`,"tag":"%s"`, err.Tag))
+	builder.WriteString(fmt.Sprintf(`"namespace":"%s"`, err.Namespace()))
+	builder.WriteString(fmt.Sprintf(`,"tag":"%s"`, err.Tag()))
 
-	if len(err.Param) > 0 {
-		builder.WriteString(fmt.Sprintf(`,"param":"%s"`, err.Param))
+	if len(err.Param()) > 0 {
+		builder.WriteString(fmt.Sprintf(`,"param":"%s"`, err.Param()))
 	}
 
-	if len(err.Message) > 0 {
-		builder.WriteString(fmt.Sprintf(`,"message":"%s"`, err.Message))
+	if len(err.Message()) > 0 {
+		builder.WriteString(fmt.Sprintf(`,"message":"%s"`, err.Message()))
 	}
 
 	builder.WriteString("}")
@@ -41,13 +40,13 @@ func (f *JSONErrorFormatter) Format(err *error2.FieldError) string {
 }
 
 // FormatAll 格式化所有错误为JSON数组
-func (f *JSONErrorFormatter) FormatAll(errs []*error2.FieldError) string {
+func (f *JSONErrorFormatter) FormatAll(errs []core.IFieldError) string {
 	if len(errs) == 0 {
 		return "[]"
 	}
 
-	builder := v5.acquireStringBuilder()
-	v5.releaseStringBuilder(builder)
+	builder := core.AcquireStringBuilder()
+	core.ReleaseStringBuilder(builder)
 
 	builder.WriteString("[")
 
