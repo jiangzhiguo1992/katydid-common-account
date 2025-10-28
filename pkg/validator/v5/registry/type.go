@@ -47,7 +47,14 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 		accessors:   make(map[string]core.FieldAccessor),
 	}
 
-	// 检查接口实现
+	// 检查是否实现规则注册接口
+	var ruleRegistry core.IRuleRegistry
+	if _, info.isRuleRegistry = target.(core.IRuleRegistry); info.isRuleRegistry {
+		register := NewRuleRegister(r.validator)
+		ruleRegistry.RegisterRules(register)
+	}
+
+	// 检查是否实现规则验证接口
 	var ruleProvider core.IRuleValidation
 	if ruleProvider, info.isRuleValidator = target.(core.IRuleValidation); info.isRuleValidator {
 		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
@@ -58,7 +65,13 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 			// 构建字段访问器
 			info.accessors = buildFieldAccessors(typ, info.rules)
 		}
+
+		// 弃用，不能分场景注册，且一个target类型只能注册一次，同理下面的RegisterStructValidation
+		// 注册到底层验证器，直接注册rules，而不是写在struct里，更灵活
+		//r.validator.RegisterStructValidationMapRules(info.rules, target)
 	}
+
+	// 检查是否实现业务验证接口
 	if _, info.isBusinessValidator = target.(core.IBusinessValidation); info.isBusinessValidator {
 		// 注册到底层验证器（用于缓存优化）
 		// 注意：这里提供空回调，实际验证在步骤4执行
@@ -71,6 +84,8 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 			// 实际的 CustomValidation 在步骤4中调用
 		}, target)
 	}
+
+	// 检查是否实现生命周期钩子
 	_, info.isLifecycleHooks = target.(core.ILifecycleHooks)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）

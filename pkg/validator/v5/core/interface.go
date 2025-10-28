@@ -9,6 +9,20 @@ import (
 // 外部需要实现的接口
 // ============================================================================
 
+// IRuleRegister 规则注册表接口
+type IRuleRegister interface {
+	RegisterAlias(alias, tags string)
+	RegisterValidation(tag string, fn func()) error
+}
+
+// IRuleRegistry 规则注册接口
+// 职责：注册验证规则和自定义验证函数
+type IRuleRegistry interface {
+	// RegisterRules 注册验证规则
+	// 通过 IRuleRegistry 注册别名(聚合Tag)和自定义验证函数
+	RegisterRules(IRuleRegister)
+}
+
 // IRuleValidation 规则验证器接口
 // 职责：提供字段级别的验证规则（required, min, max等）
 // 设计原则：单一职责 - 只负责提供规则，不执行验证
@@ -169,6 +183,9 @@ type FieldAccessor func(v reflect.Value) reflect.Value
 
 // ITypeInfo 类型信息接口
 type ITypeInfo interface {
+	// IsRuleRegistry 是否实现了规则注册
+	IsRuleRegistry() bool
+
 	// IsRuleValidation 是否实现了规则验证
 	IsRuleValidation() bool
 
