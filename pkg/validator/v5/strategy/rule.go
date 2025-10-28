@@ -3,6 +3,7 @@ package strategy
 import (
 	v5 "katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/core"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"reflect"
 	"strings"
 
@@ -13,12 +14,12 @@ import (
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
 	validator    *validator.Validate
-	sceneMatcher v5.SceneMatcher
+	sceneMatcher core.SceneMatcher
 	registry     v5.Registry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher v5.SceneMatcher, registry v5.Registry) *RuleStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.SceneMatcher, registry v5.Registry) *RuleStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -48,7 +49,7 @@ func (s *RuleStrategy) Priority() int8 {
 // Validate 执行规则验证
 func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 	// 获取场景规则
-	var sceneRules map[v5.Scene]map[string]string
+	var sceneRules map[core.Scene]map[string]string
 	if s.registry != nil {
 		// 从缓存中获取类型信息，直接使用
 		if typeInfo := s.registry.Register(target); typeInfo != nil {
@@ -191,12 +192,12 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 func (s *RuleStrategy) addValidationErrors(err error, ctx *v5.ValidationContext) bool {
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		return ctx.AddError(v5.NewFieldErrorWithMessage(err.Error()))
+		return ctx.AddError(error2.NewFieldErrorWithMessage(err.Error()))
 	}
 
 	for _, e := range validationErrors {
 		if !ctx.AddError(
-			v5.NewFieldError(e.Namespace(), e.Tag()).
+			error2.NewFieldError(e.Namespace(), e.Tag()).
 				WithParam(e.Param()).
 				WithValue(e.Value()).
 				WithMessage(e.Error()),

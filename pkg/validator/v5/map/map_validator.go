@@ -1,9 +1,10 @@
-package v5
+package _map
 
 import (
 	"fmt"
+	"katydid-common-account/pkg/validator/v5"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -83,21 +84,21 @@ func WithKeyValidator(key string, validator func(value any) error) MapValidatorO
 }
 
 // Validate 验证Map字段
-func (mv *MapValidator) Validate(data map[string]any, ctx *ValidationContext) {
+func (mv *MapValidator) Validate(data map[string]any, ctx *v5.ValidationContext) {
 	if ctx == nil {
 		return
 	}
 
 	if data == nil || len(data) == 0 {
 		if len(mv.requiredKeys) > 0 {
-			ctx.AddError(NewFieldError("Map", "required"))
+			ctx.AddError(error2.NewFieldError("Map", "required"))
 		}
 		return
 	}
 
 	// 安全检查：防止DoS攻击
 	if len(data) > maxMapSize {
-		ctx.AddError(NewFieldError("Map", "size").
+		ctx.AddError(error2.NewFieldError("Map", "size").
 			WithParam(strconv.Itoa(maxMapSize)).
 			WithValue(len(data)))
 		return
@@ -114,14 +115,14 @@ func (mv *MapValidator) Validate(data map[string]any, ctx *ValidationContext) {
 }
 
 // validateRequiredKeys 验证必填键
-func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *ValidationContext) {
+func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *v5.ValidationContext) {
 	if mv.requiredKeys == nil || len(mv.requiredKeys) == 0 {
 		return
 	}
 
 	for _, key := range mv.requiredKeys {
 		if len(key) > maxMapKeyLength {
-			if !ctx.AddError(NewFieldError("Map", "key_len").
+			if !ctx.AddError(error2.NewFieldError("Map", "key_len").
 				WithParam(strconv.Itoa(maxMapKeyLength)).
 				WithValue(key)) {
 				break
@@ -130,7 +131,7 @@ func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *Validatio
 		}
 
 		if err := validateKeyName(key); err != nil {
-			if !ctx.AddError(NewFieldError("Map", "invalid_key").
+			if !ctx.AddError(error2.NewFieldError("Map", "invalid_key").
 				WithValue(key).
 				WithMessage(fmt.Sprintf("invalid required key name '%s': %v", key, err))) {
 				break
@@ -140,7 +141,7 @@ func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *Validatio
 
 		if _, exists := data[key]; !exists {
 			namespace := mv.getNamespace(key)
-			if !ctx.AddError(NewFieldError(namespace, "required")) {
+			if !ctx.AddError(error2.NewFieldError(namespace, "required")) {
 				break
 			}
 		}
@@ -148,7 +149,7 @@ func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *Validatio
 }
 
 // validateAllowedKeys 验证允许的键（白名单）
-func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *ValidationContext) {
+func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *v5.ValidationContext) {
 	if mv.allowedKeys == nil || len(mv.allowedKeys) == 0 {
 		return
 	}
@@ -163,7 +164,7 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *Validation
 
 	for key := range data {
 		if len(key) > maxMapKeyLength {
-			if !ctx.AddError(NewFieldError("Map", "key_len").
+			if !ctx.AddError(error2.NewFieldError("Map", "key_len").
 				WithParam(strconv.Itoa(maxMapKeyLength)).
 				WithValue(key)) {
 				break
@@ -172,7 +173,7 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *Validation
 		}
 
 		if err := validateKeyName(key); err != nil {
-			if !ctx.AddError(NewFieldError("Map", "invalid_key").
+			if !ctx.AddError(error2.NewFieldError("Map", "invalid_key").
 				WithValue(key).
 				WithMessage(fmt.Sprintf("invalid key name '%s': %v", key, err))) {
 				break
@@ -182,7 +183,7 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *Validation
 
 		if !mv.allowedKeysMap[key] {
 			namespace := mv.getNamespace(key)
-			if !ctx.AddError(NewFieldError(namespace, "not_allowed")) {
+			if !ctx.AddError(error2.NewFieldError(namespace, "not_allowed")) {
 				break
 			}
 		}
@@ -190,7 +191,7 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *Validation
 }
 
 // validateCustomKeys 执行自定义键验证
-func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *ValidationContext) {
+func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *v5.ValidationContext) {
 	if mv.keyValidators == nil || len(mv.keyValidators) == 0 {
 		return
 	}
@@ -209,14 +210,14 @@ func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *ValidationC
 		canNext := func() bool {
 			defer func() {
 				if r := recover(); r != nil {
-					ctx.AddError(NewFieldError("Map", "validate_panic").
+					ctx.AddError(error2.NewFieldError("Map", "validate_panic").
 						WithValue(key).
 						WithMessage(fmt.Sprintf("validator function panicked: %v", r)))
 				}
 			}()
 
 			if err := validator(value); err != nil {
-				if !ctx.AddError(NewFieldError(mv.parentNamespace, key).
+				if !ctx.AddError(error2.NewFieldError(mv.parentNamespace, key).
 					WithParam(err.Error()).
 					WithMessage(err.Error())) {
 					return false
@@ -237,147 +238,12 @@ func (mv *MapValidator) getNamespace(key string) string {
 	}
 
 	// 内存优化：从对象池获取 strings.Builder
-	builder := acquireStringBuilder()
-	defer releaseStringBuilder(builder)
+	builder := v5.acquireStringBuilder()
+	defer v5.releaseStringBuilder(builder)
 
 	builder.Grow(len(mv.parentNamespace) + len(key) + 1)
 	builder.WriteString(mv.parentNamespace)
 	builder.WriteString(".")
 	builder.WriteString(key)
 	return builder.String()
-}
-
-// ValidateMapKey 验证map中特定键的值（使用自定义验证函数）
-func ValidateMapKey(data map[string]any, key string, validatorFunc func(value any) error) error {
-	if data == nil || len(data) == 0 {
-		return fmt.Errorf("map is nil")
-	}
-
-	if len(key) == 0 {
-		return fmt.Errorf("map key validation failed: key name cannot be empty")
-	}
-
-	if validatorFunc == nil {
-		return fmt.Errorf("map key validation failed: validator function cannot be nil")
-	}
-
-	if err := validateKeyName(key); err != nil {
-		return fmt.Errorf("invalid key name: %w", err)
-	}
-
-	value, exists := data[key]
-	if !exists {
-		return fmt.Errorf("key '%s' does not exist", key)
-	}
-
-	var validationErr error
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				validationErr = fmt.Errorf("map key '%s' validation failed: validator panicked: %v", key, r)
-			}
-		}()
-		validationErr = validatorFunc(value)
-	}()
-
-	return validationErr
-}
-
-// ValidateMapMustHaveKey 验证map必须包含指定的键
-func ValidateMapMustHaveKey(data map[string]any, key string) error {
-	if data == nil || len(data) == 0 {
-		return fmt.Errorf("map is nil")
-	}
-
-	if len(key) == 0 {
-		return fmt.Errorf("map key validation failed: key name cannot be empty")
-	}
-
-	if err := validateKeyName(key); err != nil {
-		return fmt.Errorf("invalid key name: %w", err)
-	}
-
-	if _, exists := data[key]; !exists {
-		return fmt.Errorf("required key '%s' is missing", key)
-	}
-
-	return nil
-}
-
-// ValidateMapMustHaveKeys 验证map必须包含指定的多个键
-func ValidateMapMustHaveKeys(data map[string]any, keys ...string) error {
-	if data == nil || len(data) == 0 {
-		return fmt.Errorf("map is nil")
-	}
-
-	if len(keys) == 0 {
-		return nil
-	}
-
-	var missingKeys []string
-	var invalidKeys []string
-
-	for _, key := range keys {
-		if len(key) == 0 {
-			continue // 忽略空键名
-		}
-
-		if err := validateKeyName(key); err != nil {
-			invalidKeys = append(invalidKeys, key)
-			continue
-		}
-
-		if _, exists := data[key]; !exists {
-			missingKeys = append(missingKeys, key)
-		}
-	}
-
-	// 构建错误消息
-	if len(invalidKeys) > 0 || len(missingKeys) > 0 {
-		// 内存优化：从对象池获取 strings.Builder
-		errMsg := acquireStringBuilder()
-		defer releaseStringBuilder(errMsg)
-
-		errMsg.WriteString("map validation failed: ")
-
-		if len(invalidKeys) > 0 {
-			errMsg.WriteString(fmt.Sprintf("invalid key names: %s", strings.Join(invalidKeys, ", ")))
-		}
-
-		if len(missingKeys) > 0 {
-			if len(invalidKeys) > 0 {
-				errMsg.WriteString("; ")
-			}
-			errMsg.WriteString(fmt.Sprintf("missing required keys: %s", strings.Join(missingKeys, ", ")))
-		}
-
-		return fmt.Errorf("%s", errMsg.String())
-	}
-
-	return nil
-}
-
-// validateKeyName 验证键名的有效性
-func validateKeyName(key string) error {
-	if len(key) == 0 {
-		return fmt.Errorf("key name cannot be empty")
-	}
-
-	// 检查是否包含危险字符
-	if strings.ContainsAny(key, "\x00\n\r\t") {
-		return fmt.Errorf("key name contains invalid characters")
-	}
-
-	// 检查是否包含控制字符（ASCII 0-31）
-	for _, r := range key {
-		if r < 32 {
-			return fmt.Errorf("key name contains control character (code %d)", r)
-		}
-		// 检查是否包含危险字符（防止注入攻击）
-		if r == 0x7F { // DEL 字符
-			return fmt.Errorf("key name contains delete character")
-		}
-	}
-
-	return nil
 }

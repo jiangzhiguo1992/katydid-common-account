@@ -1,6 +1,7 @@
 package v5
 
 import (
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"katydid-common-account/pkg/validator/v5/formatter"
 	"sync"
 )
@@ -35,17 +36,17 @@ func SetDefaultFormater(errorFormatter formatter.ErrorFormatter) {
 }
 
 // Validate 使用默认验证器验证对象
-func Validate(target any, scene Scene) *ValidationError {
+func Validate(target any, scene Scene) *error2.ValidationError {
 	return Default().Validate(target, scene)
 }
 
 // ValidateFields 使用默认验证器验证指定字段
-func ValidateFields(target any, scene Scene, fields ...string) *ValidationError {
+func ValidateFields(target any, scene Scene, fields ...string) *error2.ValidationError {
 	return Default().ValidateFields(target, scene, fields...)
 }
 
 // ValidateFieldsExcept 使用默认验证器验证排除字段外的所有字段
-func ValidateFieldsExcept(target any, scene Scene, fields ...string) *ValidationError {
+func ValidateFieldsExcept(target any, scene Scene, fields ...string) *error2.ValidationError {
 	return Default().ValidateFieldsExcept(target, scene, fields...)
 }
 

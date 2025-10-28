@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	v5 "katydid-common-account/pkg/validator/v5"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 )
 
 // JSONErrorFormatter JSON错误格式化器
@@ -15,7 +16,7 @@ func NewJSONErrorFormatter() *JSONErrorFormatter {
 }
 
 // Format 格式化单个错误为JSON字符串
-func (f *JSONErrorFormatter) Format(err *v5.FieldError) string {
+func (f *JSONErrorFormatter) Format(err *error2.FieldError) string {
 	if err == nil {
 		return "{}"
 	}
@@ -40,7 +41,7 @@ func (f *JSONErrorFormatter) Format(err *v5.FieldError) string {
 }
 
 // FormatAll 格式化所有错误为JSON数组
-func (f *JSONErrorFormatter) FormatAll(errs []*v5.FieldError) string {
+func (f *JSONErrorFormatter) FormatAll(errs []*error2.FieldError) string {
 	if len(errs) == 0 {
 		return "[]"
 	}

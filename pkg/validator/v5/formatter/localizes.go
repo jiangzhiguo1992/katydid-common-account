@@ -1,6 +1,9 @@
 package formatter
 
-import v5 "katydid-common-account/pkg/validator/v5"
+import (
+	v5 "katydid-common-account/pkg/validator/v5"
+	error2 "katydid-common-account/pkg/validator/v5/error"
+)
 
 // LocalizesErrorFormatter 国际化错误格式化器
 // 职责：将错误格式化为国际化配置模板
@@ -12,7 +15,7 @@ func NewLocalizesErrorFormatter() *LocalizesErrorFormatter {
 }
 
 // Format 格式化单个错误为国际化模板字符串
-func (f *LocalizesErrorFormatter) Format(err *v5.FieldError) string {
+func (f *LocalizesErrorFormatter) Format(err *error2.FieldError) string {
 	if err == nil {
 		return ""
 	}
@@ -39,7 +42,7 @@ func (f *LocalizesErrorFormatter) Format(err *v5.FieldError) string {
 }
 
 // FormatAll 格式化所有错误为国际化模板字符串
-func (f *LocalizesErrorFormatter) FormatAll(errs []*v5.FieldError) string {
+func (f *LocalizesErrorFormatter) FormatAll(errs []*error2.FieldError) string {
 	if len(errs) == 0 {
 		return ""
 	}

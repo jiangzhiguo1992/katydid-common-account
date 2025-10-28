@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	"katydid-common-account/pkg/validator/v5"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 )
 
 // NormalErrorFormatter 普通错误格式化器
@@ -14,7 +15,7 @@ func NewNormalErrorFormatter() *NormalErrorFormatter {
 }
 
 // Format 格式化单个错误
-func (f *NormalErrorFormatter) Format(err *v5.FieldError) string {
+func (f *NormalErrorFormatter) Format(err *error2.FieldError) string {
 	if err == nil {
 		return ""
 	}
@@ -57,7 +58,7 @@ func (f *NormalErrorFormatter) Format(err *v5.FieldError) string {
 }
 
 // FormatAll 格式化所有错误
-func (f *NormalErrorFormatter) FormatAll(errs []*v5.FieldError) string {
+func (f *NormalErrorFormatter) FormatAll(errs []*error2.FieldError) string {
 	if len(errs) == 0 {
 		return "验证通过"
 	}

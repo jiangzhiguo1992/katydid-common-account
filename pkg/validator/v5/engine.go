@@ -3,6 +3,7 @@ package v5
 import (
 	"fmt"
 	"katydid-common-account/pkg/validator/v5/core"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"katydid-common-account/pkg/validator/v5/formatter"
 	"sort"
 
@@ -118,10 +119,10 @@ func (e *ValidatorEngine) GetValidator() *validator.Validate {
 
 // Validate 执行验证
 // 职责：编排整个验证流程
-func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
+func (e *ValidatorEngine) Validate(target any, scene Scene) *error2.ValidationError {
 	if target == nil {
-		return NewValidationError(e.errorFormatter).
-			WithError(NewFieldError("Struct", "required"))
+		return error2.NewValidationError(e.errorFormatter).
+			WithError(error2.NewFieldError("Struct", "required"))
 	}
 
 	// 创建验证上下文
@@ -141,7 +142,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	if err != nil {
 		return err
 	} else if ctx.HasErrors() {
-		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
+		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil
@@ -149,13 +150,13 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 
 // validateWithContext 使用已有上下文执行验证（内部方法）
 // 还可用于嵌套验证场景，保持上下文连续性（如深度信息）
-func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) *ValidationError {
+func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext) *error2.ValidationError {
 	// 注册类型信息（首次使用时）
 	e.registry.Register(target)
 
 	// 执行生命周期前钩子
 	if err := e.executeBeforeHooks(target, ctx); err != nil {
-		return NewValidationError(e.errorFormatter).WithMessage(err.Error())
+		return error2.NewValidationError(e.errorFormatter).WithMessage(err.Error())
 	}
 
 	// 按优先级执行所有验证策略
@@ -163,7 +164,7 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 		// 执行策略，捕获 panic
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 检查是否超过最大错误数
-			if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
+			if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
 				break
 			}
 		}
@@ -171,14 +172,14 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 
 	// 执行生命周期后钩子
 	if err := e.executeAfterHooks(target, ctx); err != nil {
-		return NewValidationError(e.errorFormatter).WithMessage(err.Error())
+		return error2.NewValidationError(e.errorFormatter).WithMessage(err.Error())
 	}
 
 	return nil
 }
 
 // ValidateFields 只验证指定字段
-func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) *ValidationError {
+func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) *error2.ValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}
@@ -188,14 +189,14 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	defer ctx.Release()
 
 	// 设置需要验证的字段
-	ctx.WithMetadata(metadataKeyValidateFields, fields)
+	ctx.WithMetadata(core.metadataKeyValidateFields, fields)
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
 		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
+				if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
 			}
@@ -205,14 +206,14 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
+		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil
 }
 
 // ValidateFieldsExcept 验证除指定字段外的所有字段
-func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) *ValidationError {
+func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) *error2.ValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}
@@ -222,14 +223,14 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 	defer ctx.Release()
 
 	// 设置排除验证的字段
-	ctx.WithMetadata(metadataKeyExcludeFields, fields)
+	ctx.WithMetadata(core.metadataKeyExcludeFields, fields)
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
 		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
+				if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
 			}
@@ -239,7 +240,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
+		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.GetErrors())
 	}
 
 	return nil

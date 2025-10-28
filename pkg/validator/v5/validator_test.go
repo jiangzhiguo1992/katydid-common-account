@@ -2,6 +2,7 @@ package v5
 
 import (
 	"errors"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"testing"
 )
 
@@ -48,13 +49,13 @@ func (u *TestUser) ValidateRules() map[Scene]map[string]string {
 func (u *TestUser) ValidateBusiness(scene Scene, ctx *ValidationContext) error {
 	// 业务规则：用户名不能是 admin
 	if u.Username == "admin" {
-		ctx.AddError(NewFieldError("TestUser.Username", "Username").
+		ctx.AddError(error2.NewFieldError("TestUser.Username", "Username").
 			WithMessage("username 'admin' is reserved"))
 	}
 
 	// 业务规则：年龄必须在合理范围内
 	if u.Age > 150 {
-		ctx.AddError(NewFieldError("TestUser.Age", "Age").
+		ctx.AddError(error2.NewFieldError("TestUser.Age", "Age").
 			WithMessage("age is not reasonable"))
 	}
 
@@ -92,7 +93,7 @@ func TestValidatorEngine_Validate(t *testing.T) {
 			t.Error("expected error, got nil")
 		}
 
-		var ve *ValidationError
+		var ve *error2.ValidationError
 		ok := errors.As(err, &ve)
 		if !ok {
 			t.Error("expected ValidationError")
@@ -117,7 +118,7 @@ func TestValidatorEngine_Validate(t *testing.T) {
 			t.Error("expected error, got nil")
 		}
 
-		var ve *ValidationError
+		var ve *error2.ValidationError
 		ok := errors.As(err, &ve)
 		if !ok {
 			t.Error("expected ValidationError")
@@ -293,7 +294,7 @@ func TestNestedValidation_ContextUsage(t *testing.T) {
 			t.Error("expected validation error for nested field ID, got nil")
 		} else {
 			t.Logf("Got expected error: %v", err)
-			var ve *ValidationError
+			var ve *error2.ValidationError
 			if errors.As(err, &ve) {
 				t.Logf("Error count: %d", len(ve.errors))
 				for _, e := range ve.errors {

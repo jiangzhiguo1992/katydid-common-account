@@ -4,6 +4,7 @@ import (
 	"fmt"
 	v5 "katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/core"
+	error2 "katydid-common-account/pkg/validator/v5/error"
 	"reflect"
 )
 
@@ -80,7 +81,7 @@ func (s *NestedStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 			// 超过最大深度，记录错误并停止验证
 			if ctx.Depth >= s.maxDepth {
 				ctx.AddError(
-					v5.NewFieldError("Struct", "max_depth").
+					error2.NewFieldError("Struct", "max_depth").
 						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
 				)
 				break

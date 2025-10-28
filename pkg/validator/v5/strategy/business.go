@@ -1,7 +1,7 @@
 package strategy
 
 import (
-	v5 "katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/core"
 )
 
