@@ -47,9 +47,9 @@ var keyFormatRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-.]+$`)
 
 // Registry 生成器注册表
 type Registry struct {
-	generators    map[string]core.IDGenerator // 生成器映射表
-	maxGenerators int                         // 最大生成器数量限制
-	mu            sync.RWMutex                // 读写锁，保护并发访问
+	generators    map[string]core.Generator // 生成器映射表
+	maxGenerators int                       // 最大生成器数量限制
+	mu            sync.RWMutex              // 读写锁，保护并发访问
 }
 
 var (
@@ -64,7 +64,7 @@ var (
 func GetRegistry() *Registry {
 	registryOnce.Do(func() {
 		globalRegistry = &Registry{
-			generators:    make(map[string]core.IDGenerator),
+			generators:    make(map[string]core.Generator),
 			maxGenerators: defaultMaxGenerators,
 		}
 	})
@@ -72,7 +72,7 @@ func GetRegistry() *Registry {
 }
 
 // Create 创建并注册一个新的生成器
-func (r *Registry) Create(key string, generatorType core.GeneratorType, config any) (core.IDGenerator, error) {
+func (r *Registry) Create(key string, generatorType core.GeneratorType, config any) (core.Generator, error) {
 	// 步骤1：验证参数
 	if err := validateKey(key); err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (r *Registry) Create(key string, generatorType core.GeneratorType, config a
 }
 
 // Get 获取已注册的生成器
-func (r *Registry) Get(key string) (core.IDGenerator, error) {
+func (r *Registry) Get(key string) (core.Generator, error) {
 	// 验证key
 	if err := validateKey(key); err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (r *Registry) Get(key string) (core.IDGenerator, error) {
 }
 
 // GetOrCreate 获取生成器，如果不存在则创建
-func (r *Registry) GetOrCreate(key string, generatorType core.GeneratorType, config any) (core.IDGenerator, error) {
+func (r *Registry) GetOrCreate(key string, generatorType core.GeneratorType, config any) (core.Generator, error) {
 	// 步骤1：验证参数
 	if err := validateKey(key); err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (r *Registry) Clear() {
 	defer r.mu.Unlock()
 
 	// 创建新的map，让GC回收旧的map
-	r.generators = make(map[string]core.IDGenerator)
+	r.generators = make(map[string]core.Generator)
 
 	// 日志建议：此处可添加日志记录
 	log.Println("注册表已清空", "操作", "Clear")

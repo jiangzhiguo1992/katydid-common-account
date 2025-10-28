@@ -1,6 +1,7 @@
 package snowflake_test
 
 import (
+	"katydid-common-account/pkg/idgen/core"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -531,7 +532,7 @@ func TestMillionMultiGenerator(t *testing.T) {
 	const totalIDs = numGenerators * idsPerGenerator
 
 	// 创建多个生成器（不同的datacenterID和workerID）
-	generators := make([]*snowflake.Generator, numGenerators)
+	generators := make([]core.Generator, numGenerators)
 	for i := 0; i < numGenerators; i++ {
 		gen, err := snowflake.New(int64(i/5), int64(i%5))
 		if err != nil {
