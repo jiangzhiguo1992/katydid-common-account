@@ -1,43 +1,23 @@
-package v5
+package strategy
 
 import (
-	"fmt"
+	v5 "katydid-common-account/pkg/validator/v5"
 	"reflect"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
 )
 
-type StrategyType int8
-
-const (
-	StrategyTypeRule StrategyType = iota + 1
-	StrategyTypeBusiness
-	StrategyTypeNested
-)
-
-// ValidationStrategy 验证策略接口
-// 职责：定义具体的验证策略
-// 设计原则：策略模式 - 支持不同的验证策略
-type ValidationStrategy interface {
-	// Type 策略类型
-	Type() StrategyType
-	// Priority 优先级（数字越小优先级越高）
-	Priority() int8
-	// Validate 执行验证
-	Validate(target any, ctx *ValidationContext) error
-}
-
 // RuleStrategy 规则验证策略
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
 	validator    *validator.Validate
-	sceneMatcher SceneMatcher
-	registry     Registry
+	sceneMatcher v5.SceneMatcher
+	registry     v5.Registry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher SceneMatcher, registry Registry) *RuleStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher v5.SceneMatcher, registry v5.Registry) *RuleStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -55,8 +35,8 @@ func NewRuleStrategy(validator *validator.Validate, sceneMatcher SceneMatcher, r
 }
 
 // Type 策略类型
-func (s *RuleStrategy) Type() StrategyType {
-	return StrategyTypeRule
+func (s *RuleStrategy) Type() v5.StrategyType {
+	return v5.StrategyTypeRule
 }
 
 // Priority 优先级（最高）
@@ -65,9 +45,9 @@ func (s *RuleStrategy) Priority() int8 {
 }
 
 // Validate 执行规则验证
-func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
+func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 	// 获取场景规则
-	var sceneRules map[Scene]map[string]string
+	var sceneRules map[v5.Scene]map[string]string
 	if s.registry != nil {
 		// 从缓存中获取类型信息，直接使用
 		if typeInfo := s.registry.Register(target); typeInfo != nil {
@@ -75,7 +55,7 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 		}
 	} else {
 		// 回退到传统方式：检查是否实现了 RuleValidation 接口
-		if provider, ok := target.(RuleValidation); ok {
+		if provider, ok := target.(v5.RuleValidation); ok {
 			sceneRules = provider.ValidateRules()
 		}
 	}
@@ -87,14 +67,14 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(metadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(v5.metadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(metadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(v5.metadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -105,20 +85,20 @@ func (s *RuleStrategy) Validate(target any, ctx *ValidationContext) error {
 }
 
 // validateByRules 使用 RuleValidation 提供的规则验证
-func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx *ValidationContext) error {
+func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx *v5.ValidationContext) error {
 	if len(rules) == 0 {
 		return nil
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(metadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(v5.metadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(metadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(v5.metadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -182,7 +162,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 }
 
 // validateByTags 使用 struct tag 验证
-func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *ValidationContext) error {
+func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *v5.ValidationContext) error {
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
 		// Struct()内部本质还是validator.Var()
@@ -207,15 +187,15 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 }
 
 // addValidationErrors 添加验证错误
-func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) bool {
+func (s *RuleStrategy) addValidationErrors(err error, ctx *v5.ValidationContext) bool {
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		return ctx.AddError(NewFieldErrorWithMessage(err.Error()))
+		return ctx.AddError(v5.NewFieldErrorWithMessage(err.Error()))
 	}
 
 	for _, e := range validationErrors {
 		if !ctx.AddError(
-			NewFieldError(e.Namespace(), e.Tag()).
+			v5.NewFieldError(e.Namespace(), e.Tag()).
 				WithParam(e.Param()).
 				WithValue(e.Value()).
 				WithMessage(e.Error()),
@@ -281,146 +261,4 @@ func (s *RuleStrategy) findFieldByJSONTag(val reflect.Value, jsonTag string) ref
 
 	// 未找到，返回零值
 	return reflect.Value{}
-}
-
-// ============================================================================
-// NestedStrategy 嵌套验证策略
-// ============================================================================
-
-// NestedStrategy 嵌套验证策略
-// 职责：递归验证嵌套的结构体
-type NestedStrategy struct {
-	engine   *ValidatorEngine
-	maxDepth int
-}
-
-// NewNestedStrategy 创建嵌套验证策略
-func NewNestedStrategy(engine *ValidatorEngine, maxDepth int) *NestedStrategy {
-	return &NestedStrategy{
-		engine:   engine,
-		maxDepth: maxDepth,
-	}
-}
-
-// Type 策略类型
-func (s *NestedStrategy) Type() StrategyType {
-	return StrategyTypeNested
-}
-
-// Priority 优先级
-func (s *NestedStrategy) Priority() int8 {
-	return 20
-}
-
-// Validate 执行嵌套验证
-func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
-	// 获取反射值
-	val := reflect.ValueOf(target)
-	if !val.IsValid() {
-		return nil
-	}
-
-	if val.Kind() == reflect.Ptr {
-		if val.IsNil() {
-			return nil
-		}
-		val = val.Elem()
-	}
-
-	if val.Kind() != reflect.Struct {
-		return nil
-	}
-
-	// 遍历所有字段
-	typ := val.Type()
-	numField := val.NumField()
-
-	for i := 0; i < numField; i++ {
-		field := val.Field(i)
-		fieldType := typ.Field(i)
-
-		// 跳过不可访问的字段
-		if !field.CanInterface() || !field.IsValid() {
-			continue
-		}
-
-		// 跳过 nil 指针
-		if field.Kind() == reflect.Ptr && field.IsNil() {
-			continue
-		}
-
-		// 只处理匿名（嵌入）结构体字段
-		fieldKind := field.Kind()
-		if fieldKind == reflect.Ptr && !field.IsNil() {
-			fieldKind = field.Elem().Kind()
-		}
-
-		// 只处理匿名（嵌入）的结构体字段
-		if fieldKind == reflect.Struct && fieldType.Anonymous {
-			// 超过最大深度，记录错误并停止验证
-			if ctx.Depth >= s.maxDepth {
-				ctx.AddError(
-					NewFieldError("Struct", "max_depth").
-						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
-				)
-				break
-			}
-
-			// 创建子上下文，保持深度和上下文信息
-			subCtx := NewValidationContext(ctx.Scene, ctx.MaxErrors).
-				WithContext(ctx.Context).
-				WithErrors(ctx.errors)
-			subCtx.Depth = ctx.Depth + 1
-			subCtx.Metadata = ctx.Metadata
-
-			// 使用子上下文进行递归验证
-			fieldValue := field.Interface()
-			if err := s.engine.validateWithContext(fieldValue, subCtx); err != nil {
-				// 如果返回错误，直接中断
-				return err
-			}
-
-			// 将子上下文的错误添加到父上下文
-			if subCtx.HasErrors() {
-				ctx.AddErrors(subCtx.GetErrors())
-			}
-		}
-	}
-
-	return nil
-}
-
-// ============================================================================
-// BusinessStrategy 业务验证策略
-// ============================================================================
-
-// BusinessStrategy 业务验证策略
-// 职责：执行业务逻辑验证
-type BusinessStrategy struct{}
-
-// NewBusinessStrategy 创建业务验证策略
-func NewBusinessStrategy() *BusinessStrategy {
-	return &BusinessStrategy{}
-}
-
-// Type 策略类型
-func (s *BusinessStrategy) Type() StrategyType {
-	return StrategyTypeBusiness
-}
-
-// Priority 优先级
-func (s *BusinessStrategy) Priority() int8 {
-	return 30
-}
-
-// Validate 执行业务验证
-func (s *BusinessStrategy) Validate(target any, ctx *ValidationContext) error {
-	// 检查是否实现了 BusinessValidation 接口
-	valid, ok := target.(BusinessValidation)
-	if !ok {
-		return nil
-	}
-
-	// 执行业务验证 (外部利用ctx来AddError)
-	return valid.ValidateBusiness(ctx.Scene, ctx)
 }

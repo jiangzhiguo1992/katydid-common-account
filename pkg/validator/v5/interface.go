@@ -1,5 +1,9 @@
 package v5
 
+// ============================================================================
+// 外部实现
+// ============================================================================
+
 // RuleValidation 规则验证器接口
 // 职责：提供字段级别的验证规则（required, min, max等）
 // 设计原则：单一职责 - 只负责提供规则，不执行验证
@@ -37,4 +41,27 @@ type ValidationListener interface {
 	OnValidationEnd(ctx *ValidationContext)
 	// OnError 发生错误
 	OnError(ctx *ValidationContext, err *FieldError)
+}
+
+// ============================================================================
+// 内部定义
+// ============================================================================
+
+type StrategyType int8
+
+const (
+	StrategyTypeRule StrategyType = iota + 1
+	StrategyTypeNested
+	StrategyTypeBusiness
+)
+
+// ValidationStrategy 验证策略接口
+// 职责：定义具体的验证策略
+type ValidationStrategy interface {
+	// Type 策略类型
+	Type() StrategyType
+	// Priority 优先级（数字越小优先级越高）
+	Priority() int8
+	// Validate 执行验证
+	Validate(target any, ctx *ValidationContext) error
 }
