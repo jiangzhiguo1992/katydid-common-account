@@ -47,7 +47,7 @@ func (s *RuleStrategy) Priority() int8 {
 }
 
 // Validate 执行规则验证
-func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) error {
+func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) {
 	// 获取场景规则
 	var sceneRules map[core.Scene]map[string]string
 	if s.registry != nil {
@@ -65,7 +65,7 @@ func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) error {
 	// 匹配当前场景的规则
 	rules := s.sceneMatcher.MatchRules(ctx.Scene(), sceneRules)
 	if len(rules) == 0 {
-		return nil
+		return
 	}
 
 	// 检查是否是部分字段验证
@@ -83,13 +83,13 @@ func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) error {
 	}
 
 	// 没必要validateByTags了，直接走 validateByRules(性能更好)
-	return s.validateByRules(target, rules, ctx)
+	s.validateByRules(target, rules, ctx)
 }
 
 // validateByRules 使用 IRuleValidation 提供的规则验证
-func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx core.IValidationContext) error {
+func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx core.IValidationContext) {
 	if len(rules) == 0 {
-		return nil
+		return
 	}
 
 	// 检查是否是部分字段验证
@@ -109,20 +109,20 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 	// 获取对象的反射值
 	val := reflect.ValueOf(target)
 	if !val.IsValid() {
-		return nil
+		return
 	}
 
 	// 处理指针类型
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
-			return nil
+			return
 		}
 		val = val.Elem()
 	}
 
 	// 只处理结构体类型
 	if val.Kind() != reflect.Struct {
-		return nil
+		return
 	}
 
 	// 优化：获取类型信息（包含字段访问器缓存）
@@ -160,18 +160,18 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		}
 	}
 
-	return nil
+	return
 }
 
 // validateByTags 使用 struct tag 验证
-func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx core.IValidationContext) error {
+func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx core.IValidationContext) {
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
 		// Struct()内部本质还是validator.Var()
 		if err := s.validator.Struct(target); err != nil {
 			s.addValidationErrors(err, ctx)
 		}
-		return nil
+		return
 	}
 
 	// 使用底层验证器的 StructPartial 方法
@@ -185,7 +185,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 		s.addValidationErrors(err, ctx)
 	}
 
-	return nil
+	return
 }
 
 // addValidationErrors 添加验证错误
@@ -196,12 +196,12 @@ func (s *RuleStrategy) addValidationErrors(err error, ctx core.IValidationContex
 	}
 
 	for _, e := range validationErrors {
-		if !ctx.AddError(
-			error2.NewFieldError(e.Namespace(), e.Tag()).
-				WithParam(e.Param()).
-				WithValue(e.Value()).
-				WithMessage(e.Error()),
-		) {
+		if !ctx.AddError(error2.NewFieldError(
+			e.Namespace(), e.Tag(),
+			error2.WithParam(e.Param()),
+			error2.WithValue(e.Value()),
+			error2.WithMessage(e.Error()),
+		)) {
 			return false
 		}
 	}

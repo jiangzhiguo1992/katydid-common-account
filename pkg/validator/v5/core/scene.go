@@ -32,7 +32,7 @@ type SceneBitMatcher struct {
 }
 
 // NewSceneBitMatcher 创建默认场景匹配器
-func NewSceneBitMatcher() *SceneBitMatcher {
+func NewSceneBitMatcher() ISceneMatcher {
 	return &SceneBitMatcher{
 		cache: sync.Map{},
 	}

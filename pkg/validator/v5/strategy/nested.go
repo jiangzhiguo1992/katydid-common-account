@@ -1,7 +1,6 @@
 package strategy
 
 import (
-	"fmt"
 	v5 "katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
@@ -35,22 +34,22 @@ func (s *NestedStrategy) Priority() int8 {
 }
 
 // Validate 执行嵌套验证
-func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) error {
+func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) {
 	// 获取反射值
 	val := reflect.ValueOf(target)
 	if !val.IsValid() {
-		return nil
+		return
 	}
 
 	if val.Kind() == reflect.Ptr {
 		if val.IsNil() {
-			return nil
+			return
 		}
 		val = val.Elem()
 	}
 
 	if val.Kind() != reflect.Struct {
-		return nil
+		return
 	}
 
 	// 遍历所有字段
@@ -81,10 +80,7 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) error
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
 			// 超过最大深度，记录错误并停止验证
 			if ctx.Depth() >= s.maxDepth {
-				ctx.AddError(
-					error2.NewFieldError("Struct", "max_depth").
-						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
-				)
+				ctx.AddError(error2.NewFieldError("Struct", "max_depth"))
 				break
 			}
 
@@ -100,9 +96,10 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) error
 
 			// 使用子上下文进行递归验证
 			fieldValue := field.Interface()
-			if err := s.engine.validateWithContext(fieldValue, subCtx); err != nil {
+			if err := s.engine.ValidateWithContext(fieldValue, subCtx); err != nil {
 				// 如果返回错误，直接中断
-				return err
+				ctx.AddError(error2.NewFieldErrorWithMessage(err.Error()))
+				return
 			}
 
 			// 将子上下文的错误添加到父上下文
@@ -112,5 +109,5 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) error
 		}
 	}
 
-	return nil
+	return
 }

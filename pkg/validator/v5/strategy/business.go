@@ -22,13 +22,15 @@ func (s *BusinessStrategy) Priority() int8 {
 }
 
 // Validate 执行业务验证
-func (s *BusinessStrategy) Validate(target any, ctx core.IValidationContext) error {
+func (s *BusinessStrategy) Validate(target any, ctx core.IValidationContext) {
 	// 检查是否实现了 IBusinessValidation 接口
 	valid, ok := target.(core.IBusinessValidation)
 	if !ok {
-		return nil
+		return
 	}
 
+	// 已实现缓存
+
 	// 执行业务验证 (外部利用ctx来AddError)
-	return valid.ValidateBusiness(ctx.Scene(), ctx)
+	valid.ValidateBusiness(ctx.Scene(), ctx)
 }

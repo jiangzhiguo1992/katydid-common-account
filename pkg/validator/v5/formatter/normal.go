@@ -9,7 +9,7 @@ import (
 type NormalErrorFormatter struct{}
 
 // NewNormalErrorFormatter 创建普通错误格式化器
-func NewNormalErrorFormatter() *NormalErrorFormatter {
+func NewNormalErrorFormatter() core.IErrorFormatter {
 	return &NormalErrorFormatter{}
 }
 

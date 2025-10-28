@@ -21,7 +21,7 @@ type IRuleValidation interface {
 type IBusinessValidation interface {
 	// ValidateBusiness 执行业务验证
 	// 通过 ctx.AddError 添加错误
-	ValidateBusiness(scene Scene, ctx IValidationContext) error
+	ValidateBusiness(scene Scene, ctx IValidationContext)
 }
 
 // ILifecycleHooks 生命周期钩子接口
@@ -133,5 +133,5 @@ type IValidationStrategy interface {
 	// Priority 优先级（数字越小优先级越高）
 	Priority() int8
 	// Validate 执行验证
-	Validate(target any, ctx IValidationContext) error
+	Validate(target any, ctx IValidationContext)
 }
