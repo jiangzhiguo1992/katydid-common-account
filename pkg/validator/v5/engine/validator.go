@@ -114,6 +114,11 @@ func (ve *ValidatorEngine) RegisterAlias(alias, tags string) {
 	ve.typeRegistry.Validator().RegisterAlias(alias, tags)
 }
 
+// ValidateMap 验证 Map 数据 TODO:GG 这个怎么搞场景化
+func (ve *ValidatorEngine) ValidateMap(data map[string]interface{}, rules map[string]interface{}) {
+	ve.typeRegistry.Validator().ValidateMap(data, rules)
+}
+
 // RegisterValidation 注册自定义验证函数（tag:func）
 func (ve *ValidatorEngine) RegisterValidation(tag string, fn func()) error {
 	return ve.typeRegistry.Validator().RegisterValidation(tag, func(fl validator.FieldLevel) bool {
