@@ -123,7 +123,7 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) *ValidationError {
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene)
+	ctx := NewValidationContext(scene, e.maxErrors)
 	defer ctx.Release()
 
 	// 触发验证开始事件
@@ -161,11 +161,9 @@ func (e *ValidatorEngine) validateWithContext(target any, ctx *ValidationContext
 		// 执行策略，捕获 panic
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 检查是否超过最大错误数
-			if ctx.ErrorCount() > e.maxErrors {
+			if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
 				break
 			}
-			// 策略执行失败，记录错误但继续执行其他策略
-			ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 		}
 	}
 
@@ -184,7 +182,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene)
+	ctx := NewValidationContext(scene, e.maxErrors)
 	defer ctx.Release()
 
 	// 设置需要验证的字段
@@ -195,10 +193,9 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if ctx.ErrorCount() > e.maxErrors {
+				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
-				ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 			}
 			break
 		}
@@ -219,7 +216,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 	}
 
 	// 创建验证上下文
-	ctx := NewValidationContext(scene)
+	ctx := NewValidationContext(scene, e.maxErrors)
 	defer ctx.Release()
 
 	// 设置排除验证的字段
@@ -230,10 +227,9 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 		if strategy.Type() == StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if ctx.ErrorCount() > e.maxErrors {
+				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
-				ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 			}
 			break
 		}

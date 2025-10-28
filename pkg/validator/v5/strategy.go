@@ -162,7 +162,9 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 
 		// 验证字段
 		if err := s.validator.Var(field.Interface(), rule); err != nil {
-			s.addValidationErrors(err, ctx)
+			if !s.addValidationErrors(err, ctx) {
+				break
+			}
 		}
 	}
 
@@ -195,21 +197,23 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 }
 
 // addValidationErrors 添加验证错误
-func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) {
+func (s *RuleStrategy) addValidationErrors(err error, ctx *ValidationContext) bool {
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
-		ctx.AddError(NewFieldErrorWithMessage(err.Error()))
-		return
+		return ctx.AddError(NewFieldErrorWithMessage(err.Error()))
 	}
 
 	for _, e := range validationErrors {
-		ctx.AddError(
+		if !ctx.AddError(
 			NewFieldError(e.Namespace(), e.Tag()).
 				WithParam(e.Param()).
 				WithValue(e.Value()).
 				WithMessage(e.Error()),
-		)
+		) {
+			return false
+		}
 	}
+	return true
 }
 
 // filterRulesByFields 过滤规则，只保留指定字段
@@ -353,7 +357,9 @@ func (s *NestedStrategy) Validate(target any, ctx *ValidationContext) error {
 			}
 
 			// 创建子上下文，保持深度和上下文信息
-			subCtx := NewValidationContext(ctx.Scene).WithContext(ctx.Context).WithErrors(ctx.errors)
+			subCtx := NewValidationContext(ctx.Scene, ctx.MaxErrors).
+				WithContext(ctx.Context).
+				WithErrors(ctx.errors)
 			subCtx.Depth = ctx.Depth + 1
 			subCtx.Metadata = ctx.Metadata
 

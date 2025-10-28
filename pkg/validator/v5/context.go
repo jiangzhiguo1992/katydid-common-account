@@ -29,6 +29,8 @@ type ValidationContext struct {
 	Context context.Context
 	// Scene 当前验证场景
 	Scene Scene
+	// 最大错误数
+	MaxErrors int
 	// Depth 嵌套深度
 	Depth int
 	// errors 错误收集
@@ -38,10 +40,11 @@ type ValidationContext struct {
 }
 
 // NewValidationContext 创建验证上下文
-func NewValidationContext(scene Scene) *ValidationContext {
+func NewValidationContext(scene Scene, maxErrors int) *ValidationContext {
 	// 使用对象池优化内存分配
 	ctx := validationContextPool.Get().(*ValidationContext)
 	ctx.Scene = scene
+	ctx.MaxErrors = maxErrors
 	ctx.Depth = 0
 
 	clear(ctx.errors)
@@ -85,13 +88,23 @@ func (vc *ValidationContext) Release() {
 }
 
 // AddError 添加错误
-func (vc *ValidationContext) AddError(err *FieldError) {
+func (vc *ValidationContext) AddError(err *FieldError) bool {
+	// 检查是否超过最大错误数
+	if vc.ErrorCount() >= vc.MaxErrors {
+		return false
+	}
 	vc.errors = append(vc.errors, err)
+	return true
 }
 
 // AddErrors 批量添加错误
-func (vc *ValidationContext) AddErrors(errs []*FieldError) {
+func (vc *ValidationContext) AddErrors(errs []*FieldError) bool {
+	// 检查是否超过最大错误数
+	if vc.ErrorCount() >= (vc.MaxErrors - len(errs)) {
+		return false
+	}
 	vc.errors = append(vc.errors, errs...)
+	return true
 }
 
 // GetErrors 获取所有错误
