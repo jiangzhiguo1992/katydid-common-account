@@ -60,6 +60,12 @@ type IValidator interface {
 	// AddStrategy 添加验证策略
 	AddStrategy(strategy IValidationStrategy)
 
+	// RegisterAlias 注册规则别名（alias:tags）
+	RegisterAlias(alias, tags string)
+
+	// RegisterValidation 注册自定义验证函数（tag:func）
+	RegisterValidation(tag string, fn func()) error
+
 	// Validate 执行完整验证
 	Validate(target any, scene Scene) IValidationError
 

@@ -7,6 +7,8 @@ import (
 	"katydid-common-account/pkg/validator/v5/err"
 	"katydid-common-account/pkg/validator/v5/formatter"
 	"sort"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // ValidatorEngine 验证引擎
@@ -104,6 +106,19 @@ func (ve *ValidatorEngine) AddStrategy(strategy core.IValidationStrategy) {
 	// 重新排序
 	sort.Slice(ve.strategies, func(i, j int) bool {
 		return ve.strategies[i].Priority() < ve.strategies[j].Priority()
+	})
+}
+
+// RegisterAlias 注册别名（alias:tags）
+func (ve *ValidatorEngine) RegisterAlias(alias, tags string) {
+	ve.typeRegistry.Validator().RegisterAlias(alias, tags)
+}
+
+// RegisterValidation 注册自定义验证函数（tag:func）
+func (ve *ValidatorEngine) RegisterValidation(tag string, fn func()) error {
+	return ve.typeRegistry.Validator().RegisterValidation(tag, func(fl validator.FieldLevel) bool {
+		fn()
+		return true
 	})
 }
 
