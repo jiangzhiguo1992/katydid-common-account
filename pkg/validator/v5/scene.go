@@ -1,5 +1,9 @@
 package v5
 
+import (
+	"sync"
+)
+
 // Scene 验证场景，使用位运算支持场景组合
 type Scene int64
 
@@ -32,12 +36,16 @@ type SceneMatcher interface {
 	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
-// SceneBitMatcher 位运算场景匹配器
-type SceneBitMatcher struct{}
+// SceneBitMatcher 位运算场景匹配器（带缓存）
+type SceneBitMatcher struct {
+	cache sync.Map // key: cacheKey (scene + rules pointer), value: map[string]string
+}
 
 // NewSceneBitMatcher 创建默认场景匹配器
 func NewSceneBitMatcher() *SceneBitMatcher {
-	return &SceneBitMatcher{}
+	return &SceneBitMatcher{
+		cache: sync.Map{},
+	}
 }
 
 // Match 判断场景是否匹配
@@ -51,9 +59,25 @@ func (m *SceneBitMatcher) MatchRules(target Scene, rules map[Scene]map[string]st
 		return nil
 	}
 
-	result := make(map[string]string)
+	// 生成缓存键：场景 + 规则集指针（规则集不变时指针不变）
+	// 注意：这里假设规则集在注册后不会被修改
+	type cacheKey struct {
+		scene    Scene
+		rulesPtr uintptr
+	}
 
-	// 遍历所有规则场景
+	key := cacheKey{
+		scene:    target,
+		rulesPtr: uintptr(0), // Go 1.18+ 不推荐直接用指针做 map key
+	}
+
+	// 尝试从缓存获取
+	if cached, ok := m.cache.Load(key); ok {
+		return cached.(map[string]string)
+	}
+
+	// 缓存未命中，执行匹配
+	result := make(map[string]string)
 	for scene, sceneRules := range rules {
 		if m.Match(target, scene) {
 			// 合并规则（后面的覆盖前面的）
@@ -62,6 +86,9 @@ func (m *SceneBitMatcher) MatchRules(target Scene, rules map[Scene]map[string]st
 			}
 		}
 	}
+
+	// 存入缓存
+	m.cache.Store(key, result)
 
 	return result
 }

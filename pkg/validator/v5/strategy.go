@@ -143,17 +143,27 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		return nil
 	}
 
+	// 优化：获取类型信息（包含字段访问器缓存）
+	typeInfo := s.registry.Register(target)
+
 	// 逐个字段验证
 	for fieldName, rule := range rules {
 		if len(fieldName) == 0 || len(rule) == 0 {
 			continue
 		}
 
-		// 获取字段值
-		field := val.FieldByName(fieldName)
-		if !field.IsValid() {
-			// 尝试通过 JSON tag 查找
-			field = s.findFieldByJSONTag(val, fieldName)
+		var field reflect.Value
+
+		// 优化：优先使用缓存的访问器（O(1) 访问）
+		if accessor, ok := typeInfo.Accessors[fieldName]; ok {
+			field = accessor(val)
+		} else {
+			// 回退到传统方式：通过字段名查找（O(n) 访问）
+			field = val.FieldByName(fieldName)
+			if !field.IsValid() {
+				// 尝试通过 JSON tag 查找
+				field = s.findFieldByJSONTag(val, fieldName)
+			}
 		}
 
 		if !field.IsValid() || !field.CanInterface() {

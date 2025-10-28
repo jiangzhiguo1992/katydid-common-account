@@ -16,8 +16,8 @@ var (
 	validationContextPool = sync.Pool{
 		New: func() interface{} {
 			return &ValidationContext{
-				errors:   make([]*FieldError, 0),
-				Metadata: make(map[string]any),
+				errors:   make([]*FieldError, 0, 4), // 预分配容量，减少扩容
+				Metadata: make(map[string]any, 2),   // 预分配容量
 			}
 		},
 	}
