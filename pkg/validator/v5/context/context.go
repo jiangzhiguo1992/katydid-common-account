@@ -73,6 +73,16 @@ func WithMetadata(metadata map[string]any) ValidationContextOption {
 	}
 }
 
+// WithAddMetadata 添加元数据
+func WithAddMetadata(key string, value any) ValidationContextOption {
+	return func(c *ValidationContext) {
+		if c.metadata == nil {
+			c.metadata = make(map[string]any)
+		}
+		c.metadata[key] = value
+	}
+}
+
 // Release 释放验证上下文到对象池
 // 使用完毕后应该调用此方法
 func (vc *ValidationContext) Release() {
