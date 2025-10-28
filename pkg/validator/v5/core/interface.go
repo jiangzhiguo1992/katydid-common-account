@@ -97,6 +97,15 @@ type IErrorFormatter interface {
 	FormatAll(errs []IFieldError) string
 }
 
+// IValidationError 验证错误接口
+// 职责：封装多个字段错误
+type IValidationError interface {
+	// HasErrors 是否有错误
+	HasErrors() bool
+	// Formatter 格式化所有错误
+	Formatter() []string
+}
+
 // ISceneMatcher 场景匹配器接口
 type ISceneMatcher interface {
 	// Match 判断场景是否匹配
@@ -105,8 +114,10 @@ type ISceneMatcher interface {
 	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
+// StrategyType 验证策略类型枚举
 type StrategyType int8
 
+// 验证策略类型枚举值
 const (
 	StrategyTypeRule StrategyType = iota + 1
 	StrategyTypeNested

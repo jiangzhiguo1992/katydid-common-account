@@ -1,39 +1,66 @@
 package error
 
+import "katydid-common-account/pkg/validator/v5/core"
+
+// ValidationErrorOption 字段错误选项函数类型
+type ValidationErrorOption func(*ValidationError)
+
 // ValidationError 验证错误集合
 // 职责：包装多个字段错误
 type ValidationError struct {
-	formatter formatter2.ErrorFormatter
+	formatter core.IErrorFormatter
 	message   string
-	errors    []*FieldError
+	errors    []core.IFieldError
 }
 
 // NewValidationError 创建验证错误
-func NewValidationError(formatter formatter2.ErrorFormatter) *ValidationError {
-	return &ValidationError{formatter: formatter}
+func NewValidationError(formatter core.IErrorFormatter, opts ...ValidationErrorOption) core.IValidationError {
+	ve := &ValidationError{formatter: formatter}
+
+	// 应用选项
+	for _, opt := range opts {
+		opt(ve)
+	}
+
+	return ve
 }
 
 // WithMessage 设置消息
-func (ve *ValidationError) WithMessage(message string) *ValidationError {
-	ve.message = message
-	return ve
+func (ve *ValidationError) WithMessage(message string) ValidationErrorOption {
+	return func(ve *ValidationError) {
+		ve.message = message
+	}
 }
 
-// WithError 添加单个错误
-func (ve *ValidationError) WithError(err *FieldError) *ValidationError {
-	ve.errors = append(ve.errors, err)
-	return ve
+// WithError 追加单个错误
+func (ve *ValidationError) WithError(err core.IFieldError) ValidationErrorOption {
+	return func(ve *ValidationError) {
+		ve.errors = append(ve.errors, err)
+	}
 }
 
-// WithErrors 添加多个错误
-func (ve *ValidationError) WithErrors(errs []*FieldError) *ValidationError {
-	ve.errors = errs
-	return ve
+// WithErrors 设置多个错误
+func (ve *ValidationError) WithErrors(errs []core.IFieldError) ValidationErrorOption {
+	return func(ve *ValidationError) {
+		ve.errors = append(ve.errors, errs...)
+	}
 }
 
-// FormatterAll 格式化所有错误
-func (ve *ValidationError) FormatterAll() []string {
+// HasErrors 是否有错误
+func (ve *ValidationError) HasErrors() bool {
+	return len(ve.errors) > 0
+}
+
+// Formatter 格式化所有错误
+func (ve *ValidationError) Formatter() []string {
 	var formatters []string
+
+	if len(ve.errors) == 0 {
+		if len(ve.message) > 0 {
+			formatters = append(formatters, ve.message)
+		}
+		return formatters
+	}
 
 	for _, err := range ve.errors {
 		if err == nil {
@@ -44,23 +71,4 @@ func (ve *ValidationError) FormatterAll() []string {
 	}
 
 	return formatters
-}
-
-// Error 实现 error 接口
-func (ve *ValidationError) Error() string {
-	if len(ve.errors) == 0 {
-		if len(ve.message) > 0 {
-			return ve.message
-		}
-		return "validation passed"
-	}
-	if len(ve.errors) == 1 {
-		return ve.errors[0].Error()
-	}
-	return "validation failed with " + string(rune(len(ve.errors))) + " errors"
-}
-
-// HasErrors 是否有错误
-func (ve *ValidationError) HasErrors() bool {
-	return len(ve.errors) > 0
 }
