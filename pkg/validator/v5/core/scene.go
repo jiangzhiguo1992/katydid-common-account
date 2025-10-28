@@ -51,18 +51,10 @@ func (m *SceneBitMatcher) MatchRules(target Scene, rules map[Scene]map[string]st
 
 	// 生成缓存键：场景 + 规则集指针（规则集不变时指针不变）
 	// 注意：这里假设规则集在注册后不会被修改
-	type cacheKey struct {
-		scene    Scene
-		rulesPtr uintptr
-	}
-
-	key := cacheKey{
-		scene:    target,
-		rulesPtr: uintptr(0), // Go 1.18+ 不推荐直接用指针做 map key
-	}
+	cacheKey := m.buildCacheKey(target, rules)
 
 	// 尝试从缓存获取
-	if cached, ok := m.cache.Load(key); ok {
+	if cached, ok := m.cache.Load(cacheKey); ok {
 		return cached.(map[string]string)
 	}
 
@@ -78,7 +70,24 @@ func (m *SceneBitMatcher) MatchRules(target Scene, rules map[Scene]map[string]st
 	}
 
 	// 存入缓存
-	m.cache.Store(key, result)
+	m.cache.Store(cacheKey, result)
 
 	return result
+}
+
+// buildCacheKey 构建缓存键
+func (m *SceneBitMatcher) buildCacheKey(scene Scene, rules map[Scene]map[string]string) interface{} {
+	// 使用场景值作为键（假设规则不变）
+	// 更好的做法是使用 scene + rules 的哈希
+	type cacheKey struct {
+		scene    Scene
+		rulesPtr uintptr
+	}
+
+	key := cacheKey{
+		scene:    scene,
+		rulesPtr: uintptr(0), // Go 1.18+ 不推荐直接用指针做 map key
+	}
+
+	return key
 }

@@ -3,6 +3,7 @@ package _map
 import (
 	"fmt"
 	"katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5/core"
 	error2 "katydid-common-account/pkg/validator/v5/error"
 	"strconv"
 	"sync"
@@ -18,7 +19,7 @@ const (
 // 职责：专门验证 map[string]any 类型的动态字段
 type MapValidator struct {
 	// parentNamespace 父级命名空间，用于生成准确的错误路径
-	// 例如：User.Extras, Product.Metadata
+	// 例如：User.Extras, Product.metadata
 	parentNamespace string
 
 	// requiredKeys 必填键列表
@@ -29,7 +30,7 @@ type MapValidator struct {
 	allowedKeys []string
 
 	// keyValidators 自定义键验证器 map[tag][func]
-	// key: Tag，value: 验证函数（返回 error 表示Param/Message）
+	// key: tag，value: 验证函数（返回 error 表示Param/message）
 	keyValidators map[string]func(value any) error
 
 	// allowedKeysMap 缓存的允许键映射（性能优化）
@@ -84,7 +85,7 @@ func WithKeyValidator(key string, validator func(value any) error) MapValidatorO
 }
 
 // Validate 验证Map字段
-func (mv *MapValidator) Validate(data map[string]any, ctx *v5.ValidationContext) {
+func (mv *MapValidator) Validate(data map[string]any, ctx core.IValidationContext) {
 	if ctx == nil {
 		return
 	}
@@ -115,7 +116,7 @@ func (mv *MapValidator) Validate(data map[string]any, ctx *v5.ValidationContext)
 }
 
 // validateRequiredKeys 验证必填键
-func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *v5.ValidationContext) {
+func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx core.IValidationContext) {
 	if mv.requiredKeys == nil || len(mv.requiredKeys) == 0 {
 		return
 	}
@@ -149,7 +150,7 @@ func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *v5.Valida
 }
 
 // validateAllowedKeys 验证允许的键（白名单）
-func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *v5.ValidationContext) {
+func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx core.IValidationContext) {
 	if mv.allowedKeys == nil || len(mv.allowedKeys) == 0 {
 		return
 	}
@@ -191,7 +192,7 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *v5.Validat
 }
 
 // validateCustomKeys 执行自定义键验证
-func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *v5.ValidationContext) {
+func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx core.IValidationContext) {
 	if mv.keyValidators == nil || len(mv.keyValidators) == 0 {
 		return
 	}

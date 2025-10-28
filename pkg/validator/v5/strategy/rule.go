@@ -1,9 +1,8 @@
 package strategy
 
 import (
-	v5 "katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/core"
-	error2 "katydid-common-account/pkg/validator/v5/error"
+	"katydid-common-account/pkg/validator/v5/err"
 	"reflect"
 	"strings"
 
@@ -15,11 +14,11 @@ import (
 type RuleStrategy struct {
 	validator    *validator.Validate
 	sceneMatcher core.ISceneMatcher
-	registry     v5.Registry
+	registry     core.IRegistry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry v5.Registry) core.IValidationStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry core.IRegistry) core.IValidationStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -189,18 +188,18 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 }
 
 // addValidationErrors 添加验证错误
-func (s *RuleStrategy) addValidationErrors(err error, ctx core.IValidationContext) bool {
-	validationErrors, ok := err.(validator.ValidationErrors)
+func (s *RuleStrategy) addValidationErrors(error error, ctx core.IValidationContext) bool {
+	validationErrors, ok := error.(validator.ValidationErrors)
 	if !ok {
-		return ctx.AddError(error2.NewFieldErrorWithMessage(err.Error()))
+		return ctx.AddError(err.NewFieldErrorWithMessage(error.Error()))
 	}
 
 	for _, e := range validationErrors {
-		if !ctx.AddError(error2.NewFieldError(
+		if !ctx.AddError(err.NewFieldError(
 			e.Namespace(), e.Tag(),
-			error2.WithParam(e.Param()),
-			error2.WithValue(e.Value()),
-			error2.WithMessage(e.Error()),
+			err.WithParam(e.Param()),
+			err.WithValue(e.Value()),
+			err.WithMessage(e.Error()),
 		)) {
 			return false
 		}

@@ -1,4 +1,4 @@
-package error
+package err
 
 import "katydid-common-account/pkg/validator/v5/core"
 

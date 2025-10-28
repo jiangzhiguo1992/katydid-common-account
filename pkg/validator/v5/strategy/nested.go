@@ -4,7 +4,7 @@ import (
 	v5 "katydid-common-account/pkg/validator/v5"
 	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
-	error2 "katydid-common-account/pkg/validator/v5/error"
+	"katydid-common-account/pkg/validator/v5/err"
 	"reflect"
 )
 
@@ -80,7 +80,7 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) {
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
 			// 超过最大深度，记录错误并停止验证
 			if ctx.Depth() >= s.maxDepth {
-				ctx.AddError(error2.NewFieldError("Struct", "max_depth"))
+				ctx.AddError(err.NewFieldError("Struct", "max_depth"))
 				break
 			}
 
@@ -96,9 +96,9 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) {
 
 			// 使用子上下文进行递归验证
 			fieldValue := field.Interface()
-			if err := s.engine.ValidateWithContext(fieldValue, subCtx); err != nil {
+			if e := s.engine.ValidateWithContext(fieldValue, subCtx); e != nil {
 				// 如果返回错误，直接中断
-				ctx.AddError(error2.NewFieldErrorWithMessage(err.Error()))
+				ctx.AddError(err.NewFieldErrorWithMessage(e.Error()))
 				return
 			}
 

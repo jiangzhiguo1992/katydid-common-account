@@ -1,4 +1,4 @@
-package v5
+package registry
 
 import (
 	"katydid-common-account/pkg/validator/v5/core"
@@ -8,38 +8,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 )
-
-// FieldAccessor 字段访问器函数类型
-// 通过索引访问字段，避免重复的 FieldByName 查找，性能提升 20-30%
-type FieldAccessor func(v reflect.Value) reflect.Value
-
-// TypeInfo 类型信息，缓存类型的验证能力信息
-type TypeInfo struct {
-	// Type 类型
-	Type reflect.Type
-	// IsRuleValidator 是否实现了 RuleValidation
-	IsRuleValidator bool
-	// IsBusinessValidator 是否实现了 BusinessValidation
-	IsBusinessValidator bool
-	// IsLifecycleHooks 是否实现了 LifecycleHooks
-	IsLifecycleHooks bool
-	// Rules 缓存的规则（如果实现了 RuleValidation）
-	Rules map[Scene]map[string]string
-	// Accessors 字段访问器缓存（优化：避免重复的 FieldByName 查找）
-	Accessors map[string]FieldAccessor
-}
-
-// Registry 类型注册表接口
-type Registry interface {
-	// Register 注册类型信息
-	Register(target any) *TypeInfo
-	// Get 获取类型信息
-	Get(target any) (*TypeInfo, bool)
-	// Clear 清除缓存
-	Clear()
-	// Stats 获取统计信息
-	Stats() (count int)
-}
 
 // TypeRegistry 默认类型注册表实现
 type TypeRegistry struct {
@@ -88,7 +56,7 @@ func buildFieldAccessor(t reflect.Type, fieldName string) FieldAccessor {
 }
 
 // buildFieldAccessors 为所有规则字段构建访问器
-func buildFieldAccessors(t reflect.Type, rules map[Scene]map[string]string) map[string]FieldAccessor {
+func buildFieldAccessors(t reflect.Type, rules map[core.Scene]map[string]string) map[string]FieldAccessor {
 	accessors := make(map[string]FieldAccessor)
 
 	// 遍历所有场景的规则
@@ -127,8 +95,8 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 	}
 
 	// 检查接口实现
-	var ruleProvider core.RuleValidation
-	if ruleProvider, info.IsRuleValidator = target.(core.RuleValidation); info.IsRuleValidator {
+	var ruleProvider core.IRuleValidation
+	if ruleProvider, info.IsRuleValidator = target.(core.IRuleValidation); info.IsRuleValidator {
 		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
 		info.Rules = ruleProvider.ValidateRules()
 
@@ -140,7 +108,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 			info.Accessors = buildFieldAccessors(typ, info.Rules)
 		}
 	}
-	if _, info.IsBusinessValidator = target.(core.BusinessValidation); info.IsBusinessValidator {
+	if _, info.IsBusinessValidator = target.(core.IBusinessValidation); info.IsBusinessValidator {
 		// 注册到底层验证器（用于缓存优化）
 		// 注意：这里提供空回调，实际验证在步骤4执行
 		// 原因：
@@ -152,7 +120,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 			// 实际的 CustomValidation 在步骤4中调用
 		}, target)
 	}
-	_, info.IsLifecycleHooks = target.(core.LifecycleHooks)
+	_, info.IsLifecycleHooks = target.(core.ILifecycleHooks)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := r.cache.LoadOrStore(typ, info)

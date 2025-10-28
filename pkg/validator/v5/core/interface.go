@@ -46,8 +46,21 @@ type IValidationListener interface {
 }
 
 // ============================================================================
-// 内部定义的接口
+// 外部会调用的接口
 // ============================================================================
+
+// Validator 验证器核心接口
+// 职责：提供验证功能的统一入口
+type Validator interface {
+	// Validate 执行完整验证
+	Validate(target any, scene Scene) IValidationError
+
+	// ValidateFields 验证指定字段
+	ValidateFields(target any, scene Scene, fields ...string) IValidationError
+
+	// ValidateFieldsExcept 验证除指定字段外的所有字段
+	ValidateFieldsExcept(target any, scene Scene, fields ...string) IValidationError
+}
 
 // IValidationContext 验证上下文接口
 // 职责：管理验证过程中的状态和错误信息
@@ -78,6 +91,18 @@ type IValidationContext interface {
 	ErrorCount() int
 	// GetMetadata 获取上下文元数据
 	GetMetadata(key string) (any, bool)
+}
+
+// ============================================================================
+// 内部定义的接口
+// ============================================================================
+
+// ISceneMatcher 场景匹配器接口
+type ISceneMatcher interface {
+	// Match 判断场景是否匹配
+	Match(current, target Scene) bool
+	// MatchRules 匹配并合并规则
+	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
 // IFieldError 字段错误接口
@@ -117,12 +142,16 @@ type IValidationError interface {
 	Formatter() []string
 }
 
-// ISceneMatcher 场景匹配器接口
-type ISceneMatcher interface {
-	// Match 判断场景是否匹配
-	Match(current, target Scene) bool
-	// MatchRules 匹配并合并规则
-	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
+// IRegistry 类型注册表接口
+type IRegistry interface {
+	// Register 注册类型信息
+	Register(target any) *TypeInfo
+	// Get 获取类型信息
+	Get(target any) (*TypeInfo, bool)
+	// Clear 清除缓存
+	Clear()
+	// Stats 获取统计信息
+	Stats() (count int)
 }
 
 // IValidationStrategy 验证策略接口
