@@ -47,14 +47,15 @@ type IValidationListener interface {
 // 内部定义的接口
 // ============================================================================
 
-const (
-	// ErrorMessageEstimatedLength 预估的错误消息平均长度，用于优化字符串构建时的内存分配
-	ErrorMessageEstimatedLength = 80
-)
-
 // IValidationContext 验证上下文接口
 // 职责：管理验证过程中的状态和错误信息
 type IValidationContext interface {
+	// Release 释放验证上下文资源
+	Release()
+	// Scene 获取当前验证场景
+	Scene() Scene
+	// Depth 获取当前验证深度（用于嵌套结构体）
+	Depth() int8
 	// AddError 添加单个字段错误
 	AddError(IFieldError) bool
 	// AddErrors 添加多个字段错误
@@ -113,16 +114,6 @@ type ISceneMatcher interface {
 	// MatchRules 匹配并合并规则
 	MatchRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
-
-// StrategyType 验证策略类型枚举
-type StrategyType int8
-
-// 验证策略类型枚举值
-const (
-	StrategyTypeRule StrategyType = iota + 1
-	StrategyTypeNested
-	StrategyTypeBusiness
-)
 
 // IValidationStrategy 验证策略接口
 // 职责：定义具体的验证策略
