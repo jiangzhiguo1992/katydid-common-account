@@ -1,21 +1,21 @@
 package core
 
-// IDGenerator ID生成器基础接口
-type IDGenerator interface {
+// IIDGenerator ID生成器基础接口
+type IIDGenerator interface {
 	// NextID 生成下一个唯一ID（线程安全）
 	NextID() (int64, error)
 }
 
-// BatchGenerator 批量ID生成接口
-type BatchGenerator interface {
-	IDGenerator
+// IBatchGenerator 批量ID生成接口
+type IBatchGenerator interface {
+	IIDGenerator
 
 	// NextIDBatch 批量生成指定数量的ID（线程安全）
 	NextIDBatch(n int) ([]int64, error)
 }
 
-// ConfigurableGenerator 可配置的生成器接口
-type ConfigurableGenerator interface {
+// IConfigurableGenerator 可配置的生成器接口
+type IConfigurableGenerator interface {
 	// GetWorkerID 获取工作机器ID
 	// 返回值：工作机器ID（0-31）
 	GetWorkerID() int64
@@ -25,8 +25,8 @@ type ConfigurableGenerator interface {
 	GetDatacenterID() int64
 }
 
-// MonitorableGenerator 可监控的生成器接口
-type MonitorableGenerator interface {
+// IMonitorableGenerator 可监控的生成器接口
+type IMonitorableGenerator interface {
 	// GetMetrics 获取性能监控指标
 	GetMetrics() map[string]uint64
 
@@ -37,8 +37,8 @@ type MonitorableGenerator interface {
 	GetIDCount() uint64
 }
 
-// ValidaParseableGenerator 可验证+解析的生成器接口
-type ValidaParseableGenerator interface {
+// IValidaParseableGenerator 可验证+解析的生成器接口
+type IValidaParseableGenerator interface {
 	// ParseID 解析ID，提取其中的时间戳、机器ID等元信息
 	ParseID(id int64) (*IDInfo, error)
 
@@ -46,19 +46,19 @@ type ValidaParseableGenerator interface {
 	ValidateID(id int64) error
 }
 
-// Generator 完整功能的生成器接口
-type Generator interface {
-	IDGenerator
-	BatchGenerator
-	ConfigurableGenerator
-	MonitorableGenerator
-	ValidaParseableGenerator
+// IGenerator 完整功能的生成器接口
+type IGenerator interface {
+	IIDGenerator
+	IBatchGenerator
+	IConfigurableGenerator
+	IMonitorableGenerator
+	IValidaParseableGenerator
 }
 
-// GeneratorFactory 生成器工厂接口
-type GeneratorFactory interface {
+// IGeneratorFactory 生成器工厂接口
+type IGeneratorFactory interface {
 	// Create 根据配置创建生成器实例
-	Create(config any) (Generator, error)
+	Create(config any) (IGenerator, error)
 }
 
 // IDInfo ID信息结构
@@ -70,8 +70,8 @@ type IDInfo struct {
 	Sequence     int64 // 序列号（0-4095，同一毫秒内的序号）
 }
 
-// IDParser ID解析器接口
-type IDParser interface {
+// IIDParser ID解析器接口
+type IIDParser interface {
 	// Parse 解析ID，提取完整的元信息
 	Parse(id int64) (*IDInfo, error)
 
@@ -88,8 +88,8 @@ type IDParser interface {
 	ExtractSequence(id int64) int64
 }
 
-// IDValidator ID验证器接口
-type IDValidator interface {
+// IIDValidator ID验证器接口
+type IIDValidator interface {
 	// Validate 验证ID的有效性
 	Validate(id int64) error
 

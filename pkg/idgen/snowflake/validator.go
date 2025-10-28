@@ -17,7 +17,7 @@ func ValidateID(id int64) error {
 
 // NewValidator 创建新的验证器实例
 // 说明：验证器是无状态的，可以创建多个实例或共享单个实例
-func NewValidator() *Validator {
+func NewValidator() core.IIDValidator {
 	return &Validator{}
 }
 

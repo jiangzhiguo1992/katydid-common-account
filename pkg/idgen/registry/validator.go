@@ -9,8 +9,8 @@ import (
 
 // ValidatorRegistry 验证器注册表
 type ValidatorRegistry struct {
-	validators map[core.GeneratorType]core.IDValidator // 验证器映射表
-	mu         sync.RWMutex                            // 读写锁，保护并发访问
+	validators map[core.GeneratorType]core.IIDValidator // 验证器映射表
+	mu         sync.RWMutex                             // 读写锁，保护并发访问
 }
 
 var (
@@ -25,14 +25,14 @@ var (
 func GetValidatorRegistry() *ValidatorRegistry {
 	validatorRegistryOnce.Do(func() {
 		globalValidatorRegistry = &ValidatorRegistry{
-			validators: make(map[core.GeneratorType]core.IDValidator),
+			validators: make(map[core.GeneratorType]core.IIDValidator),
 		}
 	})
 	return globalValidatorRegistry
 }
 
 // Register 注册验证器
-func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator core.IDValidator) error {
+func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator core.IIDValidator) error {
 	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return core.ErrInvalidGeneratorType
@@ -55,7 +55,7 @@ func (r *ValidatorRegistry) Register(generatorType core.GeneratorType, validator
 }
 
 // Get 获取验证器
-func (r *ValidatorRegistry) Get(generatorType core.GeneratorType) (core.IDValidator, error) {
+func (r *ValidatorRegistry) Get(generatorType core.GeneratorType) (core.IIDValidator, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

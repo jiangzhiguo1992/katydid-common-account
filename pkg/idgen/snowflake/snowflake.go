@@ -24,9 +24,9 @@ type Generator struct {
 	precomputedPart int64 // 预计算的ID部分（datacenterID和workerID），避免重复计算
 
 	// ========== 监控和工具 ==========
-	metrics   *Metrics         // 性能监控指标（可选，nil时不收集）
-	validator core.IDValidator // ID验证器
-	parser    core.IDParser    // ID解析器
+	metrics   *Metrics          // 性能监控指标（可选，nil时不收集）
+	validator core.IIDValidator // ID验证器
+	parser    core.IIDParser    // ID解析器
 
 	// ========== 并发控制 ==========
 	mu sync.Mutex // 互斥锁，保护生成器状态
@@ -34,7 +34,7 @@ type Generator struct {
 
 // New 创建一个新的Snowflake ID生成器
 // 说明：使用最简配置创建生成器，默认关闭监控
-func New(datacenterID, workerID int64) (core.Generator, error) {
+func New(datacenterID, workerID int64) (core.IGenerator, error) {
 	return NewWithConfig(&Config{
 		DatacenterID:  datacenterID,
 		WorkerID:      workerID,
@@ -44,7 +44,7 @@ func New(datacenterID, workerID int64) (core.Generator, error) {
 
 // NewWithConfig 使用配置创建Snowflake ID生成器
 // 说明：完整配置方式，支持自定义时钟回拨策略和监控开关
-func NewWithConfig(config *Config) (core.Generator, error) {
+func NewWithConfig(config *Config) (core.IGenerator, error) {
 	if config == nil {
 		return nil, core.ErrNilConfig
 	}

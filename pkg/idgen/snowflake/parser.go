@@ -9,7 +9,7 @@ import (
 
 // Parser Snowflake ID解析器
 type Parser struct {
-	validator core.IDValidator // 验证器，用于解析前验证ID有效性
+	validator core.IIDValidator // 验证器，用于解析前验证ID有效性
 }
 
 // ParseID 全局解析函数
@@ -24,13 +24,8 @@ func ParseID(id int64) (timestamp int64, datacenterID int64, workerID int64, seq
 	return
 }
 
-// GetTimestamp 全局时间戳提取函数
-func GetTimestamp(id int64) time.Time {
-	return NewParser().ExtractTimestampAsTime(id)
-}
-
 // NewParser 创建新的解析器实例
-func NewParser() *Parser {
+func NewParser() core.IIDParser {
 	return &Parser{
 		validator: NewValidator(),
 	}

@@ -180,7 +180,7 @@ func TestRegistry_Remove(t *testing.T) {
 			t.Errorf("Remove() error = %v", err)
 		}
 		if r.Has("test1") {
-			t.Error("Generator still exists after Remove()")
+			t.Error("IGenerator still exists after Remove()")
 		}
 	})
 
@@ -496,7 +496,7 @@ func TestRegistry_MillionConcurrentIDGeneration(t *testing.T) {
 		EnableMetrics: true,
 	}
 
-	generators := make([]core.IDGenerator, numGenerators)
+	generators := make([]core.IIDGenerator, numGenerators)
 	for i := 0; i < numGenerators; i++ {
 		gen, err := r.Create(fmt.Sprintf("gen_%d", i), core.GeneratorTypeSnowflake, config)
 		if err != nil {

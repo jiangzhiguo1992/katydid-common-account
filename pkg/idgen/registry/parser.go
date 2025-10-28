@@ -10,8 +10,8 @@ import (
 
 // ParserRegistry 解析器注册表
 type ParserRegistry struct {
-	parsers map[core.GeneratorType]core.IDParser // 解析器映射表
-	mu      sync.RWMutex                         // 读写锁，保护并发访问
+	parsers map[core.GeneratorType]core.IIDParser // 解析器映射表
+	mu      sync.RWMutex                          // 读写锁，保护并发访问
 }
 
 var (
@@ -26,14 +26,14 @@ var (
 func GetParserRegistry() *ParserRegistry {
 	parserRegistryOnce.Do(func() {
 		globalParserRegistry = &ParserRegistry{
-			parsers: make(map[core.GeneratorType]core.IDParser),
+			parsers: make(map[core.GeneratorType]core.IIDParser),
 		}
 	})
 	return globalParserRegistry
 }
 
 // Register 注册解析器
-func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.IDParser) error {
+func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.IIDParser) error {
 	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return core.ErrInvalidGeneratorType
@@ -56,7 +56,7 @@ func (r *ParserRegistry) Register(generatorType core.GeneratorType, parser core.
 }
 
 // Get 获取解析器
-func (r *ParserRegistry) Get(generatorType core.GeneratorType) (core.IDParser, error) {
+func (r *ParserRegistry) Get(generatorType core.GeneratorType) (core.IIDParser, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

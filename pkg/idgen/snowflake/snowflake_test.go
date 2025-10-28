@@ -532,7 +532,7 @@ func TestMillionMultiGenerator(t *testing.T) {
 	const totalIDs = numGenerators * idsPerGenerator
 
 	// 创建多个生成器（不同的datacenterID和workerID）
-	generators := make([]core.Generator, numGenerators)
+	generators := make([]core.IGenerator, numGenerators)
 	for i := 0; i < numGenerators; i++ {
 		gen, err := snowflake.New(int64(i/5), int64(i%5))
 		if err != nil {

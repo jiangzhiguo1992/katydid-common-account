@@ -9,8 +9,8 @@ import (
 
 // FactoryRegistry 工厂注册表
 type FactoryRegistry struct {
-	factories map[core.GeneratorType]core.GeneratorFactory // 工厂映射表
-	mu        sync.RWMutex                                 // 读写锁，保护并发访问
+	factories map[core.GeneratorType]core.IGeneratorFactory // 工厂映射表
+	mu        sync.RWMutex                                  // 读写锁，保护并发访问
 }
 
 var (
@@ -25,14 +25,14 @@ var (
 func GetFactoryRegistry() *FactoryRegistry {
 	factoryRegistryOnce.Do(func() {
 		globalFactoryRegistry = &FactoryRegistry{
-			factories: make(map[core.GeneratorType]core.GeneratorFactory),
+			factories: make(map[core.GeneratorType]core.IGeneratorFactory),
 		}
 	})
 	return globalFactoryRegistry
 }
 
 // Register 注册工厂
-func (r *FactoryRegistry) Register(generatorType core.GeneratorType, factory core.GeneratorFactory) error {
+func (r *FactoryRegistry) Register(generatorType core.GeneratorType, factory core.IGeneratorFactory) error {
 	// 验证生成器类型
 	if !generatorType.IsValid() {
 		return fmt.Errorf("%w: %s", core.ErrInvalidGeneratorType, generatorType)
@@ -52,7 +52,7 @@ func (r *FactoryRegistry) Register(generatorType core.GeneratorType, factory cor
 }
 
 // Get 获取工厂
-func (r *FactoryRegistry) Get(generatorType core.GeneratorType) (core.GeneratorFactory, error) {
+func (r *FactoryRegistry) Get(generatorType core.GeneratorType) (core.IGeneratorFactory, error) {
 	factory, exists := r.factories[generatorType]
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", core.ErrFactoryNotFound, generatorType)
