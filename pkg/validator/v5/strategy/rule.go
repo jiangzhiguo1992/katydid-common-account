@@ -2,6 +2,7 @@ package strategy
 
 import (
 	v5 "katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5/core"
 	"reflect"
 	"strings"
 
@@ -35,8 +36,8 @@ func NewRuleStrategy(validator *validator.Validate, sceneMatcher v5.SceneMatcher
 }
 
 // Type 策略类型
-func (s *RuleStrategy) Type() v5.StrategyType {
-	return v5.StrategyTypeRule
+func (s *RuleStrategy) Type() core.StrategyType {
+	return core.StrategyTypeRule
 }
 
 // Priority 优先级（最高）
@@ -55,7 +56,7 @@ func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 		}
 	} else {
 		// 回退到传统方式：检查是否实现了 RuleValidation 接口
-		if provider, ok := target.(v5.RuleValidation); ok {
+		if provider, ok := target.(core.RuleValidation); ok {
 			sceneRules = provider.ValidateRules()
 		}
 	}

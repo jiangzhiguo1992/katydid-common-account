@@ -2,6 +2,8 @@ package v5
 
 import (
 	"fmt"
+	"katydid-common-account/pkg/validator/v5/core"
+	"katydid-common-account/pkg/validator/v5/formatter"
 	"sort"
 
 	"github.com/go-playground/validator/v10"
@@ -17,11 +19,11 @@ type ValidatorEngine struct {
 	// registry 类型注册表
 	registry Registry
 	// strategies 验证策略列表
-	strategies []ValidationStrategy
+	strategies []core.ValidationStrategy
 	// listeners 验证监听器
-	listeners []ValidationListener
+	listeners []core.ValidationListener
 	// errorFormatter 错误格式化器
-	errorFormatter ErrorFormatter
+	errorFormatter formatter.ErrorFormatter
 	// maxDepth 最大嵌套深度
 	maxDepth int
 	// maxErrors 最大错误数
@@ -36,9 +38,9 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 		validator:      v,
 		sceneMatcher:   NewSceneBitMatcher(),
 		registry:       NewTypeRegistry(v),
-		strategies:     make([]ValidationStrategy, 0),
-		listeners:      make([]ValidationListener, 0),
-		errorFormatter: NewLocalizesErrorFormatter(),
+		strategies:     make([]core.ValidationStrategy, 0),
+		listeners:      make([]core.ValidationListener, 0),
+		errorFormatter: formatter.NewLocalizesErrorFormatter(),
 		maxDepth:       100,
 		maxErrors:      100,
 	}
@@ -61,7 +63,7 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 type EngineOption func(*ValidatorEngine)
 
 // WithStrategies 设置验证策略
-func WithStrategies(strategies ...ValidationStrategy) EngineOption {
+func WithStrategies(strategies ...core.ValidationStrategy) EngineOption {
 	return func(e *ValidatorEngine) {
 		e.strategies = append(e.strategies, strategies...)
 	}
@@ -82,14 +84,14 @@ func WithSceneMatcher(matcher SceneMatcher) EngineOption {
 }
 
 // WithListeners 设置监听器
-func WithListeners(listeners ...ValidationListener) EngineOption {
+func WithListeners(listeners ...core.ValidationListener) EngineOption {
 	return func(e *ValidatorEngine) {
 		e.listeners = append(e.listeners, listeners...)
 	}
 }
 
 // WithErrorFormatter 设置错误格式化器
-func WithErrorFormatter(formatter ErrorFormatter) EngineOption {
+func WithErrorFormatter(formatter formatter.ErrorFormatter) EngineOption {
 	return func(e *ValidatorEngine) {
 		e.errorFormatter = formatter
 	}
@@ -190,7 +192,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
-		if strategy.Type() == StrategyTypeRule {
+		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
 				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
@@ -224,7 +226,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 	// 只执行规则验证策略
 	for _, strategy := range e.strategies {
-		if strategy.Type() == StrategyTypeRule {
+		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
 				if !ctx.AddError(NewFieldErrorWithMessage(err.Error())) {
@@ -245,7 +247,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 // AddStrategy 添加验证策略
 // 支持运行时动态添加策略
-func (e *ValidatorEngine) AddStrategy(strategy ValidationStrategy) {
+func (e *ValidatorEngine) AddStrategy(strategy core.ValidationStrategy) {
 	e.strategies = append(e.strategies, strategy)
 	// 重新排序
 	sort.Slice(e.strategies, func(i, j int) bool {
@@ -254,7 +256,7 @@ func (e *ValidatorEngine) AddStrategy(strategy ValidationStrategy) {
 }
 
 // AddListener 添加监听器
-func (e *ValidatorEngine) AddListener(listener ValidationListener) {
+func (e *ValidatorEngine) AddListener(listener core.ValidationListener) {
 	e.listeners = append(e.listeners, listener)
 }
 
@@ -278,7 +280,7 @@ func (e *ValidatorEngine) Stats() map[string]any {
 
 // executeStrategyWithRecovery 执行策略并捕获 panic
 func (e *ValidatorEngine) executeStrategyWithRecovery(
-	strategy ValidationStrategy,
+	strategy core.ValidationStrategy,
 	target any,
 	ctx *ValidationContext,
 ) (err error) {
@@ -293,7 +295,7 @@ func (e *ValidatorEngine) executeStrategyWithRecovery(
 
 // executeBeforeHooks 执行前置钩子
 func (e *ValidatorEngine) executeBeforeHooks(target any, ctx *ValidationContext) error {
-	if hooks, ok := target.(LifecycleHooks); ok {
+	if hooks, ok := target.(core.LifecycleHooks); ok {
 		return hooks.BeforeValidation(ctx)
 	}
 	return nil
@@ -301,7 +303,7 @@ func (e *ValidatorEngine) executeBeforeHooks(target any, ctx *ValidationContext)
 
 // executeAfterHooks 执行后置钩子
 func (e *ValidatorEngine) executeAfterHooks(target any, ctx *ValidationContext) error {
-	if hooks, ok := target.(LifecycleHooks); ok {
+	if hooks, ok := target.(core.LifecycleHooks); ok {
 		return hooks.AfterValidation(ctx)
 	}
 	return nil

@@ -1,6 +1,9 @@
 package strategy
 
-import v5 "katydid-common-account/pkg/validator/v5"
+import (
+	v5 "katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5/core"
+)
 
 // BusinessStrategy 业务验证策略
 // 职责：执行业务逻辑验证
@@ -12,8 +15,8 @@ func NewBusinessStrategy() *BusinessStrategy {
 }
 
 // Type 策略类型
-func (s *BusinessStrategy) Type() v5.StrategyType {
-	return v5.StrategyTypeBusiness
+func (s *BusinessStrategy) Type() core.StrategyType {
+	return core.StrategyTypeBusiness
 }
 
 // Priority 优先级
@@ -24,7 +27,7 @@ func (s *BusinessStrategy) Priority() int8 {
 // Validate 执行业务验证
 func (s *BusinessStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 	// 检查是否实现了 BusinessValidation 接口
-	valid, ok := target.(v5.BusinessValidation)
+	valid, ok := target.(core.BusinessValidation)
 	if !ok {
 		return nil
 	}

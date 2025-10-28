@@ -1,6 +1,7 @@
 package v5
 
 import (
+	"katydid-common-account/pkg/validator/v5/core"
 	"reflect"
 	"strings"
 	"sync"
@@ -126,8 +127,8 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 	}
 
 	// 检查接口实现
-	var ruleProvider RuleValidation
-	if ruleProvider, info.IsRuleValidator = target.(RuleValidation); info.IsRuleValidator {
+	var ruleProvider core.RuleValidation
+	if ruleProvider, info.IsRuleValidator = target.(core.RuleValidation); info.IsRuleValidator {
 		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
 		info.Rules = ruleProvider.ValidateRules()
 
@@ -139,7 +140,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 			info.Accessors = buildFieldAccessors(typ, info.Rules)
 		}
 	}
-	if _, info.IsBusinessValidator = target.(BusinessValidation); info.IsBusinessValidator {
+	if _, info.IsBusinessValidator = target.(core.BusinessValidation); info.IsBusinessValidator {
 		// 注册到底层验证器（用于缓存优化）
 		// 注意：这里提供空回调，实际验证在步骤4执行
 		// 原因：
@@ -151,7 +152,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 			// 实际的 CustomValidation 在步骤4中调用
 		}, target)
 	}
-	_, info.IsLifecycleHooks = target.(LifecycleHooks)
+	_, info.IsLifecycleHooks = target.(core.LifecycleHooks)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := r.cache.LoadOrStore(typ, info)

@@ -2,6 +2,7 @@ package v5
 
 import (
 	"fmt"
+	formatter2 "katydid-common-account/pkg/validator/v5/formatter"
 	"reflect"
 	"strings"
 	"unsafe"
@@ -152,13 +153,13 @@ func estimateValueSize(v any) int {
 // ValidationError 验证错误集合
 // 职责：包装多个字段错误
 type ValidationError struct {
-	formatter ErrorFormatter
+	formatter formatter2.ErrorFormatter
 	message   string
 	errors    []*FieldError
 }
 
 // NewValidationError 创建验证错误
-func NewValidationError(formatter ErrorFormatter) *ValidationError {
+func NewValidationError(formatter formatter2.ErrorFormatter) *ValidationError {
 	return &ValidationError{formatter: formatter}
 }
 

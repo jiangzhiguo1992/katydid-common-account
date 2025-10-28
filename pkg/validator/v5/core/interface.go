@@ -1,4 +1,6 @@
-package v5
+package core
+
+import "katydid-common-account/pkg/validator/v5"
 
 // ============================================================================
 // 外部实现
@@ -10,7 +12,7 @@ package v5
 type RuleValidation interface {
 	// ValidateRules 获取指定场景的验证规则
 	// 返回格式：map[场景]map[字段名]规则字符串
-	ValidateRules() map[Scene]map[string]string
+	ValidateRules() map[v5.Scene]map[string]string
 }
 
 // BusinessValidation 自定义验证器接口
@@ -19,7 +21,7 @@ type RuleValidation interface {
 type BusinessValidation interface {
 	// ValidateBusiness 执行业务验证
 	// 通过 ctx.AddError 添加错误
-	ValidateBusiness(scene Scene, ctx *ValidationContext) error
+	ValidateBusiness(scene v5.Scene, ctx *v5.ValidationContext) error
 }
 
 // LifecycleHooks 生命周期钩子接口
@@ -27,20 +29,20 @@ type BusinessValidation interface {
 // 设计原则：开放封闭 - 通过钩子扩展功能
 type LifecycleHooks interface {
 	// BeforeValidation 验证前执行
-	BeforeValidation(ctx *ValidationContext) error
+	BeforeValidation(ctx *v5.ValidationContext) error
 	// AfterValidation 验证后执行
-	AfterValidation(ctx *ValidationContext) error
+	AfterValidation(ctx *v5.ValidationContext) error
 }
 
 // ValidationListener 验证监听器接口
 // 职责：监听验证过程中的事件（观察者模式）
 type ValidationListener interface {
 	// OnValidationStart 验证开始
-	OnValidationStart(ctx *ValidationContext)
+	OnValidationStart(ctx *v5.ValidationContext)
 	// OnValidationEnd 验证结束
-	OnValidationEnd(ctx *ValidationContext)
+	OnValidationEnd(ctx *v5.ValidationContext)
 	// OnError 发生错误
-	OnError(ctx *ValidationContext, err *FieldError)
+	OnError(ctx *v5.ValidationContext, err *v5.FieldError)
 }
 
 // ============================================================================
@@ -63,5 +65,14 @@ type ValidationStrategy interface {
 	// Priority 优先级（数字越小优先级越高）
 	Priority() int8
 	// Validate 执行验证
-	Validate(target any, ctx *ValidationContext) error
+	Validate(target any, ctx *v5.ValidationContext) error
+}
+
+// ErrorFormatter 错误格式化器接口
+// 职责：格式化错误信息
+type ErrorFormatter interface {
+	// Format 格式化单个错误
+	Format(err *v5.FieldError) string
+	// FormatAll 格式化所有错误
+	FormatAll(errs []*v5.FieldError) string
 }

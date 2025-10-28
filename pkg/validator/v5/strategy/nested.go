@@ -3,6 +3,7 @@ package strategy
 import (
 	"fmt"
 	v5 "katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5/core"
 	"reflect"
 )
 
@@ -22,8 +23,8 @@ func NewNestedStrategy(engine *v5.ValidatorEngine, maxDepth int) *NestedStrategy
 }
 
 // Type 策略类型
-func (s *NestedStrategy) Type() v5.StrategyType {
-	return v5.StrategyTypeNested
+func (s *NestedStrategy) Type() core.StrategyType {
+	return core.StrategyTypeNested
 }
 
 // Priority 优先级

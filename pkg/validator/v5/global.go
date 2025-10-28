@@ -1,6 +1,9 @@
 package v5
 
-import "sync"
+import (
+	"katydid-common-account/pkg/validator/v5/formatter"
+	"sync"
+)
 
 // 全局默认验证器实例（单例）
 var (
@@ -27,7 +30,7 @@ func SetDefault(validator *ValidatorEngine) {
 }
 
 // SetDefaultFormater 设置默认错误格式化器
-func SetDefaultFormater(errorFormatter ErrorFormatter) {
+func SetDefaultFormater(errorFormatter formatter.ErrorFormatter) {
 	Default().errorFormatter = errorFormatter
 }
 
