@@ -5,6 +5,13 @@ import (
 	"katydid-common-account/pkg/validator/v5/core"
 )
 
+const (
+	// MetadataKeyValidateFields 指定字段验证的元数据键
+	MetadataKeyValidateFields = "validate_fields"
+	// MetadataKeyExcludeFields 排除字段验证的元数据键
+	MetadataKeyExcludeFields = "exclude_fields"
+)
+
 // ValidationContext 验证上下文
 // 职责：携带验证过程中的上下文信息
 type ValidationContext struct {

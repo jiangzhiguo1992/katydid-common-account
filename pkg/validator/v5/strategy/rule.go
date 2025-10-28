@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
 	"katydid-common-account/pkg/validator/v5/err"
 	"reflect"
@@ -68,14 +69,14 @@ func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) {
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(core.MetadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(context.MetadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(core.MetadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(context.MetadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -92,14 +93,14 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(core.MetadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(context.MetadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(core.MetadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(context.MetadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}

@@ -5,6 +5,9 @@ import (
 	"katydid-common-account/pkg/validator/v5/core"
 )
 
+// ErrorMessageEstimatedLength 预估的错误消息平均长度，用于优化字符串构建时的内存分配
+const ErrorMessageEstimatedLength = 80
+
 // NormalErrorFormatter 普通错误格式化器
 type NormalErrorFormatter struct{}
 
@@ -28,7 +31,7 @@ func (f *NormalErrorFormatter) Format(err core.IFieldError) string {
 	builder := core.AcquireStringBuilder()
 	core.ReleaseStringBuilder(builder)
 
-	builder.Grow(core.ErrorMessageEstimatedLength)
+	builder.Grow(ErrorMessageEstimatedLength)
 
 	if len(err.Namespace()) > 0 {
 		builder.WriteString("字段 '")
@@ -69,7 +72,7 @@ func (f *NormalErrorFormatter) FormatAll(errs []core.IFieldError) string {
 	builder := core.AcquireStringBuilder()
 	core.ReleaseStringBuilder(builder)
 
-	builder.Grow(len(errs) * core.ErrorMessageEstimatedLength)
+	builder.Grow(len(errs) * ErrorMessageEstimatedLength)
 
 	builder.WriteString(fmt.Sprintf("验证失败，共 %d 个错误:\n", len(errs)))
 

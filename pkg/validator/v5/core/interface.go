@@ -52,11 +52,14 @@ type IValidationListener interface {
 // 外部会调用的接口
 // ============================================================================
 
-// Validator 验证器核心接口
+// IValidator 验证器核心接口
 // 职责：提供验证功能的统一入口
-type Validator interface {
+type IValidator interface {
 	// Validate 执行完整验证
 	Validate(target any, scene Scene) IValidationError
+
+	// ValidateWithContext 使用自定义上下文执行验证
+	ValidateWithContext(target any, ctx IValidationContext) error
 
 	// ValidateFields 验证指定字段
 	ValidateFields(target any, scene Scene, fields ...string) IValidationError
@@ -99,16 +102,6 @@ type IValidationContext interface {
 // ============================================================================
 // 内部定义的接口
 // ============================================================================
-
-const (
-	// ErrorMessageEstimatedLength 预估的错误消息平均长度，用于优化字符串构建时的内存分配
-	ErrorMessageEstimatedLength = 80
-
-	// MetadataKeyValidateFields 指定字段验证的元数据键
-	MetadataKeyValidateFields = "validate_fields"
-	// MetadataKeyExcludeFields 排除字段验证的元数据键
-	MetadataKeyExcludeFields = "exclude_fields"
-)
 
 // ISceneMatcher 场景匹配器接口
 type ISceneMatcher interface {

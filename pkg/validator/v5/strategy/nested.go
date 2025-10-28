@@ -3,7 +3,7 @@ package strategy
 import (
 	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
-	v5 "katydid-common-account/pkg/validator/v5/engine"
+	"katydid-common-account/pkg/validator/v5/engine"
 	"katydid-common-account/pkg/validator/v5/err"
 	"reflect"
 )
@@ -11,12 +11,12 @@ import (
 // NestedStrategy 嵌套验证策略
 // 职责：递归验证嵌套的结构体
 type NestedStrategy struct {
-	engine   *v5.ValidatorEngine
+	engine   core.IValidator
 	maxDepth int8
 }
 
 // NewNestedStrategy 创建嵌套验证策略
-func NewNestedStrategy(engine *v5.ValidatorEngine, maxDepth int8) core.IValidationStrategy {
+func NewNestedStrategy(engine *engine.ValidatorEngine, maxDepth int8) core.IValidationStrategy {
 	return &NestedStrategy{
 		engine:   engine,
 		maxDepth: maxDepth,

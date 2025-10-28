@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
-	error2 "katydid-common-account/pkg/validator/v5/err"
+	"katydid-common-account/pkg/validator/v5/err"
 	"katydid-common-account/pkg/validator/v5/formatter"
-	registry2 "katydid-common-account/pkg/validator/v5/registry"
+	"katydid-common-account/pkg/validator/v5/registry"
 	"sort"
 
 	"github.com/go-playground/validator/v10"
@@ -35,12 +35,12 @@ type ValidatorEngine struct {
 
 // NewValidatorEngine 创建验证引擎
 // 工厂方法，确保对象正确初始化
-func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
+func NewValidatorEngine(opts ...ValidatorEngineOption) core.IValidator {
 	v := validator.New()
 	engine := &ValidatorEngine{
 		validator:      v,
 		sceneMatcher:   core.NewSceneBitMatcher(),
-		typeRegistry:   registry2.NewTypeRegistry(v),
+		typeRegistry:   registry.NewTypeRegistry(v),
 		strategies:     make([]core.IValidationStrategy, 0),
 		listeners:      make([]core.IValidationListener, 0),
 		errorFormatter: formatter.NewLocalizesErrorFormatter(),
@@ -61,54 +61,54 @@ func NewValidatorEngine(opts ...EngineOption) *ValidatorEngine {
 	return engine
 }
 
-// EngineOption 引擎选项
+// ValidatorEngineOption 引擎选项
 // 设计模式：函数选项模式，支持灵活配置
-type EngineOption func(*ValidatorEngine)
+type ValidatorEngineOption func(*ValidatorEngine)
 
 // WithStrategies 设置验证策略
-func WithStrategies(strategies ...core.IValidationStrategy) EngineOption {
+func WithStrategies(strategies ...core.IValidationStrategy) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.strategies = append(e.strategies, strategies...)
 	}
 }
 
 // WithRegistry 设置类型注册表
-func WithRegistry(registry registry2.Registry) EngineOption {
+func WithRegistry(registry core.ITypeRegistry) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.typeRegistry = registry
 	}
 }
 
 // WithSceneMatcher 设置场景匹配器
-func WithSceneMatcher(matcher core.ISceneMatcher) EngineOption {
+func WithSceneMatcher(matcher core.ISceneMatcher) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.sceneMatcher = matcher
 	}
 }
 
 // WithListeners 设置监听器
-func WithListeners(listeners ...core.IValidationListener) EngineOption {
+func WithListeners(listeners ...core.IValidationListener) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.listeners = append(e.listeners, listeners...)
 	}
 }
 
 // WithErrorFormatter 设置错误格式化器
-func WithErrorFormatter(formatter formatter.ErrorFormatter) EngineOption {
+func WithErrorFormatter(formatter core.IErrorFormatter) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.errorFormatter = formatter
 	}
 }
 
 // WithMaxDepth 设置最大嵌套深度
-func WithMaxDepth(depth int) EngineOption {
+func WithMaxDepth(depth int8) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.maxDepth = depth
 	}
 }
 
 // WithMaxErrors 设置最大错误数
-func WithMaxErrors(maxErrors int) EngineOption {
+func WithMaxErrors(maxErrors int) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
 		e.maxErrors = maxErrors
 	}
@@ -121,10 +121,10 @@ func (e *ValidatorEngine) GetValidator() *validator.Validate {
 
 // Validate 执行验证
 // 职责：编排整个验证流程
-func (e *ValidatorEngine) Validate(target any, scene Scene) core.IValidationError {
+func (e *ValidatorEngine) Validate(target any, scene core.Scene) core.IValidationError {
 	if target == nil {
-		return error2.NewValidationError(e.errorFormatter).
-			WithError(error2.NewFieldError("Struct", "required"))
+		return err.NewValidationError(e.errorFormatter).
+			WithError(err.NewFieldError("Struct", "required"))
 	}
 
 	// 创建验证上下文
@@ -142,9 +142,9 @@ func (e *ValidatorEngine) Validate(target any, scene Scene) core.IValidationErro
 
 	// 返回验证结果
 	if err != nil {
-		return error2.NewValidationError(e.errorFormatter).WithTotalMessage(err.Error())
+		return err.NewValidationError(e.errorFormatter).WithTotalMessage(err.Error())
 	} else if ctx.HasErrors() {
-		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
+		return err.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
 	}
 
 	return nil
@@ -166,7 +166,7 @@ func (e *ValidatorEngine) ValidateWithContext(target any, ctx core.IValidationCo
 		// 执行策略，捕获 panic
 		if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 			// 检查是否超过最大错误数
-			if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
+			if !ctx.AddError(err.NewFieldErrorWithMessage(err.Error())) {
 				break
 			}
 		}
@@ -181,7 +181,7 @@ func (e *ValidatorEngine) ValidateWithContext(target any, ctx core.IValidationCo
 }
 
 // ValidateFields 只验证指定字段
-func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...string) core.IValidationError {
+func (e *ValidatorEngine) ValidateFields(target any, scene core.Scene, fields ...string) core.IValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}
@@ -198,7 +198,7 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
+				if !ctx.AddError(err.NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
 			}
@@ -208,14 +208,14 @@ func (e *ValidatorEngine) ValidateFields(target any, scene Scene, fields ...stri
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
+		return err.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
 	}
 
 	return nil
 }
 
 // ValidateFieldsExcept 验证除指定字段外的所有字段
-func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields ...string) core.IValidationError {
+func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene core.Scene, fields ...string) core.IValidationError {
 	if target == nil || len(fields) == 0 {
 		return nil
 	}
@@ -232,7 +232,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 		if strategy.Type() == core.StrategyTypeRule {
 			if err := e.executeStrategyWithRecovery(strategy, target, ctx); err != nil {
 				// 检查是否超过最大错误数
-				if !ctx.AddError(error2.NewFieldErrorWithMessage(err.Error())) {
+				if !ctx.AddError(err.NewFieldErrorWithMessage(err.Error())) {
 					break
 				}
 			}
@@ -242,7 +242,7 @@ func (e *ValidatorEngine) ValidateFieldsExcept(target any, scene Scene, fields .
 
 	// 返回验证结果
 	if ctx.HasErrors() {
-		return error2.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
+		return err.NewValidationError(e.errorFormatter).WithErrors(ctx.Errors())
 	}
 
 	return nil

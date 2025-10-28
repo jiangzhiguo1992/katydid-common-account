@@ -23,7 +23,7 @@ func (f *LocalizesErrorFormatter) Format(err core.IFieldError) string {
 	builder := core.AcquireStringBuilder()
 	core.ReleaseStringBuilder(builder)
 
-	builder.Grow(core.ErrorMessageEstimatedLength / 2)
+	builder.Grow(ErrorMessageEstimatedLength / 2)
 
 	if len(err.Namespace()) > 0 && len(err.Tag()) > 0 {
 		builder.WriteString(err.Namespace())
@@ -49,7 +49,7 @@ func (f *LocalizesErrorFormatter) FormatAll(errs []core.IFieldError) string {
 	builder := core.AcquireStringBuilder()
 	core.ReleaseStringBuilder(builder)
 
-	builder.Grow(len(errs) * (core.ErrorMessageEstimatedLength / 2))
+	builder.Grow(len(errs) * (ErrorMessageEstimatedLength / 2))
 
 	for i, err := range errs {
 		if i > 0 {
