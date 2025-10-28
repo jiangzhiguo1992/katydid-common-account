@@ -23,6 +23,11 @@ func NewTypeRegistry(validator *validator.Validate) core.ITypeRegistry {
 	}
 }
 
+// Validator 获取底层验证器
+func (r *TypeRegistry) Validator() *validator.Validate {
+	return r.validator
+}
+
 // Register 注册类型信息
 func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 	if target == nil {
@@ -45,13 +50,6 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 	info := &TypeInfo{
 		reflectType: typ,
 		accessors:   make(map[string]core.FieldAccessor),
-	}
-
-	// 检查是否实现规则注册接口
-	var ruleRegistry core.IRuleRegistry
-	if _, info.isRuleRegistry = target.(core.IRuleRegistry); info.isRuleRegistry {
-		register := NewRuleRegister(r.validator)
-		ruleRegistry.RegisterRules(register)
 	}
 
 	// 检查是否实现规则验证接口

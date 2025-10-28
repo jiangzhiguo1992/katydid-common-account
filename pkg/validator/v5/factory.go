@@ -34,7 +34,7 @@ func (f *ValidatorFactory) CreateDefault() core.IValidator {
 	maxDepth := int8(100)
 
 	ve := engine.NewValidatorEngine(typeRegistry,
-		engine.WithStrategies(strategy.NewRuleStrategy(v, typeRegistry, sceneMatcher)),
+		engine.WithStrategies(strategy.NewRuleStrategy(typeRegistry, sceneMatcher)),
 		engine.WithStrategies(strategy.NewBusinessStrategy()),
 		engine.WithErrorFormatter(formatter.NewLocalizesErrorFormatter()),
 		engine.WithMaxDepth(maxDepth))

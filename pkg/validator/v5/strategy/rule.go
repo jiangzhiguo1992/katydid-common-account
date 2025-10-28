@@ -13,15 +13,14 @@ import (
 // RuleStrategy 规则验证策略
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
-	validator    *validator.Validate
 	registry     core.ITypeRegistry
 	sceneMatcher core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, registry core.ITypeRegistry, sceneMatcher core.ISceneMatcher) core.IValidationStrategy {
+func NewRuleStrategy(registry core.ITypeRegistry, sceneMatcher core.ISceneMatcher) core.IValidationStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
-	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
+	registry.Validator().RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		if name == "-" || name == "" {
 			return fld.Name
@@ -30,7 +29,6 @@ func NewRuleStrategy(validator *validator.Validate, registry core.ITypeRegistry,
 	})
 
 	return &RuleStrategy{
-		validator:    validator,
 		registry:     registry,
 		sceneMatcher: sceneMatcher,
 	}
@@ -157,7 +155,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		}
 
 		// 验证字段
-		if e := s.validator.Var(field.Interface(), rule); e != nil {
+		if e := s.registry.Validator().Var(field.Interface(), rule); e != nil {
 			if !s.addValidationErrors(e, ctx) {
 				break
 			}
@@ -172,7 +170,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
 		// Struct()内部本质还是validator.Var()
-		if e := s.validator.Struct(target); e != nil {
+		if e := s.registry.Validator().Struct(target); e != nil {
 			s.addValidationErrors(e, ctx)
 		}
 		return
@@ -185,7 +183,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 	}
 
 	// StructPartial()内部本质还是validator.Var()
-	if e := s.validator.StructPartial(target, partialFields...); e != nil {
+	if e := s.registry.Validator().StructPartial(target, partialFields...); e != nil {
 		s.addValidationErrors(e, ctx)
 	}
 
