@@ -3,7 +3,6 @@ package strategy
 import (
 	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
-	"katydid-common-account/pkg/validator/v5/engine"
 	"katydid-common-account/pkg/validator/v5/err"
 	"reflect"
 )
@@ -16,7 +15,7 @@ type NestedStrategy struct {
 }
 
 // NewNestedStrategy 创建嵌套验证策略
-func NewNestedStrategy(engine *engine.ValidatorEngine, maxDepth int8) core.IValidationStrategy {
+func NewNestedStrategy(engine core.IValidator, maxDepth int8) core.IValidationStrategy {
 	return &NestedStrategy{
 		engine:   engine,
 		maxDepth: maxDepth,
@@ -93,6 +92,8 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) {
 				context.WithErrors(ctx.Errors()),
 				context.WithMetadata(ctx.Metadata()),
 			)
+			// TODO:GG 合适吗?
+			defer subCtx.Release()
 
 			// 使用子上下文进行递归验证
 			fieldValue := field.Interface()

@@ -14,12 +14,12 @@ import (
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
 	validator    *validator.Validate
-	sceneMatcher core.ISceneMatcher
 	registry     core.ITypeRegistry
+	sceneMatcher core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry core.ITypeRegistry) core.IValidationStrategy {
+func NewRuleStrategy(validator *validator.Validate, registry core.ITypeRegistry, sceneMatcher core.ISceneMatcher) core.IValidationStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -31,8 +31,8 @@ func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatc
 
 	return &RuleStrategy{
 		validator:    validator,
-		sceneMatcher: sceneMatcher,
 		registry:     registry,
+		sceneMatcher: sceneMatcher,
 	}
 }
 

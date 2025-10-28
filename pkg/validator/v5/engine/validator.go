@@ -6,22 +6,14 @@ import (
 	"katydid-common-account/pkg/validator/v5/core"
 	"katydid-common-account/pkg/validator/v5/err"
 	"katydid-common-account/pkg/validator/v5/formatter"
-	"katydid-common-account/pkg/validator/v5/registry"
 	"sort"
-
-	"github.com/go-playground/validator/v10"
 )
 
 // ValidatorEngine 验证引擎
 // 职责：协调验证流程，编排各个组件
 type ValidatorEngine struct {
-	// validate 第三方验证器实例 TODO:GG 可以去掉？
-	validator *validator.Validate
-	// sceneMatcher 场景匹配器 TODO:GG 可以去掉？
-	sceneMatcher core.ISceneMatcher
-	// typeRegistry 类型注册表 TODO:GG 可以去掉？
+	// typeRegistry 类型注册表
 	typeRegistry core.ITypeRegistry
-
 	// strategies 验证策略列表
 	strategies []core.IValidationStrategy
 	// listeners 验证监听器
@@ -36,15 +28,12 @@ type ValidatorEngine struct {
 
 // NewValidatorEngine 创建验证引擎
 // 工厂方法，确保对象正确初始化
-func NewValidatorEngine(opts ...ValidatorEngineOption) core.IValidator {
-	v := validator.New()
+func NewValidatorEngine(typeRegistry core.ITypeRegistry, opts ...ValidatorEngineOption) core.IValidator {
 	engine := &ValidatorEngine{
-		validator:      v,
-		sceneMatcher:   core.NewSceneBitMatcher(),
-		typeRegistry:   registry.NewTypeRegistry(v),
+		typeRegistry:   typeRegistry,
 		strategies:     make([]core.IValidationStrategy, 0),
 		listeners:      make([]core.IValidationListener, 0),
-		errorFormatter: formatter.NewLocalizesErrorFormatter(),
+		errorFormatter: formatter.NewNormalErrorFormatter(),
 		maxDepth:       100,
 		maxErrors:      100,
 	}
@@ -80,13 +69,6 @@ func WithRegistry(registry core.ITypeRegistry) ValidatorEngineOption {
 	}
 }
 
-// WithSceneMatcher 设置场景匹配器
-func WithSceneMatcher(matcher core.ISceneMatcher) ValidatorEngineOption {
-	return func(e *ValidatorEngine) {
-		e.sceneMatcher = matcher
-	}
-}
-
 // WithListeners 设置监听器
 func WithListeners(listeners ...core.IValidationListener) ValidatorEngineOption {
 	return func(e *ValidatorEngine) {
@@ -115,9 +97,14 @@ func WithMaxErrors(maxErrors int) ValidatorEngineOption {
 	}
 }
 
-// GetValidator 获取底层 validator 实例
-func (ve *ValidatorEngine) GetValidator() *validator.Validate {
-	return ve.validator
+// AddStrategy 添加验证策略
+// 支持运行时动态添加策略
+func (ve *ValidatorEngine) AddStrategy(strategy core.IValidationStrategy) {
+	ve.strategies = append(ve.strategies, strategy)
+	// 重新排序
+	sort.Slice(ve.strategies, func(i, j int) bool {
+		return ve.strategies[i].Priority() < ve.strategies[j].Priority()
+	})
 }
 
 // Validate 执行验证
@@ -300,27 +287,5 @@ func (ve *ValidatorEngine) notifyValidationStart(ctx core.IValidationContext) {
 func (ve *ValidatorEngine) notifyValidationEnd(ctx core.IValidationContext) {
 	for _, listener := range ve.listeners {
 		listener.OnValidationEnd(ctx)
-	}
-}
-
-// AddStrategy 添加验证策略
-// 支持运行时动态添加策略
-func (ve *ValidatorEngine) AddStrategy(strategy core.IValidationStrategy) {
-	ve.strategies = append(ve.strategies, strategy)
-	// 重新排序
-	sort.Slice(ve.strategies, func(i, j int) bool {
-		return ve.strategies[i].Priority() < ve.strategies[j].Priority()
-	})
-}
-
-// AddListener 添加监听器
-func (ve *ValidatorEngine) AddListener(listener core.IValidationListener) {
-	ve.listeners = append(ve.listeners, listener)
-}
-
-// ClearCache 清除缓存
-func (ve *ValidatorEngine) ClearCache() {
-	if ve.typeRegistry != nil {
-		ve.typeRegistry.Clear()
 	}
 }

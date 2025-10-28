@@ -55,6 +55,9 @@ type IValidationListener interface {
 // IValidator 验证器核心接口
 // 职责：提供验证功能的统一入口
 type IValidator interface {
+	// AddStrategy 添加验证策略
+	AddStrategy(strategy IValidationStrategy)
+
 	// Validate 执行完整验证
 	Validate(target any, scene Scene) IValidationError
 

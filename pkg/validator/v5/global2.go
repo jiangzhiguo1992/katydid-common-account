@@ -1,8 +1,7 @@
-package _map
+package v5
 
 import (
 	"fmt"
-	v5 "katydid-common-account/pkg/validator/v5"
 	"strings"
 )
 
@@ -94,8 +93,8 @@ func ValidateMapMustHaveKeys(data map[string]any, keys ...string) error {
 	// 构建错误消息
 	if len(invalidKeys) > 0 || len(missingKeys) > 0 {
 		// 内存优化：从对象池获取 strings.Builder
-		errMsg := v5.acquireStringBuilder()
-		defer v5.releaseStringBuilder(errMsg)
+		errMsg := acquireStringBuilder()
+		defer releaseStringBuilder(errMsg)
 
 		errMsg.WriteString("map validation failed: ")
 
@@ -111,31 +110,6 @@ func ValidateMapMustHaveKeys(data map[string]any, keys ...string) error {
 		}
 
 		return fmt.Errorf("%s", errMsg.String())
-	}
-
-	return nil
-}
-
-// validateKeyName 验证键名的有效性
-func validateKeyName(key string) error {
-	if len(key) == 0 {
-		return fmt.Errorf("key name cannot be empty")
-	}
-
-	// 检查是否包含危险字符
-	if strings.ContainsAny(key, "\x00\n\r\t") {
-		return fmt.Errorf("key name contains invalid characters")
-	}
-
-	// 检查是否包含控制字符（ASCII 0-31）
-	for _, r := range key {
-		if r < 32 {
-			return fmt.Errorf("key name contains control character (code %d)", r)
-		}
-		// 检查是否包含危险字符（防止注入攻击）
-		if r == 0x7F { // DEL 字符
-			return fmt.Errorf("key name contains delete character")
-		}
 	}
 
 	return nil
