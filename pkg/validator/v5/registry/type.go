@@ -12,68 +12,19 @@ import (
 // TypeRegistry 默认类型注册表实现
 type TypeRegistry struct {
 	validator *validator.Validate
-	cache     sync.Map // key: reflect.Type, value: *TypeInfo
+	cache     sync.Map // key: reflect.reflectType, value: *TypeInfo
 }
 
 // NewTypeRegistry 创建默认类型注册表
-func NewTypeRegistry(validator *validator.Validate) *TypeRegistry {
+func NewTypeRegistry(validator *validator.Validate) core.ITypeRegistry {
 	return &TypeRegistry{
 		validator: validator,
 		cache:     sync.Map{},
 	}
 }
 
-// buildFieldAccessor 构建字段访问器
-// 优化：使用字段索引访问，时间复杂度从 O(n) 降到 O(1)
-func buildFieldAccessor(t reflect.Type, fieldName string) FieldAccessor {
-	// 首先尝试直接字段名
-	if field, ok := t.FieldByName(fieldName); ok {
-		index := field.Index
-		return func(v reflect.Value) reflect.Value {
-			return v.FieldByIndex(index) // O(1) 访问
-		}
-	}
-
-	// 尝试通过 JSON tag 查找
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		jsonTag := field.Tag.Get("json")
-		if jsonTag != "" {
-			tagName := strings.Split(jsonTag, ",")[0]
-			if tagName == fieldName {
-				index := field.Index
-				return func(v reflect.Value) reflect.Value {
-					return v.FieldByIndex(index) // O(1) 访问
-				}
-			}
-		}
-	}
-
-	// 未找到，返回空访问器
-	return func(v reflect.Value) reflect.Value {
-		return reflect.Value{}
-	}
-}
-
-// buildFieldAccessors 为所有规则字段构建访问器
-func buildFieldAccessors(t reflect.Type, rules map[core.Scene]map[string]string) map[string]FieldAccessor {
-	accessors := make(map[string]FieldAccessor)
-
-	// 遍历所有场景的规则
-	for _, sceneRules := range rules {
-		for fieldName := range sceneRules {
-			// 避免重复构建
-			if _, exists := accessors[fieldName]; !exists {
-				accessors[fieldName] = buildFieldAccessor(t, fieldName)
-			}
-		}
-	}
-
-	return accessors
-}
-
 // Register 注册类型信息
-func (r *TypeRegistry) Register(target any) *TypeInfo {
+func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 	if target == nil {
 		return &TypeInfo{}
 	}
@@ -81,6 +32,8 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 	typ := reflect.TypeOf(target)
 	if typ == nil {
 		return &TypeInfo{}
+	} else if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
 	}
 
 	// 尝试从缓存获取（热路径）
@@ -90,25 +43,23 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 
 	// 缓存未命中，创建新的缓存项（冷路径）
 	info := &TypeInfo{
-		Type:      typ,
-		Accessors: make(map[string]FieldAccessor),
+		reflectType: typ,
+		accessors:   make(map[string]core.FieldAccessor),
 	}
 
 	// 检查接口实现
 	var ruleProvider core.IRuleValidation
-	if ruleProvider, info.IsRuleValidator = target.(core.IRuleValidation); info.IsRuleValidator {
+	if ruleProvider, info.isRuleValidator = target.(core.IRuleValidation); info.isRuleValidator {
 		// 预加载常用场景的规则，不用深拷贝验证规则，外部不会修改影响缓存
-		info.Rules = ruleProvider.ValidateRules()
+		info.rules = ruleProvider.ValidateRules()
 
 		// 优化：为所有规则字段构建访问器缓存
-		if typ.Kind() == reflect.Ptr {
-			typ = typ.Elem()
-		}
 		if typ.Kind() == reflect.Struct {
-			info.Accessors = buildFieldAccessors(typ, info.Rules)
+			// 构建字段访问器
+			info.accessors = buildFieldAccessors(typ, info.rules)
 		}
 	}
-	if _, info.IsBusinessValidator = target.(core.IBusinessValidation); info.IsBusinessValidator {
+	if _, info.isBusinessValidator = target.(core.IBusinessValidation); info.isBusinessValidator {
 		// 注册到底层验证器（用于缓存优化）
 		// 注意：这里提供空回调，实际验证在步骤4执行
 		// 原因：
@@ -120,7 +71,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 			// 实际的 CustomValidation 在步骤4中调用
 		}, target)
 	}
-	_, info.IsLifecycleHooks = target.(core.ILifecycleHooks)
+	_, info.isLifecycleHooks = target.(core.ILifecycleHooks)
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := r.cache.LoadOrStore(typ, info)
@@ -128,7 +79,7 @@ func (r *TypeRegistry) Register(target any) *TypeInfo {
 }
 
 // Get 获取类型信息
-func (r *TypeRegistry) Get(target any) (*TypeInfo, bool) {
+func (r *TypeRegistry) Get(target any) (core.ITypeInfo, bool) {
 	if target == nil {
 		return nil, false
 	}
@@ -158,4 +109,53 @@ func (r *TypeRegistry) Stats() int {
 		return true
 	})
 	return count
+}
+
+// buildFieldAccessors 为所有规则字段构建访问器
+func buildFieldAccessors(t reflect.Type, rules map[core.Scene]map[string]string) map[string]core.FieldAccessor {
+	accessors := make(map[string]core.FieldAccessor)
+
+	// 遍历所有场景的规则
+	for _, sceneRules := range rules {
+		for fieldName := range sceneRules {
+			// 避免重复构建
+			if _, exists := accessors[fieldName]; !exists {
+				accessors[fieldName] = buildFieldAccessor(t, fieldName)
+			}
+		}
+	}
+
+	return accessors
+}
+
+// buildFieldAccessor 构建字段访问器
+// 优化：使用字段索引访问，时间复杂度从 O(n) 降到 O(1)
+func buildFieldAccessor(t reflect.Type, fieldName string) core.FieldAccessor {
+	// 首先尝试直接字段名
+	if field, ok := t.FieldByName(fieldName); ok {
+		index := field.Index
+		return func(v reflect.Value) reflect.Value {
+			return v.FieldByIndex(index) // O(1) 访问
+		}
+	}
+
+	// 尝试通过 JSON tag 查找
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		jsonTag := field.Tag.Get("json")
+		if jsonTag != "" {
+			tagName := strings.Split(jsonTag, ",")[0]
+			if tagName == fieldName {
+				index := field.Index
+				return func(v reflect.Value) reflect.Value {
+					return v.FieldByIndex(index) // O(1) 访问
+				}
+			}
+		}
+	}
+
+	// 未找到，返回空访问器
+	return func(v reflect.Value) reflect.Value {
+		return reflect.Value{}
+	}
 }

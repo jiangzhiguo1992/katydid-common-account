@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"reflect"
+)
 
 // ============================================================================
 // 外部需要实现的接口
@@ -97,6 +100,16 @@ type IValidationContext interface {
 // 内部定义的接口
 // ============================================================================
 
+const (
+	// ErrorMessageEstimatedLength 预估的错误消息平均长度，用于优化字符串构建时的内存分配
+	ErrorMessageEstimatedLength = 80
+
+	// MetadataKeyValidateFields 指定字段验证的元数据键
+	MetadataKeyValidateFields = "validate_fields"
+	// MetadataKeyExcludeFields 排除字段验证的元数据键
+	MetadataKeyExcludeFields = "exclude_fields"
+)
+
 // ISceneMatcher 场景匹配器接口
 type ISceneMatcher interface {
 	// Match 判断场景是否匹配
@@ -142,17 +155,49 @@ type IValidationError interface {
 	Formatter() []string
 }
 
-// IRegistry 类型注册表接口
-type IRegistry interface {
+// ITypeRegistry 类型注册表接口
+type ITypeRegistry interface {
 	// Register 注册类型信息
-	Register(target any) *TypeInfo
+	Register(target any) ITypeInfo
 	// Get 获取类型信息
-	Get(target any) (*TypeInfo, bool)
+	Get(target any) (ITypeInfo, bool)
 	// Clear 清除缓存
 	Clear()
 	// Stats 获取统计信息
 	Stats() (count int)
 }
+
+// FieldAccessor 字段访问器函数类型
+// 通过索引访问字段，避免重复的 FieldByName 查找，性能提升 20-30%
+type FieldAccessor func(v reflect.Value) reflect.Value
+
+// ITypeInfo 类型信息接口
+type ITypeInfo interface {
+	// IsRuleValidation 是否实现了规则验证
+	IsRuleValidation() bool
+
+	// IsBusinessValidation 是否实现了业务验证
+	IsBusinessValidation() bool
+
+	// IsLifecycleHooks 是否实现了生命周期钩子
+	IsLifecycleHooks() bool
+
+	// Rules 获取验证规则
+	Rules() map[Scene]map[string]string
+
+	// FieldAccessor 获取字段访问器
+	FieldAccessor(fieldName string) FieldAccessor
+}
+
+// StrategyType 验证策略类型枚举
+type StrategyType int8
+
+// 验证策略类型枚举值
+const (
+	StrategyTypeRule StrategyType = iota + 1
+	StrategyTypeNested
+	StrategyTypeBusiness
+)
 
 // IValidationStrategy 验证策略接口
 // 职责：定义具体的验证策略
