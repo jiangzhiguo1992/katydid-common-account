@@ -46,8 +46,8 @@ type ValidaParseableGenerator interface {
 	ValidateID(id int64) error
 }
 
-// FullFeaturedGenerator 完整功能的生成器接口
-type FullFeaturedGenerator interface {
+// Generator 完整功能的生成器接口
+type Generator interface {
 	IDGenerator
 	BatchGenerator
 	ConfigurableGenerator
@@ -58,7 +58,7 @@ type FullFeaturedGenerator interface {
 // GeneratorFactory 生成器工厂接口
 type GeneratorFactory interface {
 	// Create 根据配置创建生成器实例
-	Create(config any) (IDGenerator, error)
+	Create(config any) (Generator, error)
 }
 
 // IDInfo ID信息结构

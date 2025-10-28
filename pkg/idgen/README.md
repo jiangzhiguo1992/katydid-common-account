@@ -152,7 +152,7 @@ type Metrics struct {
 │           ▲                        ▲                            │
 │           │                        │                            │
 │  ┌────────┴────────────────────────┴─────────┐                  │
-│  │        FullFeaturedGenerator              │                  │
+│  │                 Generator                 │                  │
 │  ├───────────────────────────────────────────┤                  │
 │  │ Configurable + Monitorable + Parseable    │                  │
 │  └───────────────────────────────────────────┘                  │

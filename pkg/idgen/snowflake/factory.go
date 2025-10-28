@@ -16,7 +16,7 @@ func NewFactory() *Factory {
 
 // Create 创建Snowflake生成器实例
 // 实现core.GeneratorFactory接口
-func (f *Factory) Create(config any) (core.IDGenerator, error) {
+func (f *Factory) Create(config any) (core.Generator, error) {
 	// 类型断言：将通用配置转换为Snowflake配置
 	sfConfig, ok := config.(*Config)
 	if !ok {
