@@ -26,7 +26,7 @@ func NewTypeRegistry(validator *validator.Validate) core.ITypeRegistry {
 // Register 注册类型信息
 func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 	if target == nil {
-		return &TypeInfo{}
+		return nil
 	}
 
 	typ := reflect.TypeOf(target)
@@ -38,7 +38,7 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 
 	// 尝试从缓存获取（热路径）
 	if cached, ok := r.cache.Load(typ); ok {
-		return cached.(*TypeInfo)
+		return cached.(core.ITypeInfo)
 	}
 
 	// 缓存未命中，创建新的缓存项（冷路径）
@@ -75,7 +75,7 @@ func (r *TypeRegistry) Register(target any) core.ITypeInfo {
 
 	// 存入缓存（使用 LoadOrStore 避免并发时的重复存储）
 	actual, _ := r.cache.LoadOrStore(typ, info)
-	return actual.(*TypeInfo)
+	return actual.(core.ITypeInfo)
 }
 
 // Get 获取类型信息
@@ -90,7 +90,7 @@ func (r *TypeRegistry) Get(target any) (core.ITypeInfo, bool) {
 	}
 
 	if cached, ok := r.cache.Load(typ); ok {
-		return cached.(*TypeInfo), true
+		return cached.(core.ITypeInfo), true
 	}
 
 	return nil, false

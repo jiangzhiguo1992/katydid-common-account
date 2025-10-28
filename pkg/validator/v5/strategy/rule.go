@@ -14,11 +14,11 @@ import (
 type RuleStrategy struct {
 	validator    *validator.Validate
 	sceneMatcher core.ISceneMatcher
-	registry     core.IRegistry
+	registry     core.ITypeRegistry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry core.IRegistry) core.IValidationStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry core.ITypeRegistry) core.IValidationStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -52,7 +52,7 @@ func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) {
 	if s.registry != nil {
 		// 从缓存中获取类型信息，直接使用
 		if typeInfo := s.registry.Register(target); typeInfo != nil {
-			sceneRules = typeInfo.Rules
+			sceneRules = typeInfo.Rules()
 		}
 	} else {
 		// 回退到传统方式：检查是否实现了 IRuleValidation 接口
@@ -136,7 +136,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		var field reflect.Value
 
 		// 优化：优先使用缓存的访问器（O(1) 访问）
-		if accessor, ok := typeInfo.Accessors[fieldName]; ok {
+		if accessor := typeInfo.FieldAccessor(fieldName); accessor != nil {
 			field = accessor(val)
 		} else {
 			// 回退到传统方式：通过字段名查找（O(n) 访问）
@@ -152,8 +152,8 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		}
 
 		// 验证字段
-		if err := s.validator.Var(field.Interface(), rule); err != nil {
-			if !s.addValidationErrors(err, ctx) {
+		if e := s.validator.Var(field.Interface(), rule); e != nil {
+			if !s.addValidationErrors(e, ctx) {
 				break
 			}
 		}
@@ -167,8 +167,8 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
 		// Struct()内部本质还是validator.Var()
-		if err := s.validator.Struct(target); err != nil {
-			s.addValidationErrors(err, ctx)
+		if e := s.validator.Struct(target); e != nil {
+			s.addValidationErrors(e, ctx)
 		}
 		return
 	}
@@ -180,8 +180,8 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx c
 	}
 
 	// StructPartial()内部本质还是validator.Var()
-	if err := s.validator.StructPartial(target, partialFields...); err != nil {
-		s.addValidationErrors(err, ctx)
+	if e := s.validator.StructPartial(target, partialFields...); e != nil {
+		s.addValidationErrors(e, ctx)
 	}
 
 	return
