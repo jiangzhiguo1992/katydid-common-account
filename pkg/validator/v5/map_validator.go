@@ -7,13 +7,8 @@ import (
 	"sync"
 )
 
-// ============================================================================
-// Map验证器 - 用于验证动态扩展字段
-// ============================================================================
-
 // MapValidator Map字段验证器
 // 职责：专门验证 map[string]any 类型的动态字段
-// 设计原则：单一职责、高内聚低耦合
 type MapValidator struct {
 	// parentNamespace 父级命名空间，用于生成准确的错误路径
 	parentNamespace string
@@ -24,7 +19,7 @@ type MapValidator struct {
 	// allowedKeys 允许的键白名单（空则不限制）
 	allowedKeys []string
 
-	// keyValidators 自定义键验证器
+	// keyValidators 自定义键验证器 map[tag][func]
 	keyValidators map[string]func(value any) error
 
 	// allowedKeysMap 缓存的允许键映射（性能优化）
@@ -79,19 +74,22 @@ func WithKeyValidator(key string, validator func(value any) error) MapValidatorO
 
 // Validate 验证Map字段
 func (mv *MapValidator) Validate(data map[string]any, ctx *ValidationContext) {
-	if data == nil {
+	if ctx == nil {
+		return
+	}
+
+	if data == nil || len(data) == 0 {
 		if len(mv.requiredKeys) > 0 {
-			ctx.AddError(NewFieldError(mv.parentNamespace, "required").
-				WithMessage("map field cannot be nil when required keys are specified"))
+			ctx.AddError(NewFieldError("Map", "required"))
 		}
 		return
 	}
 
 	// 安全检查：防止DoS攻击
 	if len(data) > maxMapSize {
-		ctx.AddError(NewFieldError(mv.parentNamespace, "size").
+		ctx.AddError(NewFieldError("Map", "size").
 			WithParam(strconv.Itoa(maxMapSize)).
-			WithMessage(fmt.Sprintf("map size exceeds maximum limit %d", maxMapSize)))
+			WithValue(len(data)))
 		return
 	}
 
@@ -107,31 +105,41 @@ func (mv *MapValidator) Validate(data map[string]any, ctx *ValidationContext) {
 
 // validateRequiredKeys 验证必填键
 func (mv *MapValidator) validateRequiredKeys(data map[string]any, ctx *ValidationContext) {
+	if mv.requiredKeys == nil || len(mv.requiredKeys) == 0 {
+		return
+	}
+
 	for _, key := range mv.requiredKeys {
 		if len(key) > maxMapKeyLength {
-			ctx.AddError(NewFieldError(mv.parentNamespace, "key_length").
+			if !ctx.AddError(NewFieldError("Map", "key_len").
 				WithParam(strconv.Itoa(maxMapKeyLength)).
-				WithMessage(fmt.Sprintf("required key name exceeds maximum length %d", maxMapKeyLength)))
+				WithValue(key)) {
+				break
+			}
 			continue
 		}
 
 		if err := validateKeyName(key); err != nil {
-			ctx.AddError(NewFieldError(mv.parentNamespace, "invalid_key").
-				WithMessage(fmt.Sprintf("invalid required key name '%s': %v", key, err)))
+			if !ctx.AddError(NewFieldError("Map", "invalid_key").
+				WithValue(key).
+				WithMessage(fmt.Sprintf("invalid required key name '%s': %v", key, err))) {
+				break
+			}
 			continue
 		}
 
 		if _, exists := data[key]; !exists {
 			namespace := mv.getNamespace(key)
-			ctx.AddError(NewFieldError(namespace, "required").
-				WithMessage(fmt.Sprintf("required key '%s' is missing", key)))
+			if !ctx.AddError(NewFieldError(namespace, "required")) {
+				break
+			}
 		}
 	}
 }
 
 // validateAllowedKeys 验证允许的键（白名单）
 func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *ValidationContext) {
-	if len(mv.allowedKeys) == 0 {
+	if mv.allowedKeys == nil || len(mv.allowedKeys) == 0 {
 		return
 	}
 
@@ -145,28 +153,38 @@ func (mv *MapValidator) validateAllowedKeys(data map[string]any, ctx *Validation
 
 	for key := range data {
 		if len(key) > maxMapKeyLength {
-			ctx.AddError(NewFieldError(mv.parentNamespace, "key_length").
+			if !ctx.AddError(NewFieldError("Map", "key_len").
 				WithParam(strconv.Itoa(maxMapKeyLength)).
-				WithMessage(fmt.Sprintf("key name exceeds maximum length %d", maxMapKeyLength)))
+				WithValue(key)) {
+				break
+			}
 			continue
 		}
 
 		if err := validateKeyName(key); err != nil {
-			ctx.AddError(NewFieldError(mv.parentNamespace, "invalid_key").
-				WithMessage(fmt.Sprintf("invalid key name '%s': %v", key, err)))
+			if !ctx.AddError(NewFieldError("Map", "invalid_key").
+				WithValue(key).
+				WithMessage(fmt.Sprintf("invalid key name '%s': %v", key, err))) {
+				break
+			}
 			continue
 		}
 
 		if !mv.allowedKeysMap[key] {
 			namespace := mv.getNamespace(key)
-			ctx.AddError(NewFieldError(namespace, "not_allowed").
-				WithMessage(fmt.Sprintf("key '%s' is not in the allowed list", key)))
+			if !ctx.AddError(NewFieldError(namespace, "not_allowed")) {
+				break
+			}
 		}
 	}
 }
 
 // validateCustomKeys 执行自定义键验证
 func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *ValidationContext) {
+	if mv.keyValidators == nil || len(mv.keyValidators) == 0 {
+		return
+	}
+
 	for key, validator := range mv.keyValidators {
 		if validator == nil {
 			continue
@@ -174,25 +192,31 @@ func (mv *MapValidator) validateCustomKeys(data map[string]any, ctx *ValidationC
 
 		value, exists := data[key]
 		if !exists {
-			continue
+			continue // 键不存在时不执行验证
 		}
 
 		// 错误恢复：防止验证函数panic
-		func() {
+		canNext := func() bool {
 			defer func() {
 				if r := recover(); r != nil {
-					namespace := mv.getNamespace(key)
-					ctx.AddError(NewFieldError(namespace, "validator_panic").
+					ctx.AddError(NewFieldError("Map", "validate_panic").
+						WithValue(key).
 						WithMessage(fmt.Sprintf("validator function panicked: %v", r)))
 				}
 			}()
 
 			if err := validator(value); err != nil {
-				namespace := mv.getNamespace(key)
-				ctx.AddError(NewFieldError(namespace, "custom").
-					WithMessage(err.Error()))
+				if !ctx.AddError(NewFieldError(mv.parentNamespace, key).
+					WithParam(err.Error()).
+					WithMessage(err.Error())) {
+					return false
+				}
 			}
+			return true
 		}()
+		if !canNext {
+			break
+		}
 	}
 }
 
@@ -209,7 +233,7 @@ func (mv *MapValidator) getNamespace(key string) string {
 // ============================================================================
 
 const (
-	maxMapSize      = 10000       // 最大map大小
+	maxMapSize      = 1000        // 最大map大小
 	maxMapKeyLength = 256         // 最大键名长度
 	maxMapValueSize = 1024 * 1024 // 最大值大小（1MB）
 )
@@ -223,6 +247,17 @@ func validateKeyName(key string) error {
 	// 检查是否包含危险字符
 	if strings.ContainsAny(key, "\x00\n\r\t") {
 		return fmt.Errorf("key name contains invalid characters")
+	}
+
+	// 检查是否包含控制字符（ASCII 0-31）
+	for _, r := range key {
+		if r < 32 {
+			return fmt.Errorf("key name contains control character (code %d)", r)
+		}
+		// 检查是否包含危险字符（防止注入攻击）
+		if r == 0x7F { // DEL 字符
+			return fmt.Errorf("key name contains delete character")
+		}
 	}
 
 	return nil
@@ -401,7 +436,6 @@ func ValidateMapBoolKey(data map[string]any, key string) error {
 
 // MapStrategy Map验证策略
 // 职责：在验证流程中支持Map字段验证
-// 设计原则：单一职责、策略模式
 type MapStrategy struct {
 	validators map[string]*MapValidator
 }
