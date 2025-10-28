@@ -979,13 +979,13 @@ timeObj := domainID.ExtractTime()
 ### Q9: 如何扩展自定义生成器类型？
 
 ```go
-// 1. 实现core.IDGenerator接口
+// 1. 实现core.Generator接口
 type MyGenerator struct {}
 func (g *MyGenerator) NextID() (int64, error) { ... }
 
 // 2. 实现工厂
 type MyFactory struct {}
-func (f *MyFactory) Create(config any) (core.IDGenerator, error) { ... }
+func (f *MyFactory) Create(config any) (core.Generator, error) { ... }
 
 // 3. 注册到工厂注册表
 registry.GetFactoryRegistry().Register("my_type", &MyFactory{})
