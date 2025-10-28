@@ -2,8 +2,6 @@ package v5
 
 import (
 	"fmt"
-	"strings"
-	"sync"
 )
 
 // ErrorFormatter 错误格式化器接口
@@ -201,32 +199,4 @@ func (f *LocalizesErrorFormatter) FormatAll(errs []*FieldError) string {
 	}
 
 	return builder.String()
-}
-
-var stringBuilderPool = sync.Pool{
-	New: func() interface{} {
-		return &strings.Builder{}
-	},
-}
-
-// acquireStringBuilder 从对象池获取字符串构建器
-func acquireStringBuilder() *strings.Builder {
-	sb := stringBuilderPool.Get().(*strings.Builder)
-	sb.Reset()
-	return sb
-}
-
-// releaseStringBuilder 归还字符串构建器到对象池
-func releaseStringBuilder(sb *strings.Builder) {
-	if sb == nil {
-		return
-	}
-
-	// 防止内存泄漏：不归还过大的Builder
-	if sb.Cap() > 10*1024 { // 超过10KB
-		return
-	}
-
-	sb.Reset()
-	stringBuilderPool.Put(sb)
 }

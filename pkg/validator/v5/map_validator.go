@@ -7,25 +7,35 @@ import (
 	"sync"
 )
 
+// 常量定义：用于错误消息和性能优化
+const (
+	maxMapSize      = 1000 // 最大键名长度，防止恶意超长键名
+	maxMapKeyLength = 256  // 最大 map 大小，防止 DoS 攻击
+)
+
 // MapValidator Map字段验证器
 // 职责：专门验证 map[string]any 类型的动态字段
 type MapValidator struct {
 	// parentNamespace 父级命名空间，用于生成准确的错误路径
+	// 例如：User.Extras, Product.Metadata
 	parentNamespace string
 
 	// requiredKeys 必填键列表
 	requiredKeys []string
 
 	// allowedKeys 允许的键白名单（空则不限制）
+	// 用于防止非法字段注入，提升数据安全性
 	allowedKeys []string
 
 	// keyValidators 自定义键验证器 map[tag][func]
+	// key: Tag，value: 验证函数（返回 error 表示Param/Message）
 	keyValidators map[string]func(value any) error
 
 	// allowedKeysMap 缓存的允许键映射（性能优化）
+	//	// 使用 map 查找的时间复杂度为 O(1)，优于切片遍历的 O(n)
 	allowedKeysMap map[string]bool
 
-	// initOnce 确保缓存只初始化一次
+	// initOnce 确保缓存只初始化一次（线程安全）
 	initOnce sync.Once
 }
 
@@ -225,18 +235,127 @@ func (mv *MapValidator) getNamespace(key string) string {
 	if len(mv.parentNamespace) == 0 {
 		return key
 	}
-	return mv.parentNamespace + "." + key
+
+	// 内存优化：从对象池获取 strings.Builder
+	builder := acquireStringBuilder()
+	defer releaseStringBuilder(builder)
+
+	builder.Grow(len(mv.parentNamespace) + len(key) + 1)
+	builder.WriteString(mv.parentNamespace)
+	builder.WriteString(".")
+	builder.WriteString(key)
+	return builder.String()
 }
 
-// ============================================================================
-// 便捷验证函数
-// ============================================================================
+// ValidateMapKey 验证map中特定键的值（使用自定义验证函数）
+func ValidateMapKey(data map[string]any, key string, validatorFunc func(value any) error) error {
+	if data == nil || len(data) == 0 {
+		return fmt.Errorf("map is nil")
+	}
 
-const (
-	maxMapSize      = 1000        // 最大map大小
-	maxMapKeyLength = 256         // 最大键名长度
-	maxMapValueSize = 1024 * 1024 // 最大值大小（1MB）
-)
+	if len(key) == 0 {
+		return fmt.Errorf("map key validation failed: key name cannot be empty")
+	}
+
+	if validatorFunc == nil {
+		return fmt.Errorf("map key validation failed: validator function cannot be nil")
+	}
+
+	if err := validateKeyName(key); err != nil {
+		return fmt.Errorf("invalid key name: %w", err)
+	}
+
+	value, exists := data[key]
+	if !exists {
+		return fmt.Errorf("key '%s' does not exist", key)
+	}
+
+	var validationErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				validationErr = fmt.Errorf("map key '%s' validation failed: validator panicked: %v", key, r)
+			}
+		}()
+		validationErr = validatorFunc(value)
+	}()
+
+	return validationErr
+}
+
+// ValidateMapMustHaveKey 验证map必须包含指定的键
+func ValidateMapMustHaveKey(data map[string]any, key string) error {
+	if data == nil || len(data) == 0 {
+		return fmt.Errorf("map is nil")
+	}
+
+	if len(key) == 0 {
+		return fmt.Errorf("map key validation failed: key name cannot be empty")
+	}
+
+	if err := validateKeyName(key); err != nil {
+		return fmt.Errorf("invalid key name: %w", err)
+	}
+
+	if _, exists := data[key]; !exists {
+		return fmt.Errorf("required key '%s' is missing", key)
+	}
+
+	return nil
+}
+
+// ValidateMapMustHaveKeys 验证map必须包含指定的多个键
+func ValidateMapMustHaveKeys(data map[string]any, keys ...string) error {
+	if data == nil || len(data) == 0 {
+		return fmt.Errorf("map is nil")
+	}
+
+	if len(keys) == 0 {
+		return nil
+	}
+
+	var missingKeys []string
+	var invalidKeys []string
+
+	for _, key := range keys {
+		if len(key) == 0 {
+			continue // 忽略空键名
+		}
+
+		if err := validateKeyName(key); err != nil {
+			invalidKeys = append(invalidKeys, key)
+			continue
+		}
+
+		if _, exists := data[key]; !exists {
+			missingKeys = append(missingKeys, key)
+		}
+	}
+
+	// 构建错误消息
+	if len(invalidKeys) > 0 || len(missingKeys) > 0 {
+		// 内存优化：从对象池获取 strings.Builder
+		errMsg := acquireStringBuilder()
+		defer releaseStringBuilder(errMsg)
+
+		errMsg.WriteString("map validation failed: ")
+
+		if len(invalidKeys) > 0 {
+			errMsg.WriteString(fmt.Sprintf("invalid key names: %s", strings.Join(invalidKeys, ", ")))
+		}
+
+		if len(missingKeys) > 0 {
+			if len(invalidKeys) > 0 {
+				errMsg.WriteString("; ")
+			}
+			errMsg.WriteString(fmt.Sprintf("missing required keys: %s", strings.Join(missingKeys, ", ")))
+		}
+
+		return fmt.Errorf("%s", errMsg.String())
+	}
+
+	return nil
+}
 
 // validateKeyName 验证键名的有效性
 func validateKeyName(key string) error {
@@ -263,175 +382,8 @@ func validateKeyName(key string) error {
 	return nil
 }
 
-// ValidateMapKey 验证map中特定键的值（使用自定义验证函数）
-func ValidateMapKey(data map[string]any, key string, validator func(value any) error) error {
-	if data == nil {
-		return fmt.Errorf("map is nil")
-	}
-
-	if err := validateKeyName(key); err != nil {
-		return fmt.Errorf("invalid key name: %w", err)
-	}
-
-	value, exists := data[key]
-	if !exists {
-		return fmt.Errorf("key '%s' does not exist", key)
-	}
-
-	return validator(value)
-}
-
-// ValidateMapMustHaveKey 验证map必须包含指定的键
-func ValidateMapMustHaveKey(data map[string]any, key string) error {
-	if data == nil {
-		return fmt.Errorf("map is nil")
-	}
-
-	if err := validateKeyName(key); err != nil {
-		return fmt.Errorf("invalid key name: %w", err)
-	}
-
-	if _, exists := data[key]; !exists {
-		return fmt.Errorf("required key '%s' is missing", key)
-	}
-
-	return nil
-}
-
-// ValidateMapMustHaveKeys 验证map必须包含指定的多个键
-func ValidateMapMustHaveKeys(data map[string]any, keys ...string) error {
-	if data == nil {
-		return fmt.Errorf("map is nil")
-	}
-
-	var missingKeys []string
-	for _, key := range keys {
-		if err := validateKeyName(key); err != nil {
-			return fmt.Errorf("invalid key name '%s': %w", key, err)
-		}
-
-		if _, exists := data[key]; !exists {
-			missingKeys = append(missingKeys, key)
-		}
-	}
-
-	if len(missingKeys) > 0 {
-		return fmt.Errorf("missing required keys: %s", strings.Join(missingKeys, ", "))
-	}
-
-	return nil
-}
-
-// ValidateMapStringKey 验证map中字符串类型的键
-func ValidateMapStringKey(data map[string]any, key string, minLen, maxLen int) error {
-	return ValidateMapKey(data, key, func(value any) error {
-		str, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("key '%s' must be a string, got %T", key, value)
-		}
-
-		strLen := len(str)
-		if minLen > 0 && strLen < minLen {
-			return fmt.Errorf("key '%s' length must be at least %d, got %d", key, minLen, strLen)
-		}
-
-		if maxLen > 0 && strLen > maxLen {
-			return fmt.Errorf("key '%s' length must be at most %d, got %d", key, maxLen, strLen)
-		}
-
-		return nil
-	})
-}
-
-// ValidateMapIntKey 验证map中整数类型的键
-func ValidateMapIntKey(data map[string]any, key string, min, max int) error {
-	return ValidateMapKey(data, key, func(value any) error {
-		// 支持多种整数类型
-		var intValue int
-		switch v := value.(type) {
-		case int:
-			intValue = v
-		case int8:
-			intValue = int(v)
-		case int16:
-			intValue = int(v)
-		case int32:
-			intValue = int(v)
-		case int64:
-			intValue = int(v)
-		case uint:
-			intValue = int(v)
-		case uint8:
-			intValue = int(v)
-		case uint16:
-			intValue = int(v)
-		case uint32:
-			intValue = int(v)
-		case uint64:
-			intValue = int(v)
-		case float32:
-			intValue = int(v)
-		case float64:
-			intValue = int(v)
-		default:
-			return fmt.Errorf("key '%s' must be an integer, got %T", key, value)
-		}
-
-		if intValue < min {
-			return fmt.Errorf("key '%s' must be at least %d, got %d", key, min, intValue)
-		}
-
-		if intValue > max {
-			return fmt.Errorf("key '%s' must be at most %d, got %d", key, max, intValue)
-		}
-
-		return nil
-	})
-}
-
-// ValidateMapFloatKey 验证map中浮点数类型的键
-func ValidateMapFloatKey(data map[string]any, key string, min, max float64) error {
-	return ValidateMapKey(data, key, func(value any) error {
-		var floatValue float64
-		switch v := value.(type) {
-		case float32:
-			floatValue = float64(v)
-		case float64:
-			floatValue = v
-		case int:
-			floatValue = float64(v)
-		case int32:
-			floatValue = float64(v)
-		case int64:
-			floatValue = float64(v)
-		default:
-			return fmt.Errorf("key '%s' must be a float, got %T", key, value)
-		}
-
-		if floatValue < min {
-			return fmt.Errorf("key '%s' must be at least %f, got %f", key, min, floatValue)
-		}
-
-		if floatValue > max {
-			return fmt.Errorf("key '%s' must be at most %f, got %f", key, max, floatValue)
-		}
-
-		return nil
-	})
-}
-
-// ValidateMapBoolKey 验证map中布尔类型的键
-func ValidateMapBoolKey(data map[string]any, key string) error {
-	return ValidateMapKey(data, key, func(value any) error {
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("key '%s' must be a boolean, got %T", key, value)
-		}
-		return nil
-	})
-}
-
 // ============================================================================
-// MapStrategy - Map验证策略
+// MapStrategy - Map验证策略 TODO:GG 有必要吗
 // ============================================================================
 
 // MapStrategy Map验证策略
