@@ -3,6 +3,7 @@ package strategy
 import (
 	"fmt"
 	v5 "katydid-common-account/pkg/validator/v5"
+	"katydid-common-account/pkg/validator/v5/context"
 	"katydid-common-account/pkg/validator/v5/core"
 	error2 "katydid-common-account/pkg/validator/v5/error"
 	"reflect"
@@ -12,11 +13,11 @@ import (
 // 职责：递归验证嵌套的结构体
 type NestedStrategy struct {
 	engine   *v5.ValidatorEngine
-	maxDepth int
+	maxDepth int8
 }
 
 // NewNestedStrategy 创建嵌套验证策略
-func NewNestedStrategy(engine *v5.ValidatorEngine, maxDepth int) *NestedStrategy {
+func NewNestedStrategy(engine *v5.ValidatorEngine, maxDepth int8) core.IValidationStrategy {
 	return &NestedStrategy{
 		engine:   engine,
 		maxDepth: maxDepth,
@@ -34,7 +35,7 @@ func (s *NestedStrategy) Priority() int8 {
 }
 
 // Validate 执行嵌套验证
-func (s *NestedStrategy) Validate(target any, ctx *v5.ValidationContext) error {
+func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) error {
 	// 获取反射值
 	val := reflect.ValueOf(target)
 	if !val.IsValid() {
@@ -79,7 +80,7 @@ func (s *NestedStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 		// 只处理匿名（嵌入）的结构体字段
 		if fieldKind == reflect.Struct && fieldType.Anonymous {
 			// 超过最大深度，记录错误并停止验证
-			if ctx.Depth >= s.maxDepth {
+			if ctx.Depth() >= s.maxDepth {
 				ctx.AddError(
 					error2.NewFieldError("Struct", "max_depth").
 						WithMessage(fmt.Sprintf("maximum validation depth of %d exceeded", s.maxDepth)),
@@ -88,11 +89,14 @@ func (s *NestedStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 			}
 
 			// 创建子上下文，保持深度和上下文信息
-			subCtx := v5.NewValidationContext(ctx.Scene, ctx.MaxErrors).
-				WithContext(ctx.Context).
-				WithErrors(ctx.errors)
-			subCtx.Depth = ctx.Depth + 1
-			subCtx.Metadata = ctx.Metadata
+			subCtx := context.NewValidationContext(
+				ctx.Scene(),
+				ctx.MaxErrors(),
+				context.WithContext(ctx.Context()),
+				context.WithDepth(ctx.Depth()+1),
+				context.WithErrors(ctx.Errors()),
+				context.WithMetadata(ctx.Metadata()),
+			)
 
 			// 使用子上下文进行递归验证
 			fieldValue := field.Interface()
@@ -103,7 +107,7 @@ func (s *NestedStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 
 			// 将子上下文的错误添加到父上下文
 			if subCtx.HasErrors() {
-				ctx.AddErrors(subCtx.GetErrors())
+				ctx.AddErrors(subCtx.Errors())
 			}
 		}
 	}

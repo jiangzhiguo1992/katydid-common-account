@@ -14,12 +14,12 @@ import (
 // 职责：执行基于规则的字段验证（required, min, max等）
 type RuleStrategy struct {
 	validator    *validator.Validate
-	sceneMatcher core.SceneMatcher
+	sceneMatcher core.ISceneMatcher
 	registry     v5.Registry
 }
 
 // NewRuleStrategy 创建规则验证策略
-func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.SceneMatcher, registry v5.Registry) *RuleStrategy {
+func NewRuleStrategy(validator *validator.Validate, sceneMatcher core.ISceneMatcher, registry v5.Registry) core.IValidationStrategy {
 	// 注册自定义标签名函数，使用 json tag 作为字段名
 	validator.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
@@ -47,7 +47,7 @@ func (s *RuleStrategy) Priority() int8 {
 }
 
 // Validate 执行规则验证
-func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
+func (s *RuleStrategy) Validate(target any, ctx core.IValidationContext) error {
 	// 获取场景规则
 	var sceneRules map[core.Scene]map[string]string
 	if s.registry != nil {
@@ -56,27 +56,27 @@ func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 			sceneRules = typeInfo.Rules
 		}
 	} else {
-		// 回退到传统方式：检查是否实现了 RuleValidation 接口
-		if provider, ok := target.(core.RuleValidation); ok {
+		// 回退到传统方式：检查是否实现了 IRuleValidation 接口
+		if provider, ok := target.(core.IRuleValidation); ok {
 			sceneRules = provider.ValidateRules()
 		}
 	}
 
 	// 匹配当前场景的规则
-	rules := s.sceneMatcher.MatchRules(ctx.Scene, sceneRules)
+	rules := s.sceneMatcher.MatchRules(ctx.Scene(), sceneRules)
 	if len(rules) == 0 {
 		return nil
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(v5.metadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(core.MetadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(v5.metadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(core.MetadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok && (len(fieldList) > 0) {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -86,21 +86,21 @@ func (s *RuleStrategy) Validate(target any, ctx *v5.ValidationContext) error {
 	return s.validateByRules(target, rules, ctx)
 }
 
-// validateByRules 使用 RuleValidation 提供的规则验证
-func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx *v5.ValidationContext) error {
+// validateByRules 使用 IRuleValidation 提供的规则验证
+func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx core.IValidationContext) error {
 	if len(rules) == 0 {
 		return nil
 	}
 
 	// 检查是否是部分字段验证
-	if fields, ok := ctx.GetMetadata(v5.metadataKeyValidateFields); ok {
+	if fields, ok := ctx.GetMetadata(core.MetadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok {
 			rules = s.filterRulesByFields(rules, fieldList)
 		}
 	}
 
 	// 检查是否需要排除字段
-	if excludeFields, ok := ctx.GetMetadata(v5.metadataKeyExcludeFields); ok {
+	if excludeFields, ok := ctx.GetMetadata(core.MetadataKeyExcludeFields); ok {
 		if fieldList, ok := excludeFields.([]string); ok {
 			rules = s.excludeRulesFields(rules, fieldList)
 		}
@@ -164,7 +164,7 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 }
 
 // validateByTags 使用 struct tag 验证
-func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *v5.ValidationContext) error {
+func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx core.IValidationContext) error {
 	if len(rules) == 0 {
 		// 没有排除字段，执行完整验证
 		// Struct()内部本质还是validator.Var()
@@ -189,7 +189,7 @@ func (s *RuleStrategy) validateByTags(target any, rules map[string]string, ctx *
 }
 
 // addValidationErrors 添加验证错误
-func (s *RuleStrategy) addValidationErrors(err error, ctx *v5.ValidationContext) bool {
+func (s *RuleStrategy) addValidationErrors(err error, ctx core.IValidationContext) bool {
 	validationErrors, ok := err.(validator.ValidationErrors)
 	if !ok {
 		return ctx.AddError(error2.NewFieldErrorWithMessage(err.Error()))

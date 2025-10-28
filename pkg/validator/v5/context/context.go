@@ -39,33 +39,30 @@ func NewValidationContext(scene core.Scene, maxErrors int, opts ...ValidationCon
 }
 
 // WithContext 设置 Go 标准上下文
-func (vc *ValidationContext) WithContext(ctx context.Context) ValidationContextOption {
+func WithContext(ctx context.Context) ValidationContextOption {
 	return func(c *ValidationContext) {
 		c.context = ctx
 	}
 }
 
 // WithDepth 设置嵌套深度
-func (vc *ValidationContext) WithDepth(depth int8) ValidationContextOption {
+func WithDepth(depth int8) ValidationContextOption {
 	return func(c *ValidationContext) {
 		c.depth = depth
 	}
 }
 
 // WithErrors 设置错误列表
-func (vc *ValidationContext) WithErrors(errors []core.IFieldError) ValidationContextOption {
+func WithErrors(errors []core.IFieldError) ValidationContextOption {
 	return func(c *ValidationContext) {
 		c.errors = errors
 	}
 }
 
 // WithMetadata 设置元数据
-func (vc *ValidationContext) WithMetadata(key string, value any) ValidationContextOption {
+func WithMetadata(metadata map[string]any) ValidationContextOption {
 	return func(c *ValidationContext) {
-		if c.metadata == nil {
-			c.metadata = make(map[string]any)
-		}
-		c.metadata[key] = value
+		c.metadata = metadata
 	}
 }
 
@@ -73,6 +70,11 @@ func (vc *ValidationContext) WithMetadata(key string, value any) ValidationConte
 // 使用完毕后应该调用此方法
 func (vc *ValidationContext) Release() {
 	releaseValidationContext(vc)
+}
+
+// Context 获取 Go 标准上下文
+func (vc *ValidationContext) Context() context.Context {
+	return vc.context
 }
 
 // Scene 获取当前验证场景
@@ -85,13 +87,19 @@ func (vc *ValidationContext) Depth() int8 {
 	return vc.depth
 }
 
-// GetMetadata 获取元数据
-func (vc *ValidationContext) GetMetadata(key string) (any, bool) {
-	if vc.metadata == nil {
-		return nil, false
-	}
-	val, ok := vc.metadata[key]
-	return val, ok
+// Errors 获取所有错误
+func (vc *ValidationContext) Errors() []core.IFieldError {
+	return vc.errors
+}
+
+// Metadata 获取所有元数据
+func (vc *ValidationContext) Metadata() map[string]any {
+	return vc.metadata
+}
+
+// MaxErrors 获取最大错误数
+func (vc *ValidationContext) MaxErrors() int {
+	return vc.maxErrors
 }
 
 // AddError 添加错误
@@ -114,11 +122,6 @@ func (vc *ValidationContext) AddErrors(errs []core.IFieldError) bool {
 	return true
 }
 
-// GetErrors 获取所有错误
-func (vc *ValidationContext) GetErrors() []core.IFieldError {
-	return vc.errors
-}
-
 // HasErrors 是否有错误
 func (vc *ValidationContext) HasErrors() bool {
 	return len(vc.errors) > 0
@@ -127,4 +130,13 @@ func (vc *ValidationContext) HasErrors() bool {
 // ErrorCount 错误数量
 func (vc *ValidationContext) ErrorCount() int {
 	return len(vc.errors)
+}
+
+// GetMetadata 获取元数据
+func (vc *ValidationContext) GetMetadata(key string) (any, bool) {
+	if vc.metadata == nil {
+		return nil, false
+	}
+	val, ok := vc.metadata[key]
+	return val, ok
 }

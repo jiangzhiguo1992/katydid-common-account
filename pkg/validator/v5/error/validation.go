@@ -25,22 +25,22 @@ func NewValidationError(formatter core.IErrorFormatter, opts ...ValidationErrorO
 	return ve
 }
 
-// WithMessage 设置消息
-func (ve *ValidationError) WithMessage(message string) ValidationErrorOption {
+// WithTotalMessage 设置消息
+func WithTotalMessage(message string) ValidationErrorOption {
 	return func(ve *ValidationError) {
 		ve.message = message
 	}
 }
 
 // WithError 追加单个错误
-func (ve *ValidationError) WithError(err core.IFieldError) ValidationErrorOption {
+func WithError(err core.IFieldError) ValidationErrorOption {
 	return func(ve *ValidationError) {
 		ve.errors = append(ve.errors, err)
 	}
 }
 
 // WithErrors 设置多个错误
-func (ve *ValidationError) WithErrors(errs []core.IFieldError) ValidationErrorOption {
+func WithErrors(errs []core.IFieldError) ValidationErrorOption {
 	return func(ve *ValidationError) {
 		ve.errors = append(ve.errors, errs...)
 	}

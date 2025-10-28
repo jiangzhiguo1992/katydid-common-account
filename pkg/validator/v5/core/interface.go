@@ -1,5 +1,7 @@
 package core
 
+import "context"
+
 // ============================================================================
 // 外部需要实现的接口
 // ============================================================================
@@ -52,16 +54,24 @@ type IValidationListener interface {
 type IValidationContext interface {
 	// Release 释放验证上下文资源
 	Release()
+
+	// Context 获取 Go 标准上下文
+	Context() context.Context
 	// Scene 获取当前验证场景
 	Scene() Scene
 	// Depth 获取当前验证深度（用于嵌套结构体）
 	Depth() int8
+	// Errors 获取所有字段错误
+	Errors() []IFieldError
+	// Metadata 获取所有元数据
+	Metadata() map[string]any
+	// MaxErrors 获取最大错误数限制
+	MaxErrors() int
+
 	// AddError 添加单个字段错误
 	AddError(IFieldError) bool
 	// AddErrors 添加多个字段错误
 	AddErrors([]IFieldError) bool
-	// GetErrors 获取所有字段错误
-	GetErrors() []IFieldError
 	// HasErrors 检查是否存在错误
 	HasErrors() bool
 	// ErrorCount 获取错误数量
