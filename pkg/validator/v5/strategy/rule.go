@@ -136,7 +136,11 @@ func (s *RuleStrategy) validateByRules(target any, rules map[string]string, ctx 
 		var field reflect.Value
 
 		// 优化：优先使用缓存的访问器（O(1) 访问）
-		if accessor := typeInfo.FieldAccessor(fieldName); accessor != nil {
+		var accessor core.FieldAccessor
+		if typeInfo != nil {
+			accessor = typeInfo.FieldAccessor(fieldName)
+		}
+		if accessor != nil {
 			field = accessor(val)
 		} else {
 			// 回退到传统方式：通过字段名查找（O(n) 访问）

@@ -6,9 +6,6 @@ import (
 	"unsafe"
 )
 
-// FieldErrorOption 字段错误选项函数类型
-type FieldErrorOption func(*FieldError)
-
 // FieldError 字段错误
 // 职责：描述单个字段的验证错误
 type FieldError struct {
@@ -60,6 +57,9 @@ func NewFieldErrorWithMessage(message string, opts ...FieldErrorOption) core.IFi
 
 	return fe
 }
+
+// FieldErrorOption 字段错误选项函数类型
+type FieldErrorOption func(*FieldError)
 
 // WithParam 设置参数
 func WithParam(param string) FieldErrorOption {

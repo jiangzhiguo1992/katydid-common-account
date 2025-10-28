@@ -2,9 +2,6 @@ package err
 
 import "katydid-common-account/pkg/validator/v5/core"
 
-// ValidationErrorOption 字段错误选项函数类型
-type ValidationErrorOption func(*ValidationError)
-
 // ValidationError 验证错误集合
 // 职责：包装多个字段错误
 type ValidationError struct {
@@ -24,6 +21,9 @@ func NewValidationError(formatter core.IErrorFormatter, opts ...ValidationErrorO
 
 	return ve
 }
+
+// ValidationErrorOption 字段错误选项函数类型
+type ValidationErrorOption func(*ValidationError)
 
 // WithTotalMessage 设置消息
 func WithTotalMessage(message string) ValidationErrorOption {

@@ -5,9 +5,6 @@ import (
 	"katydid-common-account/pkg/validator/v5/core"
 )
 
-// ValidationContextOption 验证上下文选项函数
-type ValidationContextOption func(*ValidationContext)
-
 // ValidationContext 验证上下文
 // 职责：携带验证过程中的上下文信息
 type ValidationContext struct {
@@ -37,6 +34,9 @@ func NewValidationContext(scene core.Scene, maxErrors int, opts ...ValidationCon
 
 	return ctx
 }
+
+// ValidationContextOption 验证上下文选项函数
+type ValidationContextOption func(*ValidationContext)
 
 // WithContext 设置 Go 标准上下文
 func WithContext(ctx context.Context) ValidationContextOption {
