@@ -1,6 +1,7 @@
 package v5
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -91,12 +92,13 @@ func TestValidatorEngine_Validate(t *testing.T) {
 			t.Error("expected error, got nil")
 		}
 
-		ve, ok := err.(*ValidationError)
+		var ve *ValidationError
+		ok := errors.As(err, &ve)
 		if !ok {
 			t.Error("expected ValidationError")
 		}
 
-		if len(ve.Errors) == 0 {
+		if len(ve.errors) == 0 {
 			t.Error("expected errors")
 		}
 	})
@@ -115,13 +117,14 @@ func TestValidatorEngine_Validate(t *testing.T) {
 			t.Error("expected error, got nil")
 		}
 
-		ve, ok := err.(*ValidationError)
+		var ve *ValidationError
+		ok := errors.As(err, &ve)
 		if !ok {
 			t.Error("expected ValidationError")
 		}
 
 		found := false
-		for _, e := range ve.Errors {
+		for _, e := range ve.errors {
 			if e.Tag == "reserved" {
 				found = true
 				break
@@ -171,12 +174,12 @@ func TestValidatorEngine_Validate(t *testing.T) {
 //		t.Error("expected ValidationError")
 //	}
 //
-//	if len(ve.Errors) == 0 {
+//	if len(ve.errors) == 0 {
 //		t.Error("expected errors")
 //	}
 //
-//	t.Logf("got %d errors", len(ve.Errors))
-//	for _, e := range ve.Errors {
+//	t.Logf("got %d errors", len(ve.errors))
+//	for _, e := range ve.errors {
 //		t.Logf("error: %s", e.Error())
 //	}
 //}
@@ -290,9 +293,10 @@ func TestNestedValidation_ContextUsage(t *testing.T) {
 			t.Error("expected validation error for nested field ID, got nil")
 		} else {
 			t.Logf("Got expected error: %v", err)
-			if ve, ok := err.(*ValidationError); ok {
-				t.Logf("Error count: %d", len(ve.Errors))
-				for _, e := range ve.Errors {
+			var ve *ValidationError
+			if errors.As(err, &ve) {
+				t.Logf("Error count: %d", len(ve.errors))
+				for _, e := range ve.errors {
 					t.Logf("  Field: %s, Tag: %s", e.Namespace, e.Tag)
 				}
 			}
@@ -327,7 +331,7 @@ type BenchTestStruct struct {
 func (t *BenchTestStruct) ValidateRules() map[Scene]map[string]string {
 	return map[Scene]map[string]string{
 		SceneBench: {
-			"Name":  "required,min=3,max=20",
+			"Type":  "required,min=3,max=20",
 			"Email": "required,email",
 			"Age":   "required,gte=18,lte=100",
 		},
