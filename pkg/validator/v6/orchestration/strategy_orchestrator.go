@@ -8,7 +8,7 @@ import (
 
 // strategyEntry 策略条目
 type strategyEntry struct {
-	strategy core.ValidationStrategy
+	strategy core.IValidationStrategy
 	priority int // 数字越小优先级越高
 }
 
@@ -16,13 +16,13 @@ type strategyEntry struct {
 // 职责：管理和编排验证策略的执行顺序
 // 设计原则：责任链模式 + 策略模式
 type strategyOrchestrator struct {
-	strategies      []strategyEntry
-	executionMode   core.ExecutionMode
-	mu              sync.RWMutex
+	strategies    []strategyEntry
+	executionMode core.ExecutionMode
+	mu            sync.RWMutex
 }
 
 // NewStrategyOrchestrator 创建策略编排器
-func NewStrategyOrchestrator() core.StrategyOrchestrator {
+func NewStrategyOrchestrator() core.IStrategyOrchestrator {
 	return &strategyOrchestrator{
 		strategies:    make([]strategyEntry, 0),
 		executionMode: core.ExecutionModeSequential, // 默认串行执行
@@ -30,7 +30,7 @@ func NewStrategyOrchestrator() core.StrategyOrchestrator {
 }
 
 // Register 注册策略
-func (o *strategyOrchestrator) Register(strategy core.ValidationStrategy, priority int) {
+func (o *strategyOrchestrator) Register(strategy core.IValidationStrategy, priority int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -62,11 +62,11 @@ func (o *strategyOrchestrator) Unregister(strategyType core.StrategyType) {
 }
 
 // GetStrategies 获取所有策略
-func (o *strategyOrchestrator) GetStrategies() []core.ValidationStrategy {
+func (o *strategyOrchestrator) GetStrategies() []core.IValidationStrategy {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	strategies := make([]core.ValidationStrategy, len(o.strategies))
+	strategies := make([]core.IValidationStrategy, len(o.strategies))
 	for i, entry := range o.strategies {
 		strategies[i] = entry.strategy
 	}
@@ -74,7 +74,7 @@ func (o *strategyOrchestrator) GetStrategies() []core.ValidationStrategy {
 }
 
 // Execute 执行所有策略
-func (o *strategyOrchestrator) Execute(target any, ctx core.Context, collector core.ErrorCollector) error {
+func (o *strategyOrchestrator) Execute(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -85,7 +85,7 @@ func (o *strategyOrchestrator) Execute(target any, ctx core.Context, collector c
 }
 
 // executeSequential 串行执行策略
-func (o *strategyOrchestrator) executeSequential(target any, ctx core.Context, collector core.ErrorCollector) error {
+func (o *strategyOrchestrator) executeSequential(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	for _, entry := range o.strategies {
 		// 检查是否已达到最大错误数
 		if collector.Count() >= collector.MaxErrors() {
@@ -103,7 +103,7 @@ func (o *strategyOrchestrator) executeSequential(target any, ctx core.Context, c
 }
 
 // executeParallel 并行执行策略
-func (o *strategyOrchestrator) executeParallel(target any, ctx core.Context, collector core.ErrorCollector) error {
+func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -111,7 +111,7 @@ func (o *strategyOrchestrator) executeParallel(target any, ctx core.Context, col
 		wg.Add(1)
 
 		// 并行执行每个策略
-		go func(s core.ValidationStrategy) {
+		go func(s core.IValidationStrategy) {
 			defer wg.Done()
 
 			// 检查是否已达到最大错误数

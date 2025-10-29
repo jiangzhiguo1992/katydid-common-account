@@ -13,23 +13,23 @@ import (
 // 优点：保持错误顺序，适合顺序展示
 // 缺点：查找特定字段错误较慢
 type listErrorCollector struct {
-	errors    []core.FieldError
+	errors    []core.IFieldError
 	maxErrors int
 }
 
 // NewListErrorCollector 创建列表错误收集器
-func NewListErrorCollector(maxErrors int) core.ErrorCollector {
+func NewListErrorCollector(maxErrors int) core.IErrorCollector {
 	if maxErrors <= 0 {
 		maxErrors = 100
 	}
 	return &listErrorCollector{
-		errors:    make([]core.FieldError, 0, maxErrors),
+		errors:    make([]core.IFieldError, 0, maxErrors),
 		maxErrors: maxErrors,
 	}
 }
 
 // Collect 收集错误
-func (c *listErrorCollector) Collect(err core.FieldError) bool {
+func (c *listErrorCollector) Collect(err core.IFieldError) bool {
 	if c.Count() >= c.maxErrors {
 		return false
 	}
@@ -38,7 +38,7 @@ func (c *listErrorCollector) Collect(err core.FieldError) bool {
 }
 
 // CollectAll 批量收集错误
-func (c *listErrorCollector) CollectAll(errs []core.FieldError) bool {
+func (c *listErrorCollector) CollectAll(errs []core.IFieldError) bool {
 	for _, err := range errs {
 		if !c.Collect(err) {
 			return false
@@ -48,7 +48,7 @@ func (c *listErrorCollector) CollectAll(errs []core.FieldError) bool {
 }
 
 // Errors 获取所有错误
-func (c *listErrorCollector) Errors() []core.FieldError {
+func (c *listErrorCollector) Errors() []core.IFieldError {
 	return c.errors
 }
 
@@ -80,24 +80,24 @@ func (c *listErrorCollector) MaxErrors() int {
 // 优点：按字段分组，便于查找特定字段错误
 // 缺点：不保证错误顺序
 type mapErrorCollector struct {
-	errors    map[string][]core.FieldError
+	errors    map[string][]core.IFieldError
 	count     int
 	maxErrors int
 }
 
 // NewMapErrorCollector 创建 Map 错误收集器
-func NewMapErrorCollector(maxErrors int) core.ErrorCollector {
+func NewMapErrorCollector(maxErrors int) core.IErrorCollector {
 	if maxErrors <= 0 {
 		maxErrors = 100
 	}
 	return &mapErrorCollector{
-		errors:    make(map[string][]core.FieldError),
+		errors:    make(map[string][]core.IFieldError),
 		maxErrors: maxErrors,
 	}
 }
 
 // Collect 收集错误
-func (c *mapErrorCollector) Collect(err core.FieldError) bool {
+func (c *mapErrorCollector) Collect(err core.IFieldError) bool {
 	if c.count >= c.maxErrors {
 		return false
 	}
@@ -109,7 +109,7 @@ func (c *mapErrorCollector) Collect(err core.FieldError) bool {
 }
 
 // CollectAll 批量收集错误
-func (c *mapErrorCollector) CollectAll(errs []core.FieldError) bool {
+func (c *mapErrorCollector) CollectAll(errs []core.IFieldError) bool {
 	for _, err := range errs {
 		if !c.Collect(err) {
 			return false
@@ -119,8 +119,8 @@ func (c *mapErrorCollector) CollectAll(errs []core.FieldError) bool {
 }
 
 // Errors 获取所有错误（展平）
-func (c *mapErrorCollector) Errors() []core.FieldError {
-	result := make([]core.FieldError, 0, c.count)
+func (c *mapErrorCollector) Errors() []core.IFieldError {
+	result := make([]core.IFieldError, 0, c.count)
 	for _, errs := range c.errors {
 		result = append(result, errs...)
 	}
@@ -128,7 +128,7 @@ func (c *mapErrorCollector) Errors() []core.FieldError {
 }
 
 // ErrorsByField 获取指定字段的错误
-func (c *mapErrorCollector) ErrorsByField(field string) []core.FieldError {
+func (c *mapErrorCollector) ErrorsByField(field string) []core.IFieldError {
 	return c.errors[field]
 }
 
@@ -144,7 +144,7 @@ func (c *mapErrorCollector) Count() int {
 
 // Clear 清空错误
 func (c *mapErrorCollector) Clear() {
-	c.errors = make(map[string][]core.FieldError)
+	c.errors = make(map[string][]core.IFieldError)
 	c.count = 0
 }
 
@@ -161,7 +161,7 @@ var (
 	listCollectorPool = sync.Pool{
 		New: func() any {
 			return &listErrorCollector{
-				errors:    make([]core.FieldError, 0, 10),
+				errors:    make([]core.IFieldError, 0, 10),
 				maxErrors: 100,
 			}
 		},
@@ -170,7 +170,7 @@ var (
 	mapCollectorPool = sync.Pool{
 		New: func() any {
 			return &mapErrorCollector{
-				errors:    make(map[string][]core.FieldError),
+				errors:    make(map[string][]core.IFieldError),
 				maxErrors: 100,
 			}
 		},
@@ -178,7 +178,7 @@ var (
 )
 
 // AcquireListCollector 从对象池获取列表收集器
-func AcquireListCollector(maxErrors int) core.ErrorCollector {
+func AcquireListCollector(maxErrors int) core.IErrorCollector {
 	c := listCollectorPool.Get().(*listErrorCollector)
 	c.maxErrors = maxErrors
 	c.Clear()
@@ -186,7 +186,7 @@ func AcquireListCollector(maxErrors int) core.ErrorCollector {
 }
 
 // ReleaseListCollector 释放列表收集器到对象池
-func ReleaseListCollector(collector core.ErrorCollector) {
+func ReleaseListCollector(collector core.IErrorCollector) {
 	if c, ok := collector.(*listErrorCollector); ok {
 		c.Clear()
 		listCollectorPool.Put(c)
@@ -194,7 +194,7 @@ func ReleaseListCollector(collector core.ErrorCollector) {
 }
 
 // AcquireMapCollector 从对象池获取 Map 收集器
-func AcquireMapCollector(maxErrors int) core.ErrorCollector {
+func AcquireMapCollector(maxErrors int) core.IErrorCollector {
 	c := mapCollectorPool.Get().(*mapErrorCollector)
 	c.maxErrors = maxErrors
 	c.Clear()
@@ -202,7 +202,7 @@ func AcquireMapCollector(maxErrors int) core.ErrorCollector {
 }
 
 // ReleaseMapCollector 释放 Map 收集器到对象池
-func ReleaseMapCollector(collector core.ErrorCollector) {
+func ReleaseMapCollector(collector core.IErrorCollector) {
 	if c, ok := collector.(*mapErrorCollector); ok {
 		c.Clear()
 		mapCollectorPool.Put(c)

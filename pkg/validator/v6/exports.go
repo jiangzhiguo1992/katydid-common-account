@@ -11,7 +11,7 @@ import (
 // ============================================================================
 
 // NewFieldError 创建字段错误
-func NewFieldError(namespace, field, tag string, opts ...errors.FieldErrorOption) core.FieldError {
+func NewFieldError(namespace, field, tag string, opts ...errors.FieldErrorOption) core.IFieldError {
 	return errors.NewFieldError(namespace, field, tag, opts...)
 }
 
@@ -31,27 +31,27 @@ func WithMessage(message string) errors.FieldErrorOption {
 }
 
 // NewListErrorCollector 创建列表错误收集器
-func NewListErrorCollector(maxErrors int) core.ErrorCollector {
+func NewListErrorCollector(maxErrors int) core.IErrorCollector {
 	return errors.NewListErrorCollector(maxErrors)
 }
 
 // NewMapErrorCollector 创建 Map 错误收集器
-func NewMapErrorCollector(maxErrors int) core.ErrorCollector {
+func NewMapErrorCollector(maxErrors int) core.IErrorCollector {
 	return errors.NewMapErrorCollector(maxErrors)
 }
 
 // NewDefaultFormatter 创建默认格式化器
-func NewDefaultFormatter() core.ErrorFormatter {
+func NewDefaultFormatter() core.IErrorFormatter {
 	return errors.NewDefaultFormatter()
 }
 
 // NewJSONFormatter 创建 JSON 格式化器
-func NewJSONFormatter() core.ErrorFormatter {
+func NewJSONFormatter() core.IErrorFormatter {
 	return errors.NewJSONFormatter()
 }
 
 // NewDetailedFormatter 创建详细格式化器
-func NewDetailedFormatter() core.ErrorFormatter {
+func NewDetailedFormatter() core.IErrorFormatter {
 	return errors.NewDetailedFormatter()
 }
 
@@ -100,25 +100,25 @@ type StrategyType = core.StrategyType
 type ExecutionMode = core.ExecutionMode
 
 // Validator 验证器接口别名
-type Validator = core.Validator
+type Validator = core.IValidator
 
 // ValidationError 验证错误接口别名
-type ValidationError = core.ValidationError
+type ValidationError = core.IValidationError
 
 // FieldError 字段错误接口别名
-type FieldError = core.FieldError
+type FieldError = core.IFieldError
 
 // ErrorCollector 错误收集器接口别名
-type ErrorCollector = core.ErrorCollector
+type ErrorCollector = core.IErrorCollector
 
 // Context 上下文接口别名
-type Context = core.Context
+type Context = core.IContext
 
 // ValidationStrategy 验证策略接口别名
-type ValidationStrategy = core.ValidationStrategy
+type ValidationStrategy = core.IValidationStrategy
 
 // Interceptor 拦截器接口别名
-type Interceptor = core.Interceptor
+type Interceptor = core.IInterceptor
 
 // ValidationListener 验证监听器接口别名
-type ValidationListener = core.ValidationListener
+type ValidationListener = core.IValidationListener

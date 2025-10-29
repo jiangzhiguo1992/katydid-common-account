@@ -18,7 +18,7 @@ type simpleCache struct {
 }
 
 // NewSimpleCache 创建简单缓存
-func NewSimpleCache() core.CacheManager {
+func NewSimpleCache() core.ICacheManager {
 	return &simpleCache{}
 }
 
@@ -72,13 +72,13 @@ func (c *simpleCache) Stats() core.CacheStats {
 
 // lruCache LRU 缓存实现
 type lruCache struct {
-	mu       sync.RWMutex
-	data     map[any]*lruNode
-	head     *lruNode
-	tail     *lruNode
-	maxSize  int
-	hits     atomic.Int64
-	misses   atomic.Int64
+	mu      sync.RWMutex
+	data    map[any]*lruNode
+	head    *lruNode
+	tail    *lruNode
+	maxSize int
+	hits    atomic.Int64
+	misses  atomic.Int64
 }
 
 // lruNode LRU 链表节点
@@ -90,7 +90,7 @@ type lruNode struct {
 }
 
 // NewLRUCache 创建 LRU 缓存
-func NewLRUCache(maxSize int) core.CacheManager {
+func NewLRUCache(maxSize int) core.ICacheManager {
 	if maxSize <= 0 {
 		maxSize = 1000
 	}
@@ -222,7 +222,7 @@ func (c *lruCache) removeTail() *lruNode {
 type noCache struct{}
 
 // NewNoCache 创建无缓存
-func NewNoCache() core.CacheManager {
+func NewNoCache() core.ICacheManager {
 	return &noCache{}
 }
 

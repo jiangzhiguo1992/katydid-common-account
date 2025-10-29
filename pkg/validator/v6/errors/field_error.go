@@ -17,7 +17,7 @@ type fieldError struct {
 }
 
 // NewFieldError 创建字段错误
-func NewFieldError(namespace, field, tag string, opts ...FieldErrorOption) core.FieldError {
+func NewFieldError(namespace, field, tag string, opts ...FieldErrorOption) core.IFieldError {
 	err := &fieldError{
 		namespace: namespace,
 		field:     field,
@@ -61,32 +61,32 @@ func WithMessage(message string) FieldErrorOption {
 	}
 }
 
-// Namespace 实现 FieldError 接口
+// Namespace 实现 IFieldError 接口
 func (e *fieldError) Namespace() string {
 	return e.namespace
 }
 
-// Field 实现 FieldError 接口
+// Field 实现 IFieldError 接口
 func (e *fieldError) Field() string {
 	return e.field
 }
 
-// Tag 实现 FieldError 接口
+// Tag 实现 IFieldError 接口
 func (e *fieldError) Tag() string {
 	return e.tag
 }
 
-// Param 实现 FieldError 接口
+// Param 实现 IFieldError 接口
 func (e *fieldError) Param() string {
 	return e.param
 }
 
-// Value 实现 FieldError 接口
+// Value 实现 IFieldError 接口
 func (e *fieldError) Value() any {
 	return e.value
 }
 
-// Message 实现 FieldError 接口
+// Message 实现 IFieldError 接口
 func (e *fieldError) Message() string {
 	return e.message
 }

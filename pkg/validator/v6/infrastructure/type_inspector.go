@@ -8,11 +8,11 @@ import (
 // typeInspector 类型检查器实现
 // 设计原则：缓存代理模式
 type typeInspector struct {
-	cache core.CacheManager
+	cache core.ICacheManager
 }
 
 // NewTypeInspector 创建类型检查器
-func NewTypeInspector(cache core.CacheManager) core.TypeInspector {
+func NewTypeInspector(cache core.ICacheManager) core.ITypeInspector {
 	if cache == nil {
 		cache = NewSimpleCache()
 	}
@@ -22,7 +22,7 @@ func NewTypeInspector(cache core.CacheManager) core.TypeInspector {
 }
 
 // Inspect 检查类型信息
-func (i *typeInspector) Inspect(target any) core.TypeInfo {
+func (i *typeInspector) Inspect(target any) core.ITypeInfo {
 	if target == nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func (i *typeInspector) Inspect(target any) core.TypeInfo {
 
 	// 尝试从缓存获取
 	if info, ok := i.cache.Get(typ); ok {
-		return info.(core.TypeInfo)
+		return info.(core.ITypeInfo)
 	}
 
 	// 创建类型信息
@@ -58,7 +58,7 @@ func (i *typeInspector) Inspect(target any) core.TypeInfo {
 }
 
 // buildTypeInfo 构建类型信息
-func (i *typeInspector) buildTypeInfo(target any, typ reflect.Type) core.TypeInfo {
+func (i *typeInspector) buildTypeInfo(target any, typ reflect.Type) core.ITypeInfo {
 	info := &typeInfo{
 		typeName:  typ.Name(),
 		accessors: make(map[string]core.FieldAccessor),
@@ -69,12 +69,12 @@ func (i *typeInspector) buildTypeInfo(target any, typ reflect.Type) core.TypeInf
 	info.isBusinessValidator = i.implementsBusinessValidator(target)
 	info.isLifecycleHooks = i.implementsLifecycleHooks(target)
 
-	// 如果实现了 RuleProvider，获取规则
+	// 如果实现了 IRuleValidator，获取规则
 	if info.isRuleProvider {
-		if _, ok := target.(core.RuleProvider); ok {
+		if _, ok := target.(core.IRuleValidator); ok {
 			// 缓存所有场景的规则
 			info.rulesCache = make(map[core.Scene]map[string]string)
-			// 这里只是占位，实际规则在调用 GetRules 时获取
+			// 这里只是占位，实际规则在调用 ValidateRules 时获取
 		}
 	}
 
@@ -145,15 +145,15 @@ func (i *typeInspector) buildFieldAccessors(typ reflect.Type, info *typeInfo) {
 	}
 }
 
-// implementsRuleProvider 检查是否实现了 RuleProvider
+// implementsRuleProvider 检查是否实现了 IRuleValidator
 func (i *typeInspector) implementsRuleProvider(target any) bool {
-	_, ok := target.(core.RuleProvider)
+	_, ok := target.(core.IRuleValidator)
 	return ok
 }
 
-// implementsBusinessValidator 检查是否实现了 BusinessValidator
+// implementsBusinessValidator 检查是否实现了 IBusinessValidator
 func (i *typeInspector) implementsBusinessValidator(target any) bool {
-	_, ok := target.(core.BusinessValidator)
+	_, ok := target.(core.IBusinessValidator)
 	return ok
 }
 
@@ -174,7 +174,7 @@ func (i *typeInspector) Stats() core.CacheStats {
 }
 
 // ============================================================================
-// TypeInfo 实现
+// ITypeInfo 实现
 // ============================================================================
 
 // typeInfo 类型信息实现
@@ -187,23 +187,23 @@ type typeInfo struct {
 	accessors           map[string]core.FieldAccessor
 }
 
-// IsRuleProvider 实现 TypeInfo 接口
+// IsRuleProvider 实现 ITypeInfo 接口
 func (t *typeInfo) IsRuleProvider() bool {
 	return t.isRuleProvider
 }
 
-// IsBusinessValidator 实现 TypeInfo 接口
+// IsBusinessValidator 实现 ITypeInfo 接口
 func (t *typeInfo) IsBusinessValidator() bool {
 	return t.isBusinessValidator
 }
 
-// IsLifecycleHooks 实现 TypeInfo 接口
+// IsLifecycleHooks 实现 ITypeInfo 接口
 func (t *typeInfo) IsLifecycleHooks() bool {
 	return t.isLifecycleHooks
 }
 
-// GetRules 实现 TypeInfo 接口
-func (t *typeInfo) GetRules(scene core.Scene) map[string]string {
+// ValidateRules 实现 ITypeInfo 接口
+func (t *typeInfo) ValidateRules(scene core.Scene) map[string]string {
 	// 如果有缓存，直接返回
 	if t.rulesCache != nil {
 		if rules, ok := t.rulesCache[scene]; ok {
@@ -213,12 +213,12 @@ func (t *typeInfo) GetRules(scene core.Scene) map[string]string {
 	return nil
 }
 
-// FieldAccessor 实现 TypeInfo 接口
+// FieldAccessor 实现 ITypeInfo 接口
 func (t *typeInfo) FieldAccessor(fieldName string) core.FieldAccessor {
 	return t.accessors[fieldName]
 }
 
-// TypeName 实现 TypeInfo 接口
+// TypeName 实现 ITypeInfo 接口
 func (t *typeInfo) TypeName() string {
 	return t.typeName
 }

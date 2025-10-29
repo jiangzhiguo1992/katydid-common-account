@@ -15,13 +15,13 @@ import (
 // ============================================================================
 
 var (
-	defaultValidator core.Validator
+	defaultValidator core.IValidator
 	once             sync.Once
 )
 
 // Facade 获取默认验证器实例（单例）
 // 设计模式：单例模式 + 门面模式
-func Facade() core.Validator {
+func Facade() core.IValidator {
 	once.Do(func() {
 		defaultValidator = NewDefaultValidator()
 	})
@@ -30,7 +30,7 @@ func Facade() core.Validator {
 
 // Validate 使用默认验证器执行验证
 // 便捷方法：简化调用
-func Validate(target any, scene core.Scene) core.ValidationError {
+func Validate(target any, scene core.Scene) core.IValidationError {
 	return Facade().Validate(target, scene)
 }
 
@@ -42,25 +42,25 @@ func Validate(target any, scene core.Scene) core.ValidationError {
 // 设计模式：建造者模式
 type Builder struct {
 	// 基础设施组件
-	cache        core.CacheManager
-	inspector    core.TypeInspector
-	sceneMatcher core.SceneMatcher
-	ruleEngine   core.RuleEngine
+	cache        core.ICacheManager
+	inspector    core.ITypeInspector
+	sceneMatcher core.ISceneMatcher
+	ruleEngine   core.IRuleEngine
 
 	// 编排组件
-	orchestrator     core.StrategyOrchestrator
-	interceptorChain core.InterceptorChain
-	hookExecutor     core.HookExecutor
-	listenerNotifier core.ListenerNotifier
+	orchestrator     core.IStrategyOrchestrator
+	interceptorChain core.IInterceptorChain
+	hookExecutor     core.IHookExecutor
+	listenerNotifier core.IListenerNotifier
 
 	// 策略
 	strategies map[core.StrategyType]struct {
-		strategy core.ValidationStrategy
+		strategy core.IValidationStrategy
 		priority int
 	}
 
 	// 配置
-	errorFormatter core.ErrorFormatter
+	errorFormatter core.IErrorFormatter
 	maxErrors      int
 	maxDepth       int
 	executionMode  core.ExecutionMode
@@ -69,8 +69,8 @@ type Builder struct {
 // NewBuilder 创建构建器
 func NewBuilder() *Builder {
 	return &Builder{
-		strategies:    make(map[core.StrategyType]struct {
-			strategy core.ValidationStrategy
+		strategies: make(map[core.StrategyType]struct {
+			strategy core.IValidationStrategy
 			priority int
 		}),
 		maxErrors:     100,
@@ -80,7 +80,7 @@ func NewBuilder() *Builder {
 }
 
 // WithCache 设置缓存管理器
-func (b *Builder) WithCache(cache core.CacheManager) *Builder {
+func (b *Builder) WithCache(cache core.ICacheManager) *Builder {
 	b.cache = cache
 	return b
 }
@@ -98,13 +98,13 @@ func (b *Builder) WithNoCache() *Builder {
 }
 
 // WithRuleEngine 设置规则引擎
-func (b *Builder) WithRuleEngine(engine core.RuleEngine) *Builder {
+func (b *Builder) WithRuleEngine(engine core.IRuleEngine) *Builder {
 	b.ruleEngine = engine
 	return b
 }
 
 // WithSceneMatcher 设置场景匹配器
-func (b *Builder) WithSceneMatcher(matcher core.SceneMatcher) *Builder {
+func (b *Builder) WithSceneMatcher(matcher core.ISceneMatcher) *Builder {
 	b.sceneMatcher = matcher
 	return b
 }
@@ -112,7 +112,7 @@ func (b *Builder) WithSceneMatcher(matcher core.SceneMatcher) *Builder {
 // WithRuleStrategy 添加规则验证策略
 func (b *Builder) WithRuleStrategy(priority int) *Builder {
 	b.strategies[core.StrategyTypeRule] = struct {
-		strategy core.ValidationStrategy
+		strategy core.IValidationStrategy
 		priority int
 	}{priority: priority}
 	return b
@@ -121,14 +121,14 @@ func (b *Builder) WithRuleStrategy(priority int) *Builder {
 // WithBusinessStrategy 添加业务验证策略
 func (b *Builder) WithBusinessStrategy(priority int) *Builder {
 	b.strategies[core.StrategyTypeBusiness] = struct {
-		strategy core.ValidationStrategy
+		strategy core.IValidationStrategy
 		priority int
 	}{priority: priority}
 	return b
 }
 
 // WithInterceptor 添加拦截器
-func (b *Builder) WithInterceptor(interceptor core.Interceptor) *Builder {
+func (b *Builder) WithInterceptor(interceptor core.IInterceptor) *Builder {
 	if b.interceptorChain == nil {
 		b.interceptorChain = orchestration.NewInterceptorChain()
 	}
@@ -137,7 +137,7 @@ func (b *Builder) WithInterceptor(interceptor core.Interceptor) *Builder {
 }
 
 // WithListener 添加监听器
-func (b *Builder) WithListener(listener core.ValidationListener) *Builder {
+func (b *Builder) WithListener(listener core.IValidationListener) *Builder {
 	if b.listenerNotifier == nil {
 		b.listenerNotifier = orchestration.NewListenerNotifier()
 	}
@@ -146,7 +146,7 @@ func (b *Builder) WithListener(listener core.ValidationListener) *Builder {
 }
 
 // WithErrorFormatter 设置错误格式化器
-func (b *Builder) WithErrorFormatter(formatter core.ErrorFormatter) *Builder {
+func (b *Builder) WithErrorFormatter(formatter core.IErrorFormatter) *Builder {
 	b.errorFormatter = formatter
 	return b
 }
@@ -170,7 +170,7 @@ func (b *Builder) WithExecutionMode(mode core.ExecutionMode) *Builder {
 }
 
 // Build 构建验证器
-func (b *Builder) Build() core.Validator {
+func (b *Builder) Build() core.IValidator {
 	// 初始化基础设施组件
 	b.initInfrastructure()
 
@@ -232,7 +232,7 @@ func (b *Builder) initOrchestration() {
 // registerStrategies 注册策略
 func (b *Builder) registerStrategies() {
 	for strategyType, entry := range b.strategies {
-		var s core.ValidationStrategy
+		var s core.IValidationStrategy
 
 		switch strategyType {
 		case core.StrategyTypeRule:
@@ -252,7 +252,7 @@ func (b *Builder) registerStrategies() {
 // ============================================================================
 
 // NewDefaultValidator 创建默认验证器
-func NewDefaultValidator() core.Validator {
+func NewDefaultValidator() core.IValidator {
 	return NewBuilder().
 		WithRuleStrategy(10).
 		WithBusinessStrategy(20).
@@ -261,7 +261,7 @@ func NewDefaultValidator() core.Validator {
 }
 
 // NewFastValidator 创建快速验证器（禁用缓存）
-func NewFastValidator() core.Validator {
+func NewFastValidator() core.IValidator {
 	return NewBuilder().
 		WithNoCache().
 		WithRuleStrategy(10).
@@ -270,7 +270,7 @@ func NewFastValidator() core.Validator {
 }
 
 // NewEnterpriseValidator 创建企业级验证器（完整功能）
-func NewEnterpriseValidator() core.Validator {
+func NewEnterpriseValidator() core.IValidator {
 	return NewBuilder().
 		WithLRUCache(1000).
 		WithRuleStrategy(10).

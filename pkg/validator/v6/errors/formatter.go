@@ -13,17 +13,17 @@ import (
 type defaultFormatter struct{}
 
 // NewDefaultFormatter 创建默认格式化器
-func NewDefaultFormatter() core.ErrorFormatter {
+func NewDefaultFormatter() core.IErrorFormatter {
 	return &defaultFormatter{}
 }
 
 // Format 格式化单个错误
-func (f *defaultFormatter) Format(err core.FieldError) string {
+func (f *defaultFormatter) Format(err core.IFieldError) string {
 	return err.Message()
 }
 
 // FormatAll 格式化所有错误
-func (f *defaultFormatter) FormatAll(errs []core.FieldError) []string {
+func (f *defaultFormatter) FormatAll(errs []core.IFieldError) []string {
 	messages := make([]string, len(errs))
 	for i, err := range errs {
 		messages[i] = f.Format(err)
@@ -39,18 +39,18 @@ func (f *defaultFormatter) FormatAll(errs []core.FieldError) []string {
 type jsonFormatter struct{}
 
 // NewJSONFormatter 创建 JSON 格式化器
-func NewJSONFormatter() core.ErrorFormatter {
+func NewJSONFormatter() core.IErrorFormatter {
 	return &jsonFormatter{}
 }
 
 // Format 格式化单个错误为 JSON 风格
-func (f *jsonFormatter) Format(err core.FieldError) string {
+func (f *jsonFormatter) Format(err core.IFieldError) string {
 	return fmt.Sprintf(`{"field":"%s","tag":"%s","message":"%s"}`,
 		err.Field(), err.Tag(), err.Message())
 }
 
 // FormatAll 格式化所有错误为 JSON 数组风格
-func (f *jsonFormatter) FormatAll(errs []core.FieldError) []string {
+func (f *jsonFormatter) FormatAll(errs []core.IFieldError) []string {
 	messages := make([]string, len(errs))
 	for i, err := range errs {
 		messages[i] = f.Format(err)
@@ -66,12 +66,12 @@ func (f *jsonFormatter) FormatAll(errs []core.FieldError) []string {
 type detailedFormatter struct{}
 
 // NewDetailedFormatter 创建详细格式化器
-func NewDetailedFormatter() core.ErrorFormatter {
+func NewDetailedFormatter() core.IErrorFormatter {
 	return &detailedFormatter{}
 }
 
 // Format 格式化单个错误（包含详细信息）
-func (f *detailedFormatter) Format(err core.FieldError) string {
+func (f *detailedFormatter) Format(err core.IFieldError) string {
 	if err.Param() != "" {
 		return fmt.Sprintf("[%s] %s (tag=%s, param=%s, value=%v)",
 			err.Namespace(), err.Message(), err.Tag(), err.Param(), err.Value())
@@ -81,7 +81,7 @@ func (f *detailedFormatter) Format(err core.FieldError) string {
 }
 
 // FormatAll 格式化所有错误
-func (f *detailedFormatter) FormatAll(errs []core.FieldError) []string {
+func (f *detailedFormatter) FormatAll(errs []core.IFieldError) []string {
 	messages := make([]string, len(errs))
 	for i, err := range errs {
 		messages[i] = f.Format(err)

@@ -7,13 +7,13 @@ import (
 
 // validationError 验证错误实现
 type validationError struct {
-	fieldErrors []core.FieldError
-	formatter   core.ErrorFormatter
+	fieldErrors []core.IFieldError
+	formatter   core.IErrorFormatter
 	messages    []string // 缓存格式化后的消息
 }
 
 // NewValidationError 创建验证错误
-func NewValidationError(fieldErrors []core.FieldError, formatter core.ErrorFormatter) core.ValidationError {
+func NewValidationError(fieldErrors []core.IFieldError, formatter core.IErrorFormatter) core.IValidationError {
 	if formatter == nil {
 		formatter = NewDefaultFormatter()
 	}
@@ -50,7 +50,7 @@ func (e *validationError) Errors() []string {
 }
 
 // FieldErrors 获取原始字段错误
-func (e *validationError) FieldErrors() []core.FieldError {
+func (e *validationError) FieldErrors() []core.IFieldError {
 	return e.fieldErrors
 }
 

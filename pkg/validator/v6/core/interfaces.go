@@ -6,23 +6,23 @@ import "context"
 // 业务层接口 - 由业务模型实现
 // ============================================================================
 
-// RuleProvider 规则提供者接口
+// IRuleValidator 规则提供者接口
 // 职责：提供字段级别的验证规则
 // 设计原则：单一职责 - 只提供规则，不执行验证
-type RuleProvider interface {
-	// GetRules 获取指定场景的验证规则
+type IRuleValidator interface {
+	// ValidateRules 获取指定场景的验证规则
 	// 返回格式：map[字段名]规则字符串
 	// 如果场景不匹配，返回 nil
-	GetRules(scene Scene) map[string]string
+	ValidateRules(scene Scene) map[string]string
 }
 
-// BusinessValidator 业务验证器接口
+// IBusinessValidator 业务验证器接口
 // 职责：执行复杂的业务逻辑验证（跨字段、数据库检查等）
 // 设计原则：单一职责 - 只负责业务逻辑验证
-type BusinessValidator interface {
+type IBusinessValidator interface {
 	// ValidateBusiness 执行业务验证
 	// 通过 collector.Collect() 添加错误
-	ValidateBusiness(scene Scene, collector ErrorCollector)
+	ValidateBusiness(scene Scene, collector IErrorCollector)
 }
 
 // LifecycleHooks 生命周期钩子接口
@@ -30,55 +30,55 @@ type BusinessValidator interface {
 // 设计原则：开放封闭 - 通过钩子扩展功能
 type LifecycleHooks interface {
 	// BeforeValidation 验证前执行
-	BeforeValidation(ctx Context) error
+	BeforeValidation(ctx IContext) error
 	// AfterValidation 验证后执行
-	AfterValidation(ctx Context) error
+	AfterValidation(ctx IContext) error
 }
 
 // ============================================================================
 // 框架层接口 - 验证器核心接口
 // ============================================================================
 
-// Validator 验证器核心接口
+// IValidator 验证器核心接口
 // 职责：提供验证功能
 // 设计原则：接口隔离 - 只包含验证相关方法
-type Validator interface {
+type IValidator interface {
 	// Validate 执行完整验证
-	Validate(target any, scene Scene) ValidationError
+	Validate(target any, scene Scene) IValidationError
 
 	// ValidateWithContext 使用自定义上下文执行验证
-	ValidateWithContext(target any, ctx Context) error
+	ValidateWithContext(target any, ctx IContext) error
 }
 
-// FieldValidator 字段级验证器接口
+// IFieldValidator 字段级验证器接口
 // 职责：提供字段级别的验证功能
 // 设计原则：接口隔离 - 分离字段验证职责
-type FieldValidator interface {
+type IFieldValidator interface {
 	// ValidateFields 验证指定字段
-	ValidateFields(target any, scene Scene, fields ...string) ValidationError
+	ValidateFields(target any, scene Scene, fields ...string) IValidationError
 
 	// ValidateFieldsExcept 验证除指定字段外的所有字段
-	ValidateFieldsExcept(target any, scene Scene, excludeFields ...string) ValidationError
+	ValidateFieldsExcept(target any, scene Scene, excludeFields ...string) IValidationError
 }
 
-// StrategyManager 策略管理器接口
+// IStrategyManager 策略管理器接口
 // 职责：管理验证策略
 // 设计原则：接口隔离 - 分离策略管理职责
-type StrategyManager interface {
+type IStrategyManager interface {
 	// RegisterStrategy 注册验证策略
-	RegisterStrategy(strategy ValidationStrategy)
+	RegisterStrategy(strategy IValidationStrategy)
 
 	// UnregisterStrategy 注销验证策略
 	UnregisterStrategy(strategyType StrategyType)
 
 	// GetStrategies 获取所有策略
-	GetStrategies() []ValidationStrategy
+	GetStrategies() []IValidationStrategy
 }
 
-// ConfigurableValidator 可配置验证器接口
+// IConfigurableValidator 可配置验证器接口
 // 职责：提供配置管理功能
 // 设计原则：接口隔离 - 分离配置职责
-type ConfigurableValidator interface {
+type IConfigurableValidator interface {
 	// RegisterAlias 注册规则别名
 	RegisterAlias(alias, tags string)
 
@@ -90,10 +90,10 @@ type ConfigurableValidator interface {
 // 上下文接口
 // ============================================================================
 
-// Context 验证上下文接口
+// IContext 验证上下文接口
 // 职责：携带验证过程中的上下文信息（不包含错误）
 // 设计原则：单一职责 - 只管理上下文，不管理错误
-type Context interface {
+type IContext interface {
 	// GoContext 获取 Go 标准上下文
 	GoContext() context.Context
 
@@ -104,19 +104,19 @@ type Context interface {
 	Depth() int
 
 	// Metadata 获取元数据
-	Metadata() Metadata
+	Metadata() IMetadata
 
 	// WithDepth 创建新的上下文，增加深度
-	WithDepth(depth int) Context
+	WithDepth(depth int) IContext
 
 	// Release 释放上下文资源
 	Release()
 }
 
-// Metadata 元数据接口
+// IMetadata 元数据接口
 // 职责：管理键值对元数据
 // 设计原则：单一职责
-type Metadata interface {
+type IMetadata interface {
 	// Get 获取元数据
 	Get(key string) (any, bool)
 
@@ -140,10 +140,10 @@ type Metadata interface {
 // 错误相关接口
 // ============================================================================
 
-// FieldError 字段错误接口
+// IFieldError 字段错误接口
 // 职责：封装单个字段的验证错误信息
 // 设计原则：值对象模式，不可变
-type FieldError interface {
+type IFieldError interface {
 	// Namespace 字段的完整命名空间路径（如 User.Profile.Email）
 	Namespace() string
 
@@ -166,19 +166,19 @@ type FieldError interface {
 	Error() string
 }
 
-// ErrorCollector 错误收集器接口
+// IErrorCollector 错误收集器接口
 // 职责：收集和管理验证错误
 // 设计原则：单一职责 - 只负责错误收集
-type ErrorCollector interface {
+type IErrorCollector interface {
 	// Collect 收集单个错误
 	// 返回 false 表示已达到最大错误数，停止收集
-	Collect(err FieldError) bool
+	Collect(err IFieldError) bool
 
 	// CollectAll 批量收集错误
-	CollectAll(errs []FieldError) bool
+	CollectAll(errs []IFieldError) bool
 
 	// Errors 获取所有错误
-	Errors() []FieldError
+	Errors() []IFieldError
 
 	// HasErrors 是否有错误
 	HasErrors() bool
@@ -193,21 +193,21 @@ type ErrorCollector interface {
 	MaxErrors() int
 }
 
-// ErrorFormatter 错误格式化器接口
+// IErrorFormatter 错误格式化器接口
 // 职责：格式化错误信息
 // 设计原则：单一职责
-type ErrorFormatter interface {
+type IErrorFormatter interface {
 	// Format 格式化单个错误
-	Format(err FieldError) string
+	Format(err IFieldError) string
 
 	// FormatAll 格式化所有错误
-	FormatAll(errs []FieldError) []string
+	FormatAll(errs []IFieldError) []string
 }
 
-// ValidationError 验证错误接口
+// IValidationError 验证错误接口
 // 职责：封装验证结果和错误列表
 // 设计原则：值对象模式
-type ValidationError interface {
+type IValidationError interface {
 	// Error 实现 error 接口
 	Error() string
 
@@ -218,7 +218,7 @@ type ValidationError interface {
 	Errors() []string
 
 	// FieldErrors 获取原始字段错误
-	FieldErrors() []FieldError
+	FieldErrors() []IFieldError
 
 	// First 获取第一个错误
 	First() string
@@ -238,10 +238,10 @@ const (
 	StrategyTypeCustom   StrategyType = "custom"   // 自定义验证
 )
 
-// ValidationStrategy 验证策略接口
+// IValidationStrategy 验证策略接口
 // 职责：定义具体的验证策略
 // 设计原则：策略模式 - 策略之间完全独立，可自由替换
-type ValidationStrategy interface {
+type IValidationStrategy interface {
 	// Type 策略类型
 	Type() StrategyType
 
@@ -250,21 +250,21 @@ type ValidationStrategy interface {
 
 	// Validate 执行验证
 	// 注意：策略不应该关心优先级，由 Orchestrator 决定执行顺序
-	Validate(target any, ctx Context, collector ErrorCollector) error
+	Validate(target any, ctx IContext, collector IErrorCollector) error
 }
 
-// StrategyOrchestrator 策略编排器接口
+// IStrategyOrchestrator 策略编排器接口
 // 职责：管理和编排验证策略的执行顺序
 // 设计原则：责任链模式 + 策略模式
-type StrategyOrchestrator interface {
+type IStrategyOrchestrator interface {
 	// Register 注册策略
-	Register(strategy ValidationStrategy, priority int)
+	Register(strategy IValidationStrategy, priority int)
 
 	// Unregister 注销策略
 	Unregister(strategyType StrategyType)
 
 	// Execute 执行所有策略
-	Execute(target any, ctx Context, collector ErrorCollector) error
+	Execute(target any, ctx IContext, collector IErrorCollector) error
 
 	// SetExecutionMode 设置执行模式（串行/并行）
 	SetExecutionMode(mode ExecutionMode)
@@ -282,23 +282,23 @@ const (
 // 拦截器接口
 // ============================================================================
 
-// Interceptor 拦截器接口
+// IInterceptor 拦截器接口
 // 职责：在验证前后执行自定义逻辑
 // 设计原则：责任链模式
-type Interceptor interface {
+type IInterceptor interface {
 	// Intercept 拦截验证过程
 	// next 是下一个拦截器或实际的验证逻辑
-	Intercept(ctx Context, target any, next func() error) error
+	Intercept(ctx IContext, target any, next func() error) error
 }
 
-// InterceptorChain 拦截器链接口
+// IInterceptorChain 拦截器链接口
 // 职责：管理拦截器链
-type InterceptorChain interface {
+type IInterceptorChain interface {
 	// Add 添加拦截器
-	Add(interceptor Interceptor)
+	Add(interceptor IInterceptor)
 
 	// Execute 执行拦截器链
-	Execute(ctx Context, target any, validator func() error) error
+	Execute(ctx IContext, target any, validator func() error) error
 
 	// Clear 清空拦截器链
 	Clear()
@@ -308,61 +308,61 @@ type InterceptorChain interface {
 // 监听器和钩子接口
 // ============================================================================
 
-// ValidationListener 验证监听器接口
+// IValidationListener 验证监听器接口
 // 职责：监听验证过程中的事件
 // 设计原则：观察者模式
-type ValidationListener interface {
+type IValidationListener interface {
 	// OnValidationStart 验证开始
-	OnValidationStart(ctx Context, target any)
+	OnValidationStart(ctx IContext, target any)
 
 	// OnValidationEnd 验证结束
-	OnValidationEnd(ctx Context, target any, err error)
+	OnValidationEnd(ctx IContext, target any, err error)
 
 	// OnError 发生错误
-	OnError(ctx Context, fieldErr FieldError)
+	OnError(ctx IContext, fieldErr IFieldError)
 }
 
-// HookExecutor 钩子执行器接口
+// IHookExecutor 钩子执行器接口
 // 职责：执行生命周期钩子
 // 设计原则：单一职责 - 只负责钩子执行
-type HookExecutor interface {
+type IHookExecutor interface {
 	// ExecuteBefore 执行前置钩子
-	ExecuteBefore(target any, ctx Context) error
+	ExecuteBefore(target any, ctx IContext) error
 
 	// ExecuteAfter 执行后置钩子
-	ExecuteAfter(target any, ctx Context) error
+	ExecuteAfter(target any, ctx IContext) error
 }
 
-// ListenerNotifier 监听器通知器接口
+// IListenerNotifier 监听器通知器接口
 // 职责：通知所有监听器
 // 设计原则：单一职责 - 只负责通知
-type ListenerNotifier interface {
+type IListenerNotifier interface {
 	// Register 注册监听器
-	Register(listener ValidationListener)
+	Register(listener IValidationListener)
 
 	// Unregister 注销监听器
-	Unregister(listener ValidationListener)
+	Unregister(listener IValidationListener)
 
 	// NotifyStart 通知验证开始
-	NotifyStart(ctx Context, target any)
+	NotifyStart(ctx IContext, target any)
 
 	// NotifyEnd 通知验证结束
-	NotifyEnd(ctx Context, target any, err error)
+	NotifyEnd(ctx IContext, target any, err error)
 
 	// NotifyError 通知错误
-	NotifyError(ctx Context, fieldErr FieldError)
+	NotifyError(ctx IContext, fieldErr IFieldError)
 }
 
 // ============================================================================
 // 基础设施接口
 // ============================================================================
 
-// TypeInspector 类型检查器接口
+// ITypeInspector 类型检查器接口
 // 职责：检查类型信息并缓存
 // 设计原则：缓存代理模式
-type TypeInspector interface {
+type ITypeInspector interface {
 	// Inspect 检查类型信息
-	Inspect(target any) TypeInfo
+	Inspect(target any) ITypeInfo
 
 	// ClearCache 清除缓存
 	ClearCache()
@@ -371,21 +371,21 @@ type TypeInspector interface {
 	Stats() CacheStats
 }
 
-// TypeInfo 类型信息接口
+// ITypeInfo 类型信息接口
 // 职责：封装类型的验证能力信息
 // 设计原则：值对象模式
-type TypeInfo interface {
-	// IsRuleProvider 是否实现了 RuleProvider
+type ITypeInfo interface {
+	// IsRuleProvider 是否实现了 IRuleValidator
 	IsRuleProvider() bool
 
-	// IsBusinessValidator 是否实现了 BusinessValidator
+	// IsBusinessValidator 是否实现了 IBusinessValidator
 	IsBusinessValidator() bool
 
 	// IsLifecycleHooks 是否实现了 LifecycleHooks
 	IsLifecycleHooks() bool
 
-	// GetRules 获取规则（如果实现了 RuleProvider）
-	GetRules(scene Scene) map[string]string
+	// ValidateRules 获取规则（如果实现了 IRuleValidator）
+	ValidateRules(scene Scene) map[string]string
 
 	// FieldAccessor 获取字段访问器
 	FieldAccessor(fieldName string) FieldAccessor
@@ -398,10 +398,10 @@ type TypeInfo interface {
 // 通过预编译的访问器避免运行时 FieldByName 查找
 type FieldAccessor func(value any) (fieldValue any, ok bool)
 
-// SceneMatcher 场景匹配器接口
+// ISceneMatcher 场景匹配器接口
 // 职责：场景匹配和规则合并
 // 设计原则：策略模式
-type SceneMatcher interface {
+type ISceneMatcher interface {
 	// Match 判断场景是否匹配
 	Match(target, current Scene) bool
 
@@ -409,10 +409,10 @@ type SceneMatcher interface {
 	MergeRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
-// RuleEngine 规则引擎接口
+// IRuleEngine 规则引擎接口
 // 职责：抽象的规则验证引擎
 // 设计原则：适配器模式 - 适配不同的底层验证库
-type RuleEngine interface {
+type IRuleEngine interface {
 	// ValidateField 验证单个字段
 	ValidateField(value any, rule string) error
 
@@ -433,10 +433,10 @@ type ValidationFunc func(value any, param string) bool
 // 缓存相关接口
 // ============================================================================
 
-// CacheManager 缓存管理器接口
+// ICacheManager 缓存管理器接口
 // 职责：管理各种缓存
 // 设计原则：单一职责
-type CacheManager interface {
+type ICacheManager interface {
 	// Get 获取缓存
 	Get(key any) (value any, ok bool)
 
@@ -460,9 +460,9 @@ type CacheStats struct {
 	Size   int   // 当前大小
 }
 
-// CachePolicy 缓存策略接口
+// ICachePolicy 缓存策略接口
 // 职责：定义缓存淘汰策略
-type CachePolicy interface {
+type ICachePolicy interface {
 	// ShouldEvict 是否应该淘汰
 	ShouldEvict(size, maxSize int) bool
 
@@ -474,15 +474,15 @@ type CachePolicy interface {
 // 验证管道接口
 // ============================================================================
 
-// ValidationPipeline 验证管道接口
+// IValidationPipeline 验证管道接口
 // 职责：组合多个验证器
 // 设计原则：组合模式
-type ValidationPipeline interface {
+type IValidationPipeline interface {
 	// Add 添加验证器
-	Add(validator Validator) ValidationPipeline
+	Add(validator IValidator) IValidationPipeline
 
 	// Validate 执行管道验证
-	Validate(target any, scene Scene) ValidationError
+	Validate(target any, scene Scene) IValidationError
 
 	// Clear 清空管道
 	Clear()

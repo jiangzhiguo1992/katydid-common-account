@@ -12,11 +12,11 @@ type validationContext struct {
 	goCtx    context.Context
 	scene    core.Scene
 	depth    int
-	metadata core.Metadata
+	metadata core.IMetadata
 }
 
 // NewContext 创建新的验证上下文
-func NewContext(scene core.Scene, opts ...ContextOption) core.Context {
+func NewContext(scene core.Scene, opts ...ContextOption) core.IContext {
 	ctx := acquireContext()
 	ctx.scene = scene
 	ctx.depth = 0
@@ -55,28 +55,28 @@ func WithMetadata(key string, value any) ContextOption {
 	}
 }
 
-// GoContext 实现 Context 接口
+// GoContext 实现 IContext 接口
 func (c *validationContext) GoContext() context.Context {
 	return c.goCtx
 }
 
-// Scene 实现 Context 接口
+// Scene 实现 IContext 接口
 func (c *validationContext) Scene() core.Scene {
 	return c.scene
 }
 
-// Depth 实现 Context 接口
+// Depth 实现 IContext 接口
 func (c *validationContext) Depth() int {
 	return c.depth
 }
 
-// Metadata 实现 Context 接口
-func (c *validationContext) Metadata() core.Metadata {
+// Metadata 实现 IContext 接口
+func (c *validationContext) Metadata() core.IMetadata {
 	return c.metadata
 }
 
 // WithDepth 创建新的上下文，增加深度
-func (c *validationContext) WithDepth(depth int) core.Context {
+func (c *validationContext) WithDepth(depth int) core.IContext {
 	newCtx := acquireContext()
 	newCtx.goCtx = c.goCtx
 	newCtx.scene = c.scene
@@ -85,7 +85,7 @@ func (c *validationContext) WithDepth(depth int) core.Context {
 	return newCtx
 }
 
-// Release 实现 Context 接口
+// Release 实现 IContext 接口
 func (c *validationContext) Release() {
 	releaseContext(c)
 }
@@ -101,7 +101,7 @@ type metadata struct {
 }
 
 // NewMetadata 创建新的元数据
-func NewMetadata() core.Metadata {
+func NewMetadata() core.IMetadata {
 	return &metadata{
 		data: make(map[string]any),
 	}

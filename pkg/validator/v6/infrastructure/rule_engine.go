@@ -19,7 +19,7 @@ type playgroundRuleEngine struct {
 }
 
 // NewPlaygroundRuleEngine 创建 Playground 规则引擎
-func NewPlaygroundRuleEngine() core.RuleEngine {
+func NewPlaygroundRuleEngine() core.IRuleEngine {
 	v := validator.New()
 
 	// 注册 JSON tag 作为字段名

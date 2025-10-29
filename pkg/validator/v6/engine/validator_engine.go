@@ -13,20 +13,20 @@ import (
 // - 依赖倒置：依赖抽象接口，不依赖具体实现
 // - 模板方法：定义验证流程模板
 type validatorEngine struct {
-	orchestrator     core.StrategyOrchestrator
-	interceptorChain core.InterceptorChain
-	hookExecutor     core.HookExecutor
-	listenerNotifier core.ListenerNotifier
-	errorFormatter   core.ErrorFormatter
+	orchestrator     core.IStrategyOrchestrator
+	interceptorChain core.IInterceptorChain
+	hookExecutor     core.IHookExecutor
+	listenerNotifier core.IListenerNotifier
+	errorFormatter   core.IErrorFormatter
 	maxErrors        int
 	maxDepth         int
 }
 
 // NewValidatorEngine 创建验证引擎
 func NewValidatorEngine(
-	orchestrator core.StrategyOrchestrator,
+	orchestrator core.IStrategyOrchestrator,
 	opts ...EngineOption,
-) core.Validator {
+) core.IValidator {
 	engine := &validatorEngine{
 		orchestrator: orchestrator,
 		maxErrors:    100,
@@ -50,28 +50,28 @@ func NewValidatorEngine(
 type EngineOption func(*validatorEngine)
 
 // WithInterceptorChain 设置拦截器链
-func WithInterceptorChain(chain core.InterceptorChain) EngineOption {
+func WithInterceptorChain(chain core.IInterceptorChain) EngineOption {
 	return func(e *validatorEngine) {
 		e.interceptorChain = chain
 	}
 }
 
 // WithHookExecutor 设置钩子执行器
-func WithHookExecutor(executor core.HookExecutor) EngineOption {
+func WithHookExecutor(executor core.IHookExecutor) EngineOption {
 	return func(e *validatorEngine) {
 		e.hookExecutor = executor
 	}
 }
 
 // WithListenerNotifier 设置监听器通知器
-func WithListenerNotifier(notifier core.ListenerNotifier) EngineOption {
+func WithListenerNotifier(notifier core.IListenerNotifier) EngineOption {
 	return func(e *validatorEngine) {
 		e.listenerNotifier = notifier
 	}
 }
 
 // WithErrorFormatter 设置错误格式化器
-func WithErrorFormatter(formatter core.ErrorFormatter) EngineOption {
+func WithErrorFormatter(formatter core.IErrorFormatter) EngineOption {
 	return func(e *validatorEngine) {
 		e.errorFormatter = formatter
 	}
@@ -93,10 +93,10 @@ func WithMaxDepth(maxDepth int) EngineOption {
 
 // Validate 执行完整验证
 // 模板方法：定义验证流程
-func (e *validatorEngine) Validate(target any, scene core.Scene) core.ValidationError {
+func (e *validatorEngine) Validate(target any, scene core.Scene) core.IValidationError {
 	if target == nil {
 		return errors.NewValidationError(
-			[]core.FieldError{
+			[]core.IFieldError{
 				errors.NewFieldError("", "target", "required",
 					errors.WithMessage("validation target cannot be nil")),
 			},
@@ -137,10 +137,10 @@ func (e *validatorEngine) Validate(target any, scene core.Scene) core.Validation
 }
 
 // ValidateWithContext 使用自定义上下文执行验证
-func (e *validatorEngine) ValidateWithContext(target any, ctx core.Context) error {
+func (e *validatorEngine) ValidateWithContext(target any, ctx core.IContext) error {
 	if target == nil {
 		return errors.NewValidationError(
-			[]core.FieldError{
+			[]core.IFieldError{
 				errors.NewFieldError("", "target", "required",
 					errors.WithMessage("validation target cannot be nil")),
 			},
@@ -168,7 +168,7 @@ func (e *validatorEngine) ValidateWithContext(target any, ctx core.Context) erro
 
 // doValidate 执行实际的验证逻辑
 // 私有方法：封装验证流程
-func (e *validatorEngine) doValidate(target any, ctx core.Context, collector core.ErrorCollector) error {
+func (e *validatorEngine) doValidate(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	// 1. 通知监听器：验证开始
 	if e.listenerNotifier != nil {
 		e.listenerNotifier.NotifyStart(ctx, target)

@@ -22,8 +22,8 @@ type User struct {
 	Age      int    `json:"age"`
 }
 
-// GetRules 实现 RuleProvider 接口
-func (u *User) GetRules(scene core.Scene) map[string]string {
+// ValidateRules 实现 IRuleValidator 接口
+func (u *User) ValidateRules(scene core.Scene) map[string]string {
 	switch scene {
 	case SceneCreate:
 		return map[string]string{
@@ -43,8 +43,8 @@ func (u *User) GetRules(scene core.Scene) map[string]string {
 	}
 }
 
-// ValidateBusiness 实现 BusinessValidator 接口
-func (u *User) ValidateBusiness(scene core.Scene, collector core.ErrorCollector) {
+// ValidateBusiness 实现 IBusinessValidator 接口
+func (u *User) ValidateBusiness(scene core.Scene, collector core.IErrorCollector) {
 	// 跨字段验证
 	if scene == SceneCreate && u.Password == "123456" {
 		collector.Collect(v6.NewFieldError("User.Password", "password", "weak",
@@ -59,7 +59,7 @@ func (u *User) ValidateBusiness(scene core.Scene, collector core.ErrorCollector)
 }
 
 // BeforeValidation 实现 LifecycleHooks 接口
-func (u *User) BeforeValidation(ctx core.Context) error {
+func (u *User) BeforeValidation(ctx core.IContext) error {
 	// 数据预处理
 	// u.Username = strings.TrimSpace(u.Username)
 	fmt.Printf("验证前处理: scene=%v\n", ctx.Scene())
@@ -67,7 +67,7 @@ func (u *User) BeforeValidation(ctx core.Context) error {
 }
 
 // AfterValidation 实现 LifecycleHooks 接口
-func (u *User) AfterValidation(ctx core.Context) error {
+func (u *User) AfterValidation(ctx core.IContext) error {
 	fmt.Printf("验证后处理: scene=%v\n", ctx.Scene())
 	return nil
 }
@@ -133,7 +133,7 @@ func Example_interceptor() {
 	// 创建带拦截器的验证器
 	validator := v6.NewBuilder().
 		WithRuleStrategy(10).
-		WithInterceptor(v6.InterceptorFunc(func(ctx core.Context, target any, next func() error) error {
+		WithInterceptor(v6.InterceptorFunc(func(ctx core.IContext, target any, next func() error) error {
 			fmt.Printf("拦截器: 验证开始\n")
 			err := next()
 			fmt.Printf("拦截器: 验证结束\n")
@@ -162,15 +162,15 @@ func Example_listener() {
 	// 自定义监听器
 	type MyListener struct{}
 
-	func (l *MyListener) OnValidationStart(ctx core.Context, target any) {
+	func (l *MyListener) OnValidationStart(ctx core.IContext, target any) {
 		fmt.Printf("监听器: 验证开始\n")
 	}
 
-	func (l *MyListener) OnValidationEnd(ctx core.Context, target any, err error) {
+	func (l *MyListener) OnValidationEnd(ctx core.IContext, target any, err error) {
 		fmt.Printf("监听器: 验证结束\n")
 	}
 
-	func (l *MyListener) OnError(ctx core.Context, fieldErr core.FieldError) {
+	func (l *MyListener) OnError(ctx core.IContext, fieldErr core.IFieldError) {
 		fmt.Printf("监听器: 发现错误 - %s\n", fieldErr.Field())
 	}
 

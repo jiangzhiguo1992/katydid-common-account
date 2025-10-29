@@ -11,23 +11,23 @@ import (
 // interceptorChain 拦截器链实现
 // 设计模式：责任链模式
 type interceptorChain struct {
-	interceptors []core.Interceptor
+	interceptors []core.IInterceptor
 }
 
 // NewInterceptorChain 创建拦截器链
-func NewInterceptorChain() core.InterceptorChain {
+func NewInterceptorChain() core.IInterceptorChain {
 	return &interceptorChain{
-		interceptors: make([]core.Interceptor, 0),
+		interceptors: make([]core.IInterceptor, 0),
 	}
 }
 
 // Add 添加拦截器
-func (c *interceptorChain) Add(interceptor core.Interceptor) {
+func (c *interceptorChain) Add(interceptor core.IInterceptor) {
 	c.interceptors = append(c.interceptors, interceptor)
 }
 
 // Execute 执行拦截器链
-func (c *interceptorChain) Execute(ctx core.Context, target any, validator func() error) error {
+func (c *interceptorChain) Execute(ctx core.IContext, target any, validator func() error) error {
 	if len(c.interceptors) == 0 {
 		return validator()
 	}
@@ -71,14 +71,14 @@ type Logger interface {
 }
 
 // NewLoggingInterceptor 创建日志拦截器
-func NewLoggingInterceptor(logger Logger) core.Interceptor {
+func NewLoggingInterceptor(logger Logger) core.IInterceptor {
 	return &loggingInterceptor{
 		logger: logger,
 	}
 }
 
 // Intercept 实现拦截器接口
-func (i *loggingInterceptor) Intercept(ctx core.Context, target any, next func() error) error {
+func (i *loggingInterceptor) Intercept(ctx core.IContext, target any, next func() error) error {
 	i.logger.Logf("验证开始: scene=%v", ctx.Scene())
 	err := next()
 	if err != nil {
@@ -94,10 +94,10 @@ func (i *loggingInterceptor) Intercept(ctx core.Context, target any, next func()
 // ============================================================================
 
 // InterceptorFunc 拦截器函数类型
-type InterceptorFunc func(ctx core.Context, target any, next func() error) error
+type InterceptorFunc func(ctx core.IContext, target any, next func() error) error
 
 // Intercept 实现拦截器接口
-func (f InterceptorFunc) Intercept(ctx core.Context, target any, next func() error) error {
+func (f InterceptorFunc) Intercept(ctx core.IContext, target any, next func() error) error {
 	return f(ctx, target, next)
 }
 
@@ -108,18 +108,18 @@ func (f InterceptorFunc) Intercept(ctx core.Context, target any, next func() err
 // hookExecutor 钩子执行器实现
 // 职责：执行生命周期钩子
 type hookExecutor struct {
-	inspector core.TypeInspector
+	inspector core.ITypeInspector
 }
 
 // NewHookExecutor 创建钩子执行器
-func NewHookExecutor(inspector core.TypeInspector) core.HookExecutor {
+func NewHookExecutor(inspector core.ITypeInspector) core.IHookExecutor {
 	return &hookExecutor{
 		inspector: inspector,
 	}
 }
 
 // ExecuteBefore 执行前置钩子
-func (h *hookExecutor) ExecuteBefore(target any, ctx core.Context) error {
+func (h *hookExecutor) ExecuteBefore(target any, ctx core.IContext) error {
 	// 检查类型信息
 	typeInfo := h.inspector.Inspect(target)
 	if typeInfo == nil || !typeInfo.IsLifecycleHooks() {
@@ -135,7 +135,7 @@ func (h *hookExecutor) ExecuteBefore(target any, ctx core.Context) error {
 }
 
 // ExecuteAfter 执行后置钩子
-func (h *hookExecutor) ExecuteAfter(target any, ctx core.Context) error {
+func (h *hookExecutor) ExecuteAfter(target any, ctx core.IContext) error {
 	// 检查类型信息
 	typeInfo := h.inspector.Inspect(target)
 	if typeInfo == nil || !typeInfo.IsLifecycleHooks() {
@@ -157,24 +157,24 @@ func (h *hookExecutor) ExecuteAfter(target any, ctx core.Context) error {
 // listenerNotifier 监听器通知器实现
 // 职责：通知所有监听器
 type listenerNotifier struct {
-	listeners []core.ValidationListener
+	listeners []core.IValidationListener
 }
 
 // NewListenerNotifier 创建监听器通知器
-func NewListenerNotifier() core.ListenerNotifier {
+func NewListenerNotifier() core.IListenerNotifier {
 	return &listenerNotifier{
-		listeners: make([]core.ValidationListener, 0),
+		listeners: make([]core.IValidationListener, 0),
 	}
 }
 
 // Register 注册监听器
-func (n *listenerNotifier) Register(listener core.ValidationListener) {
+func (n *listenerNotifier) Register(listener core.IValidationListener) {
 	n.listeners = append(n.listeners, listener)
 }
 
 // Unregister 注销监听器
-func (n *listenerNotifier) Unregister(listener core.ValidationListener) {
-	filtered := make([]core.ValidationListener, 0, len(n.listeners))
+func (n *listenerNotifier) Unregister(listener core.IValidationListener) {
+	filtered := make([]core.IValidationListener, 0, len(n.listeners))
 	for _, l := range n.listeners {
 		if l != listener {
 			filtered = append(filtered, l)
@@ -184,21 +184,21 @@ func (n *listenerNotifier) Unregister(listener core.ValidationListener) {
 }
 
 // NotifyStart 通知验证开始
-func (n *listenerNotifier) NotifyStart(ctx core.Context, target any) {
+func (n *listenerNotifier) NotifyStart(ctx core.IContext, target any) {
 	for _, listener := range n.listeners {
 		listener.OnValidationStart(ctx, target)
 	}
 }
 
 // NotifyEnd 通知验证结束
-func (n *listenerNotifier) NotifyEnd(ctx core.Context, target any, err error) {
+func (n *listenerNotifier) NotifyEnd(ctx core.IContext, target any, err error) {
 	for _, listener := range n.listeners {
 		listener.OnValidationEnd(ctx, target, err)
 	}
 }
 
 // NotifyError 通知错误
-func (n *listenerNotifier) NotifyError(ctx core.Context, fieldErr core.FieldError) {
+func (n *listenerNotifier) NotifyError(ctx core.IContext, fieldErr core.IFieldError) {
 	for _, listener := range n.listeners {
 		listener.OnError(ctx, fieldErr)
 	}

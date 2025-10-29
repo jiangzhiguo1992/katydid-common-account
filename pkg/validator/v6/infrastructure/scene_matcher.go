@@ -11,7 +11,7 @@ import "katydid-common-account/pkg/validator/v6/core"
 type bitSceneMatcher struct{}
 
 // NewBitSceneMatcher 创建位运算场景匹配器
-func NewBitSceneMatcher() core.SceneMatcher {
+func NewBitSceneMatcher() core.ISceneMatcher {
 	return &bitSceneMatcher{}
 }
 
@@ -60,7 +60,7 @@ func (m *bitSceneMatcher) MergeRules(current core.Scene, rules map[core.Scene]ma
 type exactSceneMatcher struct{}
 
 // NewExactSceneMatcher 创建精确场景匹配器
-func NewExactSceneMatcher() core.SceneMatcher {
+func NewExactSceneMatcher() core.ISceneMatcher {
 	return &exactSceneMatcher{}
 }
 
@@ -95,12 +95,12 @@ func (m *exactSceneMatcher) MergeRules(current core.Scene, rules map[core.Scene]
 // cachedSceneMatcher 带缓存的场景匹配器
 // 装饰器模式：为其他匹配器添加缓存功能
 type cachedSceneMatcher struct {
-	matcher core.SceneMatcher
-	cache   core.CacheManager
+	matcher core.ISceneMatcher
+	cache   core.ICacheManager
 }
 
 // NewCachedSceneMatcher 创建带缓存的场景匹配器
-func NewCachedSceneMatcher(matcher core.SceneMatcher, cache core.CacheManager) core.SceneMatcher {
+func NewCachedSceneMatcher(matcher core.ISceneMatcher, cache core.ICacheManager) core.ISceneMatcher {
 	if cache == nil {
 		cache = NewSimpleCache()
 	}

@@ -14,17 +14,17 @@ import (
 // 设计原则：单一职责 - 只负责规则验证
 type ruleStrategy struct {
 	name         string
-	ruleEngine   core.RuleEngine
-	inspector    core.TypeInspector
-	sceneMatcher core.SceneMatcher
+	ruleEngine   core.IRuleEngine
+	inspector    core.ITypeInspector
+	sceneMatcher core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
 func NewRuleStrategy(
-	ruleEngine core.RuleEngine,
-	inspector core.TypeInspector,
-	sceneMatcher core.SceneMatcher,
-) core.ValidationStrategy {
+	ruleEngine core.IRuleEngine,
+	inspector core.ITypeInspector,
+	sceneMatcher core.ISceneMatcher,
+) core.IValidationStrategy {
 	return &ruleStrategy{
 		name:         "rule_strategy",
 		ruleEngine:   ruleEngine,
@@ -44,7 +44,7 @@ func (s *ruleStrategy) Name() string {
 }
 
 // Validate 执行规则验证
-func (s *ruleStrategy) Validate(target any, ctx core.Context, collector core.ErrorCollector) error {
+func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	// 检查类型信息
 	typeInfo := s.inspector.Inspect(target)
 	if typeInfo == nil {
@@ -56,8 +56,8 @@ func (s *ruleStrategy) Validate(target any, ctx core.Context, collector core.Err
 
 	// 优先从类型信息缓存获取
 	if typeInfo.IsRuleProvider() {
-		if provider, ok := target.(core.RuleProvider); ok {
-			sceneRules := provider.GetRules(ctx.Scene())
+		if provider, ok := target.(core.IRuleValidator); ok {
+			sceneRules := provider.ValidateRules(ctx.Scene())
 			rules = sceneRules
 		}
 	}
@@ -84,8 +84,8 @@ func (s *ruleStrategy) Validate(target any, ctx core.Context, collector core.Err
 func (s *ruleStrategy) validateFields(
 	target any,
 	rules map[string]string,
-	typeInfo core.TypeInfo,
-	collector core.ErrorCollector,
+	typeInfo core.ITypeInfo,
+	collector core.IErrorCollector,
 ) {
 	// 逐个字段验证
 	for fieldName, rule := range rules {
@@ -113,7 +113,7 @@ func (s *ruleStrategy) validateFields(
 }
 
 // getFieldValue 获取字段值
-func (s *ruleStrategy) getFieldValue(target any, fieldName string, typeInfo core.TypeInfo) (any, bool) {
+func (s *ruleStrategy) getFieldValue(target any, fieldName string, typeInfo core.ITypeInfo) (any, bool) {
 	// 优先使用缓存的访问器
 	if accessor := typeInfo.FieldAccessor(fieldName); accessor != nil {
 		return accessor(target)
@@ -142,7 +142,7 @@ func (s *ruleStrategy) getFieldValue(target any, fieldName string, typeInfo core
 }
 
 // convertAndCollectErrors 转换并收集错误
-func (s *ruleStrategy) convertAndCollectErrors(err error, collector core.ErrorCollector) {
+func (s *ruleStrategy) convertAndCollectErrors(err error, collector core.IErrorCollector) {
 	// 检查是否是 validator.ValidationErrors
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
 		for _, e := range validationErrors {
@@ -173,7 +173,7 @@ func (s *ruleStrategy) convertAndCollectErrors(err error, collector core.ErrorCo
 }
 
 // filterRules 过滤规则
-func (s *ruleStrategy) filterRules(rules map[string]string, ctx core.Context) map[string]string {
+func (s *ruleStrategy) filterRules(rules map[string]string, ctx core.IContext) map[string]string {
 	// 检查是否需要只验证指定字段
 	if fields, ok := ctx.Metadata().Get(context.MetadataKeyValidateFields); ok {
 		if fieldList, ok := fields.([]string); ok && len(fieldList) > 0 {
