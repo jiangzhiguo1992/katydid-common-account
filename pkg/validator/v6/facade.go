@@ -45,7 +45,7 @@ type Builder struct {
 	cache        core.ICacheManager
 	inspector    core.ITypeInspector
 	sceneMatcher core.ISceneMatcher
-	ruleEngine   core.IRuleEngine
+	ruleEngine   core.IPlaygroundEngine
 
 	// 编排组件
 	orchestrator     core.IStrategyOrchestrator
@@ -98,7 +98,7 @@ func (b *Builder) WithNoCache() *Builder {
 }
 
 // WithRuleEngine 设置规则引擎
-func (b *Builder) WithRuleEngine(engine core.IRuleEngine) *Builder {
+func (b *Builder) WithRuleEngine(engine core.IPlaygroundEngine) *Builder {
 	b.ruleEngine = engine
 	return b
 }
@@ -212,7 +212,7 @@ func (b *Builder) initInfrastructure() {
 
 	// 规则引擎
 	if b.ruleEngine == nil {
-		b.ruleEngine = infrastructure.NewPlaygroundRuleEngine()
+		b.ruleEngine = infrastructure.NewPlaygroundEngine()
 	}
 }
 

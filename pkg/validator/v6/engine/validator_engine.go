@@ -13,13 +13,20 @@ import (
 // - 依赖倒置：依赖抽象接口，不依赖具体实现
 // - 模板方法：定义验证流程模板
 type validatorEngine struct {
-	orchestrator     core.IStrategyOrchestrator
+	// 策略编排器
+	orchestrator core.IStrategyOrchestrator
+	// 拦截器链
 	interceptorChain core.IInterceptorChain
-	hookExecutor     core.IHookExecutor
+	// 钩子执行器
+	hookExecutor core.IHookExecutor
+	// 监听器通知器
 	listenerNotifier core.IListenerNotifier
-	errorFormatter   core.IErrorFormatter
-	maxErrors        int
-	maxDepth         int
+	// 错误格式化器
+	errorFormatter core.IErrorFormatter
+	// 最大错误数
+	maxErrors int
+	// 最大验证深度
+	maxDepth int
 }
 
 // NewValidatorEngine 创建验证引擎
@@ -97,11 +104,8 @@ func (e *validatorEngine) Validate(target any, scene core.Scene) core.IValidatio
 	if target == nil {
 		return errors.NewValidationError(
 			[]core.IFieldError{
-				errors.NewFieldError("", "target", "required",
-					errors.WithMessage("validation target cannot be nil")),
-			},
-			e.errorFormatter,
-		)
+				errors.NewFieldError("Struct", "", "required"),
+			}, e.errorFormatter)
 	}
 
 	// 创建上下文
@@ -124,8 +128,7 @@ func (e *validatorEngine) Validate(target any, scene core.Scene) core.IValidatio
 
 	// 如果有执行错误，添加到收集器
 	if validateErr != nil {
-		collector.Collect(errors.NewFieldError("", "", "error",
-			errors.WithMessage(validateErr.Error())))
+		collector.Collect(errors.NewFieldErrorWithMessage(validateErr.Error()))
 	}
 
 	// 返回验证结果
@@ -137,15 +140,13 @@ func (e *validatorEngine) Validate(target any, scene core.Scene) core.IValidatio
 }
 
 // ValidateWithContext 使用自定义上下文执行验证
+// TODO:GG 镶嵌策略用不到的话就删了吧
 func (e *validatorEngine) ValidateWithContext(target any, ctx core.IContext) error {
 	if target == nil {
 		return errors.NewValidationError(
 			[]core.IFieldError{
-				errors.NewFieldError("", "target", "required",
-					errors.WithMessage("validation target cannot be nil")),
-			},
-			e.errorFormatter,
-		)
+				errors.NewFieldError("Struct", "", "required"),
+			}, e.errorFormatter)
 	}
 
 	// 创建错误收集器
@@ -168,6 +169,7 @@ func (e *validatorEngine) ValidateWithContext(target any, ctx core.IContext) err
 
 // doValidate 执行实际的验证逻辑
 // 私有方法：封装验证流程
+// TODO:GG 被镶嵌的model，这里的钩子/监听会触发吗？
 func (e *validatorEngine) doValidate(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	// 1. 通知监听器：验证开始
 	if e.listenerNotifier != nil {

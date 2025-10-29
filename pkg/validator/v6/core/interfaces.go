@@ -53,6 +53,7 @@ type IValidator interface {
 // IFieldValidator 字段级验证器接口
 // 职责：提供字段级别的验证功能
 // 设计原则：接口隔离 - 分离字段验证职责
+// TODO:GG 没人实现？
 type IFieldValidator interface {
 	// ValidateFields 验证指定字段
 	ValidateFields(target any, scene Scene, fields ...string) IValidationError
@@ -64,6 +65,7 @@ type IFieldValidator interface {
 // IStrategyManager 策略管理器接口
 // 职责：管理验证策略
 // 设计原则：接口隔离 - 分离策略管理职责
+// TODO:GG 没人实现？
 type IStrategyManager interface {
 	// RegisterStrategy 注册验证策略
 	RegisterStrategy(strategy IValidationStrategy)
@@ -409,15 +411,18 @@ type ISceneMatcher interface {
 	MergeRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
-// IRuleEngine 规则引擎接口
+// IPlaygroundEngine Playground引擎接口
 // 职责：抽象的规则验证引擎
 // 设计原则：适配器模式 - 适配不同的底层验证库
-type IRuleEngine interface {
+type IPlaygroundEngine interface {
 	// ValidateField 验证单个字段
 	ValidateField(value any, rule string) error
 
 	// ValidateStruct 验证整个结构体
 	ValidateStruct(target any) error
+
+	// ValidateMap 验证 Map 数据
+	ValidateMap(data map[string]interface{}, rules map[string]interface{})
 
 	// RegisterAlias 注册别名
 	RegisterAlias(alias, tags string)
@@ -462,6 +467,7 @@ type CacheStats struct {
 
 // ICachePolicy 缓存策略接口
 // 职责：定义缓存淘汰策略
+// TODO:GG 没人实现？
 type ICachePolicy interface {
 	// ShouldEvict 是否应该淘汰
 	ShouldEvict(size, maxSize int) bool
@@ -477,6 +483,7 @@ type ICachePolicy interface {
 // IValidationPipeline 验证管道接口
 // 职责：组合多个验证器
 // 设计原则：组合模式
+// TODO:GG 没人实现？
 type IValidationPipeline interface {
 	// Add 添加验证器
 	Add(validator IValidator) IValidationPipeline

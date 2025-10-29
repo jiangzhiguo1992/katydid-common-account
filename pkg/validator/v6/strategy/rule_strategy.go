@@ -14,14 +14,14 @@ import (
 // 设计原则：单一职责 - 只负责规则验证
 type ruleStrategy struct {
 	name         string
-	ruleEngine   core.IRuleEngine
+	ruleEngine   core.IPlaygroundEngine
 	inspector    core.ITypeInspector
 	sceneMatcher core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
 func NewRuleStrategy(
-	ruleEngine core.IRuleEngine,
+	ruleEngine core.IPlaygroundEngine,
 	inspector core.ITypeInspector,
 	sceneMatcher core.ISceneMatcher,
 ) core.IValidationStrategy {

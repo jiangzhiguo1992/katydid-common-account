@@ -37,6 +37,20 @@ func NewFieldError(namespace, field, tag string, opts ...FieldErrorOption) core.
 	return err
 }
 
+// NewFieldErrorWithMessage 创建字段错误（带自定义消息）
+func NewFieldErrorWithMessage(message string, opts ...FieldErrorOption) core.IFieldError {
+	err := &fieldError{
+		message: message,
+	}
+
+	// 应用选项
+	for _, opt := range opts {
+		opt(err)
+	}
+
+	return err
+}
+
 // FieldErrorOption 字段错误选项
 type FieldErrorOption func(*fieldError)
 

@@ -98,7 +98,7 @@ func (c *validationContext) Release() {
 // metadata 元数据实现
 type metadata struct {
 	data map[string]any
-	//mu   sync.RWMutex // 不需要线程安全
+	//mu   sync.RWMutex // context不需要线程安全
 }
 
 // NewMetadata 创建新的元数据
