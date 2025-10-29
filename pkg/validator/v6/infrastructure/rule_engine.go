@@ -47,11 +47,13 @@ func (e *playgroundRuleEngine) ValidateStruct(target any) error {
 }
 
 // RegisterAlias 注册别名
+// TODO:GG 外部怎么调用这个方法？
 func (e *playgroundRuleEngine) RegisterAlias(alias, tags string) {
 	e.validator.RegisterAlias(alias, tags)
 }
 
 // RegisterValidation 注册自定义验证函数
+// TODO:GG 外部怎么调用这个方法？
 func (e *playgroundRuleEngine) RegisterValidation(tag string, fn core.ValidationFunc) error {
 	return e.validator.RegisterValidation(tag, func(fl validator.FieldLevel) bool {
 		return fn(fl.Field().Interface(), fl.Param())

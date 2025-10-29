@@ -72,7 +72,7 @@ func (c *simpleCache) Stats() core.CacheStats {
 
 // lruCache LRU 缓存实现
 type lruCache struct {
-	mu      sync.RWMutex
+	mu      sync.RWMutex // TODO:GG ??
 	data    map[any]*lruNode
 	head    *lruNode
 	tail    *lruNode

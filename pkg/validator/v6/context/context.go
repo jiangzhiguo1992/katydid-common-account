@@ -18,9 +18,9 @@ type validationContext struct {
 // NewContext 创建新的验证上下文
 func NewContext(scene core.Scene, opts ...ContextOption) core.IContext {
 	ctx := acquireContext()
+	ctx.goCtx = context.Background()
 	ctx.scene = scene
 	ctx.depth = 0
-	ctx.goCtx = context.Background()
 	ctx.metadata = NewMetadata()
 
 	// 应用选项
@@ -76,6 +76,7 @@ func (c *validationContext) Metadata() core.IMetadata {
 }
 
 // WithDepth 创建新的上下文，增加深度
+// TODO:GG 镶嵌策略没用到？ 还有就是parent没release？
 func (c *validationContext) WithDepth(depth int) core.IContext {
 	newCtx := acquireContext()
 	newCtx.goCtx = c.goCtx
@@ -97,7 +98,7 @@ func (c *validationContext) Release() {
 // metadata 元数据实现
 type metadata struct {
 	data map[string]any
-	mu   sync.RWMutex
+	//mu   sync.RWMutex // 不需要线程安全
 }
 
 // NewMetadata 创建新的元数据
@@ -109,45 +110,45 @@ func NewMetadata() core.IMetadata {
 
 // Get 获取元数据
 func (m *metadata) Get(key string) (any, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	//m.mu.RLock()
+	//defer m.mu.RUnlock()
 	val, ok := m.data[key]
 	return val, ok
 }
 
 // Set 设置元数据
 func (m *metadata) Set(key string, value any) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	//m.mu.Lock()
+	//defer m.mu.Unlock()
 	m.data[key] = value
 }
 
 // Has 检查是否存在
 func (m *metadata) Has(key string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	//m.mu.RLock()
+	//defer m.mu.RUnlock()
 	_, ok := m.data[key]
 	return ok
 }
 
 // Delete 删除元数据
 func (m *metadata) Delete(key string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	//m.mu.Lock()
+	//defer m.mu.Unlock()
 	delete(m.data, key)
 }
 
 // Clear 清空所有元数据
 func (m *metadata) Clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	//m.mu.Lock()
+	//defer m.mu.Unlock()
 	m.data = make(map[string]any)
 }
 
 // All 获取所有元数据
 func (m *metadata) All() map[string]any {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	//m.mu.RLock()
+	//defer m.mu.RUnlock()
 	// 返回副本
 	result := make(map[string]any, len(m.data))
 	for k, v := range m.data {
@@ -190,8 +191,6 @@ func releaseContext(ctx *validationContext) {
 // ============================================================================
 
 const (
-	MetadataKeyTarget         = "target"          // 验证目标对象
 	MetadataKeyValidateFields = "validate_fields" // 指定验证字段
 	MetadataKeyExcludeFields  = "exclude_fields"  // 排除验证字段
-	MetadataKeyMaxDepth       = "max_depth"       // 最大深度
 )
