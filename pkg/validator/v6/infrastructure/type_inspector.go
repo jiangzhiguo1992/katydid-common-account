@@ -75,7 +75,13 @@ func (i *typeInspector) buildTypeInfo(target any, typ reflect.Type) core.ITypeIn
 			// 缓存所有场景的规则
 			info.rulesCache = make(map[core.Scene]map[string]string)
 			// 这里只是占位，实际规则在调用 ValidateRules 时获取
+			// TODO:GG 怎么个事?
 		}
+	}
+
+	// 如果实现了 IBusinessValidator，注册结构体
+	if info.isBusinessValidator {
+		// TODO:GG 没有RegisterStructValidation?
 	}
 
 	// 预编译字段访问器

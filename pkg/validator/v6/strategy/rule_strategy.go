@@ -57,6 +57,7 @@ func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IE
 	// 优先从类型信息缓存获取
 	if typeInfo.IsRuleValidator() {
 		if provider, ok := target.(core.IRuleValidator); ok {
+			// TODO:GG 每次都获取，会不会影响性能？
 			sceneRules := provider.ValidateRules(ctx.Scene())
 			rules = sceneRules
 		}

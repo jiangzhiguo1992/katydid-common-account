@@ -55,6 +55,11 @@ func NewDetailedFormatter() core.IErrorFormatter {
 	return errors.NewDetailedFormatter()
 }
 
+// NewSpliceFormatter 创建拼接格式化器
+func NewSpliceFormatter() core.IErrorFormatter {
+	return errors.NewSpliceFormatter()
+}
+
 // ============================================================================
 // 导出拦截器相关类型
 // ============================================================================
