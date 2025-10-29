@@ -14,20 +14,20 @@ import (
 // 设计原则：单一职责 - 只负责规则验证
 type ruleStrategy struct {
 	name             string
-	playgroundEngine core.IPlaygroundEngine
+	dependencyEngine core.IDependencyEngine
 	typeInspector    core.ITypeInspector
 	sceneMatcher     core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
 func NewRuleStrategy(
-	playgroundEngine core.IPlaygroundEngine,
+	dependencyEngine core.IDependencyEngine,
 	typeInspector core.ITypeInspector,
 	sceneMatcher core.ISceneMatcher,
 ) core.IValidationStrategy {
 	return &ruleStrategy{
 		name:             "rule_strategy",
-		playgroundEngine: playgroundEngine,
+		dependencyEngine: dependencyEngine,
 		typeInspector:    typeInspector,
 		sceneMatcher:     sceneMatcher,
 	}
@@ -101,7 +101,7 @@ func (s *ruleStrategy) validateFields(
 		}
 
 		// 验证字段
-		if err := s.playgroundEngine.ValidateField(fieldValue, rule); err != nil {
+		if err := s.dependencyEngine.ValidateField(fieldValue, rule); err != nil {
 			// 转换错误
 			s.convertAndCollectErrors(err, collector)
 

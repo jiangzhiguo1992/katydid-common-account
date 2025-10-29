@@ -362,10 +362,10 @@ type ISceneMatcher interface {
 	MergeRules(current Scene, rules map[Scene]map[string]string) map[string]string
 }
 
-// IPlaygroundEngine Playground引擎接口
+// IDependencyEngine 依赖库引擎接口
 // 职责：抽象的规则验证引擎
 // 设计原则：适配器模式 - 适配不同的底层验证库
-type IPlaygroundEngine interface {
+type IDependencyEngine interface {
 	// ValidateField 验证单个字段
 	ValidateField(value any, rule string) error
 

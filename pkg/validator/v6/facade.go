@@ -45,7 +45,7 @@ type Builder struct {
 	cache            core.ICacheManager
 	inspector        core.ITypeInspector
 	sceneMatcher     core.ISceneMatcher
-	playgroundEngine core.IPlaygroundEngine
+	dependencyEngine core.IDependencyEngine
 
 	// 编排组件
 	orchestrator     core.IStrategyOrchestrator
@@ -96,8 +96,8 @@ func (b *Builder) WithNoCache() *Builder {
 }
 
 // WithRuleEngine 设置规则引擎
-func (b *Builder) WithRuleEngine(engine core.IPlaygroundEngine) *Builder {
-	b.playgroundEngine = engine
+func (b *Builder) WithRuleEngine(engine core.IDependencyEngine) *Builder {
+	b.dependencyEngine = engine
 	return b
 }
 
@@ -198,8 +198,8 @@ func (b *Builder) initInfrastructure() {
 	}
 
 	// 规则引擎
-	if b.playgroundEngine == nil {
-		b.playgroundEngine = infrastructure.NewPlaygroundEngine()
+	if b.dependencyEngine == nil {
+		b.dependencyEngine = infrastructure.NewDependencyEngine()
 	}
 }
 
@@ -219,7 +219,7 @@ func (b *Builder) registerStrategies() {
 
 		switch strategyType {
 		case core.StrategyTypeRule:
-			s = strategy.NewRuleStrategy(b.playgroundEngine, b.inspector, b.sceneMatcher)
+			s = strategy.NewRuleStrategy(b.dependencyEngine, b.inspector, b.sceneMatcher)
 		case core.StrategyTypeBusiness:
 			s = strategy.NewBusinessStrategy(b.inspector)
 		}

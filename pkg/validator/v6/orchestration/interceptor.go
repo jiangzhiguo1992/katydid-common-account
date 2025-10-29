@@ -57,21 +57,33 @@ func (c *interceptorChain) Clear() {
 }
 
 // ============================================================================
+// 函数式拦截器
+// ============================================================================
+
+// InterceptorFunc 拦截器函数类型
+type InterceptorFunc func(ctx core.IContext, target any, next func() error) error
+
+// Intercept 实现拦截器接口
+func (f InterceptorFunc) Intercept(ctx core.IContext, target any, next func() error) error {
+	return f(ctx, target, next)
+}
+
+// ============================================================================
 // 预定义拦截器
 // ============================================================================
 
-// loggingInterceptor 日志拦截器
-type loggingInterceptor struct {
-	logger Logger
-}
-
-// Logger 日志接口
-type Logger interface {
+// ILogger 日志接口
+type ILogger interface {
 	Logf(format string, args ...any)
 }
 
+// loggingInterceptor 日志拦截器
+type loggingInterceptor struct {
+	logger ILogger
+}
+
 // NewLoggingInterceptor 创建日志拦截器
-func NewLoggingInterceptor(logger Logger) core.IInterceptor {
+func NewLoggingInterceptor(logger ILogger) core.IInterceptor {
 	return &loggingInterceptor{
 		logger: logger,
 	}
@@ -87,16 +99,4 @@ func (i *loggingInterceptor) Intercept(ctx core.IContext, target any, next func(
 		i.logger.Logf("验证成功")
 	}
 	return err
-}
-
-// ============================================================================
-// 函数式拦截器
-// ============================================================================
-
-// InterceptorFunc 拦截器函数类型
-type InterceptorFunc func(ctx core.IContext, target any, next func() error) error
-
-// Intercept 实现拦截器接口
-func (f InterceptorFunc) Intercept(ctx core.IContext, target any, next func() error) error {
-	return f(ctx, target, next)
 }
