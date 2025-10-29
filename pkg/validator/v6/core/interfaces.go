@@ -25,10 +25,10 @@ type IBusinessValidator interface {
 	ValidateBusiness(scene Scene, collector IErrorCollector)
 }
 
-// LifecycleHooks 生命周期钩子接口
+// ILifecycleHooks 生命周期钩子接口
 // 职责：在验证前后执行自定义逻辑
 // 设计原则：开放封闭 - 通过钩子扩展功能
-type LifecycleHooks interface {
+type ILifecycleHooks interface {
 	// BeforeValidation 验证前执行
 	BeforeValidation(ctx IContext) error
 	// AfterValidation 验证后执行
@@ -307,55 +307,6 @@ type IInterceptorChain interface {
 }
 
 // ============================================================================
-// 监听器和钩子接口
-// ============================================================================
-
-// IValidationListener 验证监听器接口
-// 职责：监听验证过程中的事件
-// 设计原则：观察者模式
-type IValidationListener interface {
-	// OnValidationStart 验证开始
-	OnValidationStart(ctx IContext, target any)
-
-	// OnValidationEnd 验证结束
-	OnValidationEnd(ctx IContext, target any, err error)
-
-	// OnError 发生错误
-	OnError(ctx IContext, fieldErr IFieldError)
-}
-
-// IHookExecutor 钩子执行器接口
-// 职责：执行生命周期钩子
-// 设计原则：单一职责 - 只负责钩子执行
-type IHookExecutor interface {
-	// ExecuteBefore 执行前置钩子
-	ExecuteBefore(target any, ctx IContext) error
-
-	// ExecuteAfter 执行后置钩子
-	ExecuteAfter(target any, ctx IContext) error
-}
-
-// IListenerNotifier 监听器通知器接口
-// 职责：通知所有监听器
-// 设计原则：单一职责 - 只负责通知
-type IListenerNotifier interface {
-	// Register 注册监听器
-	Register(listener IValidationListener)
-
-	// Unregister 注销监听器
-	Unregister(listener IValidationListener)
-
-	// NotifyStart 通知验证开始
-	NotifyStart(ctx IContext, target any)
-
-	// NotifyEnd 通知验证结束
-	NotifyEnd(ctx IContext, target any, err error)
-
-	// NotifyError 通知错误
-	NotifyError(ctx IContext, fieldErr IFieldError)
-}
-
-// ============================================================================
 // 基础设施接口
 // ============================================================================
 
@@ -383,7 +334,7 @@ type ITypeInfo interface {
 	// IsBusinessValidator 是否实现了 IBusinessValidator
 	IsBusinessValidator() bool
 
-	// IsLifecycleHooks 是否实现了 LifecycleHooks
+	// IsLifecycleHooks 是否实现了 ILifecycleHooks
 	IsLifecycleHooks() bool
 
 	// ValidateRules 获取规则（如果实现了 IRuleValidator）

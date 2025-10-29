@@ -13,8 +13,8 @@ import (
 // simpleCache 简单缓存实现
 type simpleCache struct {
 	data   sync.Map
-	hits   atomic.Int64
-	misses atomic.Int64
+	hits   atomic.Int64 // TODO:GG 测试之后可以去掉？
+	misses atomic.Int64 // TODO:GG 测试之后可以去掉？
 }
 
 // NewSimpleCache 创建简单缓存
@@ -72,7 +72,7 @@ func (c *simpleCache) Stats() core.CacheStats {
 
 // lruCache LRU 缓存实现
 type lruCache struct {
-	mu      sync.RWMutex // TODO:GG ??
+	mu      sync.RWMutex // 全局的，所以可以加线程安全
 	data    map[any]*lruNode
 	head    *lruNode
 	tail    *lruNode

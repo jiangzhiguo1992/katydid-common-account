@@ -13,23 +13,23 @@ import (
 // 职责：执行基于规则的字段验证
 // 设计原则：单一职责 - 只负责规则验证
 type ruleStrategy struct {
-	name         string
-	ruleEngine   core.IPlaygroundEngine
-	inspector    core.ITypeInspector
-	sceneMatcher core.ISceneMatcher
+	name             string
+	playgroundEngine core.IPlaygroundEngine
+	typeInspector    core.ITypeInspector
+	sceneMatcher     core.ISceneMatcher
 }
 
 // NewRuleStrategy 创建规则验证策略
 func NewRuleStrategy(
-	ruleEngine core.IPlaygroundEngine,
-	inspector core.ITypeInspector,
+	playgroundEngine core.IPlaygroundEngine,
+	typeInspector core.ITypeInspector,
 	sceneMatcher core.ISceneMatcher,
 ) core.IValidationStrategy {
 	return &ruleStrategy{
-		name:         "rule_strategy",
-		ruleEngine:   ruleEngine,
-		inspector:    inspector,
-		sceneMatcher: sceneMatcher,
+		name:             "rule_strategy",
+		playgroundEngine: playgroundEngine,
+		typeInspector:    typeInspector,
+		sceneMatcher:     sceneMatcher,
 	}
 }
 
@@ -46,7 +46,7 @@ func (s *ruleStrategy) Name() string {
 // Validate 执行规则验证
 func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	// 检查类型信息
-	typeInfo := s.inspector.Inspect(target)
+	typeInfo := s.typeInspector.Inspect(target)
 	if typeInfo == nil {
 		return nil
 	}
@@ -100,7 +100,7 @@ func (s *ruleStrategy) validateFields(
 		}
 
 		// 验证字段
-		if err := s.ruleEngine.ValidateField(fieldValue, rule); err != nil {
+		if err := s.playgroundEngine.ValidateField(fieldValue, rule); err != nil {
 			// 转换错误
 			s.convertAndCollectErrors(err, collector)
 

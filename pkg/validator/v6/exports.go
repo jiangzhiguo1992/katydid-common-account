@@ -119,6 +119,3 @@ type ValidationStrategy = core.IValidationStrategy
 
 // Interceptor 拦截器接口别名
 type Interceptor = core.IInterceptor
-
-// ValidationListener 验证监听器接口别名
-type ValidationListener = core.IValidationListener

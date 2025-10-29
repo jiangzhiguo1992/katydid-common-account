@@ -17,10 +17,6 @@ type validatorEngine struct {
 	orchestrator core.IStrategyOrchestrator
 	// 拦截器链
 	interceptorChain core.IInterceptorChain
-	// 钩子执行器
-	hookExecutor core.IHookExecutor
-	// 监听器通知器
-	listenerNotifier core.IListenerNotifier
 	// 错误格式化器
 	errorFormatter core.IErrorFormatter
 	// 最大错误数
@@ -60,20 +56,6 @@ type EngineOption func(*validatorEngine)
 func WithInterceptorChain(chain core.IInterceptorChain) EngineOption {
 	return func(e *validatorEngine) {
 		e.interceptorChain = chain
-	}
-}
-
-// WithHookExecutor 设置钩子执行器
-func WithHookExecutor(executor core.IHookExecutor) EngineOption {
-	return func(e *validatorEngine) {
-		e.hookExecutor = executor
-	}
-}
-
-// WithListenerNotifier 设置监听器通知器
-func WithListenerNotifier(notifier core.IListenerNotifier) EngineOption {
-	return func(e *validatorEngine) {
-		e.listenerNotifier = notifier
 	}
 }
 
@@ -120,10 +102,10 @@ func (e *validatorEngine) Validate(target any, scene core.Scene) core.IValidatio
 	var validateErr error
 	if e.interceptorChain != nil {
 		validateErr = e.interceptorChain.Execute(ctx, target, func() error {
-			return e.doValidate(target, ctx, collector)
+			return e.orchestrator.Execute(target, ctx, collector)
 		})
 	} else {
-		validateErr = e.doValidate(target, ctx, collector)
+		validateErr = e.orchestrator.Execute(target, ctx, collector)
 	}
 
 	// 如果有执行错误，添加到收集器
@@ -154,7 +136,7 @@ func (e *validatorEngine) ValidateWithContext(target any, ctx core.IContext) err
 	defer errors.ReleaseListCollector(collector)
 
 	// 执行验证
-	err := e.doValidate(target, ctx, collector)
+	err := e.orchestrator.Execute(target, ctx, collector)
 	if err != nil {
 		return err
 	}
@@ -162,51 +144,6 @@ func (e *validatorEngine) ValidateWithContext(target any, ctx core.IContext) err
 	// 返回验证结果
 	if collector.HasErrors() {
 		return errors.NewValidationError(collector.Errors(), e.errorFormatter)
-	}
-
-	return nil
-}
-
-// doValidate 执行实际的验证逻辑
-// 私有方法：封装验证流程
-// TODO:GG 被镶嵌的model，这里的钩子/监听会触发吗？
-func (e *validatorEngine) doValidate(target any, ctx core.IContext, collector core.IErrorCollector) error {
-	// 1. 通知监听器：验证开始
-	if e.listenerNotifier != nil {
-		e.listenerNotifier.NotifyStart(ctx, target)
-	}
-
-	// 2. 执行前置钩子
-	if e.hookExecutor != nil {
-		if err := e.hookExecutor.ExecuteBefore(target, ctx); err != nil {
-			return err
-		}
-	}
-
-	// 3. 执行验证策略
-	if err := e.orchestrator.Execute(target, ctx, collector); err != nil {
-		return err
-	}
-
-	// 4. 执行后置钩子
-	if e.hookExecutor != nil {
-		if err := e.hookExecutor.ExecuteAfter(target, ctx); err != nil {
-			return err
-		}
-	}
-
-	// 5. 通知监听器：验证结束
-	if e.listenerNotifier != nil {
-		var resultErr error
-		if collector.HasErrors() {
-			resultErr = errors.NewValidationError(collector.Errors(), e.errorFormatter)
-		}
-		e.listenerNotifier.NotifyEnd(ctx, target, resultErr)
-
-		// 通知每个错误
-		for _, fieldErr := range collector.Errors() {
-			e.listenerNotifier.NotifyError(ctx, fieldErr)
-		}
 	}
 
 	return nil

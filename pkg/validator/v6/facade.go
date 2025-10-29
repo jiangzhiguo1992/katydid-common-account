@@ -42,16 +42,14 @@ func Validate(target any, scene core.Scene) core.IValidationError {
 // 设计模式：建造者模式
 type Builder struct {
 	// 基础设施组件
-	cache        core.ICacheManager
-	inspector    core.ITypeInspector
-	sceneMatcher core.ISceneMatcher
-	ruleEngine   core.IPlaygroundEngine
+	cache            core.ICacheManager
+	inspector        core.ITypeInspector
+	sceneMatcher     core.ISceneMatcher
+	playgroundEngine core.IPlaygroundEngine
 
 	// 编排组件
 	orchestrator     core.IStrategyOrchestrator
 	interceptorChain core.IInterceptorChain
-	hookExecutor     core.IHookExecutor
-	listenerNotifier core.IListenerNotifier
 
 	// 策略
 	strategies map[core.StrategyType]struct {
@@ -99,7 +97,7 @@ func (b *Builder) WithNoCache() *Builder {
 
 // WithRuleEngine 设置规则引擎
 func (b *Builder) WithRuleEngine(engine core.IPlaygroundEngine) *Builder {
-	b.ruleEngine = engine
+	b.playgroundEngine = engine
 	return b
 }
 
@@ -133,15 +131,6 @@ func (b *Builder) WithInterceptor(interceptor core.IInterceptor) *Builder {
 		b.interceptorChain = orchestration.NewInterceptorChain()
 	}
 	b.interceptorChain.Add(interceptor)
-	return b
-}
-
-// WithListener 添加监听器
-func (b *Builder) WithListener(listener core.IValidationListener) *Builder {
-	if b.listenerNotifier == nil {
-		b.listenerNotifier = orchestration.NewListenerNotifier()
-	}
-	b.listenerNotifier.Register(listener)
 	return b
 }
 
@@ -184,8 +173,6 @@ func (b *Builder) Build() core.IValidator {
 	return engine.NewValidatorEngine(
 		b.orchestrator,
 		engine.WithInterceptorChain(b.interceptorChain),
-		engine.WithHookExecutor(b.hookExecutor),
-		engine.WithListenerNotifier(b.listenerNotifier),
 		engine.WithErrorFormatter(b.errorFormatter),
 		engine.WithMaxErrors(b.maxErrors),
 		engine.WithMaxDepth(b.maxDepth),
@@ -211,8 +198,8 @@ func (b *Builder) initInfrastructure() {
 	}
 
 	// 规则引擎
-	if b.ruleEngine == nil {
-		b.ruleEngine = infrastructure.NewPlaygroundEngine()
+	if b.playgroundEngine == nil {
+		b.playgroundEngine = infrastructure.NewPlaygroundEngine()
 	}
 }
 
@@ -223,11 +210,6 @@ func (b *Builder) initOrchestration() {
 		b.orchestrator = orchestration.NewStrategyOrchestrator()
 		b.orchestrator.SetExecutionMode(b.executionMode)
 	}
-
-	// 钩子执行器
-	if b.hookExecutor == nil {
-		b.hookExecutor = orchestration.NewHookExecutor(b.inspector)
-	}
 }
 
 // registerStrategies 注册策略
@@ -237,7 +219,7 @@ func (b *Builder) registerStrategies() {
 
 		switch strategyType {
 		case core.StrategyTypeRule:
-			s = strategy.NewRuleStrategy(b.ruleEngine, b.inspector, b.sceneMatcher)
+			s = strategy.NewRuleStrategy(b.playgroundEngine, b.inspector, b.sceneMatcher)
 		case core.StrategyTypeBusiness:
 			s = strategy.NewBusinessStrategy(b.inspector)
 		}

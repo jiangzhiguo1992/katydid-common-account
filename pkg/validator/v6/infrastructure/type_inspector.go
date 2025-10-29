@@ -157,9 +157,9 @@ func (i *typeInspector) implementsBusinessValidator(target any) bool {
 	return ok
 }
 
-// implementsLifecycleHooks 检查是否实现了 LifecycleHooks
+// implementsLifecycleHooks 检查是否实现了 ILifecycleHooks
 func (i *typeInspector) implementsLifecycleHooks(target any) bool {
-	_, ok := target.(core.LifecycleHooks)
+	_, ok := target.(core.ILifecycleHooks)
 	return ok
 }
 

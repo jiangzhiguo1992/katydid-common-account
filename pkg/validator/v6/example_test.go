@@ -58,7 +58,7 @@ func (u *User) ValidateBusiness(scene core.Scene, collector core.IErrorCollector
 	}
 }
 
-// BeforeValidation 实现 LifecycleHooks 接口
+// BeforeValidation 实现 ILifecycleHooks 接口
 func (u *User) BeforeValidation(ctx core.IContext) error {
 	// 数据预处理
 	// u.Username = strings.TrimSpace(u.Username)
@@ -66,7 +66,7 @@ func (u *User) BeforeValidation(ctx core.IContext) error {
 	return nil
 }
 
-// AfterValidation 实现 LifecycleHooks 接口
+// AfterValidation 实现 ILifecycleHooks 接口
 func (u *User) AfterValidation(ctx core.IContext) error {
 	fmt.Printf("验证后处理: scene=%v\n", ctx.Scene())
 	return nil
