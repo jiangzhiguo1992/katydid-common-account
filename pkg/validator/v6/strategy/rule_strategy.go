@@ -55,7 +55,7 @@ func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IE
 	var rules map[string]string
 
 	// 优先从类型信息缓存获取
-	if typeInfo.IsRuleProvider() {
+	if typeInfo.IsRuleValidator() {
 		if provider, ok := target.(core.IRuleValidator); ok {
 			sceneRules := provider.ValidateRules(ctx.Scene())
 			rules = sceneRules

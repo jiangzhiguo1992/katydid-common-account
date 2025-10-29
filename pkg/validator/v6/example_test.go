@@ -9,8 +9,8 @@ import (
 // 定义场景
 const (
 	SceneCreate core.Scene = 1 << iota // 1
-	SceneUpdate                         // 2
-	SceneDelete                         // 4
+	SceneUpdate                        // 2
+	SceneDelete                        // 4
 )
 
 // User 用户模型
@@ -157,23 +157,23 @@ func Example_interceptor() {
 	// 拦截器: 验证结束
 }
 
+// 自定义监听器
+type MyListener struct{}
+
+func (l *MyListener) OnValidationStart(ctx core.IContext, target any) {
+	fmt.Printf("监听器: 验证开始\n")
+}
+
+func (l *MyListener) OnValidationEnd(ctx core.IContext, target any, err error) {
+	fmt.Printf("监听器: 验证结束\n")
+}
+
+func (l *MyListener) OnError(ctx core.IContext, fieldErr core.IFieldError) {
+	fmt.Printf("监听器: 发现错误 - %s\n", fieldErr.Field())
+}
+
 // Example_listener 使用监听器
 func Example_listener() {
-	// 自定义监听器
-	type MyListener struct{}
-
-	func (l *MyListener) OnValidationStart(ctx core.IContext, target any) {
-		fmt.Printf("监听器: 验证开始\n")
-	}
-
-	func (l *MyListener) OnValidationEnd(ctx core.IContext, target any, err error) {
-		fmt.Printf("监听器: 验证结束\n")
-	}
-
-	func (l *MyListener) OnError(ctx core.IContext, fieldErr core.IFieldError) {
-		fmt.Printf("监听器: 发现错误 - %s\n", fieldErr.Field())
-	}
-
 	// 创建带监听器的验证器
 	validator := v6.NewBuilder().
 		WithRuleStrategy(10).

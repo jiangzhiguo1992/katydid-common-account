@@ -375,8 +375,8 @@ type ITypeInspector interface {
 // 职责：封装类型的验证能力信息
 // 设计原则：值对象模式
 type ITypeInfo interface {
-	// IsRuleProvider 是否实现了 IRuleValidator
-	IsRuleProvider() bool
+	// IsRuleValidator 是否实现了 IRuleValidator
+	IsRuleValidator() bool
 
 	// IsBusinessValidator 是否实现了 IBusinessValidator
 	IsBusinessValidator() bool

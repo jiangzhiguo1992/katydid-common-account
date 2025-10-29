@@ -187,8 +187,8 @@ type typeInfo struct {
 	accessors           map[string]core.FieldAccessor
 }
 
-// IsRuleProvider 实现 ITypeInfo 接口
-func (t *typeInfo) IsRuleProvider() bool {
+// IsRuleValidator 实现 ITypeInfo 接口
+func (t *typeInfo) IsRuleValidator() bool {
 	return t.isRuleProvider
 }
 

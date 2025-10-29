@@ -206,7 +206,8 @@ func (b *Builder) initInfrastructure() {
 
 	// 场景匹配器
 	if b.sceneMatcher == nil {
-		b.sceneMatcher = infrastructure.NewBitSceneMatcher()
+		matcher := infrastructure.NewBitSceneMatcher()
+		b.sceneMatcher = infrastructure.NewCachedSceneMatcher(matcher, b.cache)
 	}
 
 	// 规则引擎

@@ -30,18 +30,3 @@ func (s Scene) Add(scene Scene) Scene {
 func (s Scene) Remove(scene Scene) Scene {
 	return s &^ scene
 }
-
-// Equals 判断场景是否相等
-func (s Scene) Equals(scene Scene) bool {
-	return s == scene
-}
-
-// IsNone 是否为空场景
-func (s Scene) IsNone() bool {
-	return s == SceneNone
-}
-
-// IsAll 是否为全场景
-func (s Scene) IsAll() bool {
-	return s == SceneAll
-}

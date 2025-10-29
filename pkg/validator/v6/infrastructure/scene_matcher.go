@@ -17,11 +17,6 @@ func NewBitSceneMatcher() core.ISceneMatcher {
 
 // Match 判断场景是否匹配
 func (m *bitSceneMatcher) Match(target, current core.Scene) bool {
-	// SceneAll 匹配所有场景
-	if current == core.SceneAll {
-		return true
-	}
-	// 使用位运算检查
 	return current.Has(target)
 }
 
@@ -66,7 +61,7 @@ func NewExactSceneMatcher() core.ISceneMatcher {
 
 // Match 判断场景是否匹配（精确匹配）
 func (m *exactSceneMatcher) Match(target, current core.Scene) bool {
-	return target.Equals(current) || current == core.SceneAll
+	return (target == current) || (current == core.SceneAll)
 }
 
 // MergeRules 合并规则（精确匹配）
@@ -139,7 +134,7 @@ func (m *cachedSceneMatcher) MergeRules(current core.Scene, rules map[core.Scene
 // buildCacheKey 构建缓存键
 func (m *cachedSceneMatcher) buildCacheKey(scene core.Scene, rules map[core.Scene]map[string]string) any {
 	// 简单策略：使用场景值作为键
-	// 更好的做法是使用 scene + rules 的哈希
+	// TODO:GG 更好的做法是使用 scene + rules 的哈希
 	type cacheKey struct {
 		scene     core.Scene
 		rulesSize int
