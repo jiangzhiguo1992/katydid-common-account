@@ -114,7 +114,7 @@ func (ve *ValidatorEngine) RegisterAlias(alias, tags string) {
 	ve.typeRegistry.Validator().RegisterAlias(alias, tags)
 }
 
-// ValidateMap 验证 Map 数据 TODO:GG 这个怎么搞场景化
+// ValidateMap 验证 Map 数据
 func (ve *ValidatorEngine) ValidateMap(data map[string]interface{}, rules map[string]interface{}) {
 	ve.typeRegistry.Validator().ValidateMap(data, rules)
 }

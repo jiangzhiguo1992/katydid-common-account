@@ -82,6 +82,7 @@ func (i *typeInspector) buildTypeInfo(target any, typ reflect.Type) core.ITypeIn
 	// 如果实现了 IBusinessValidator，注册结构体
 	if info.isBusinessValidator {
 		// TODO:GG 没有RegisterStructValidation?
+		// TODO:GG 要是model里自带scene的话就能了
 	}
 
 	// 预编译字段访问器

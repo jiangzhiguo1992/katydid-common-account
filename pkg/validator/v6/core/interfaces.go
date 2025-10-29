@@ -369,7 +369,7 @@ type IDependencyEngine interface {
 	// ValidateField 验证单个字段
 	ValidateField(value any, rule string) error
 
-	// ValidateStruct 验证整个结构体
+	// ValidateStruct 验证整个结构体 (场景化一般用不到)
 	ValidateStruct(target any) error
 
 	// ValidateMap 验证 Map 数据

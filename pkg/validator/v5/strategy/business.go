@@ -29,8 +29,6 @@ func (s *BusinessStrategy) Validate(target any, ctx core.IValidationContext) {
 		return
 	}
 
-	// 已实现缓存，TODO:GG 能提升性能吗？
-
 	// 执行业务验证 (外部利用ctx来AddError)
 	valid.ValidateBusiness(ctx.Scene(), ctx)
 }

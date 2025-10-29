@@ -92,7 +92,6 @@ func (s *NestedStrategy) Validate(target any, ctx core.IValidationContext) {
 				context.WithErrors(ctx.Errors()),
 				context.WithMetadata(ctx.Metadata()),
 			)
-			// TODO:GG 合适吗?
 			defer subCtx.Release()
 
 			// 使用子上下文进行递归验证

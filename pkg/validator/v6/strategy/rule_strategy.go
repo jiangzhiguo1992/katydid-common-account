@@ -26,7 +26,7 @@ func NewRuleStrategy(
 	sceneMatcher core.ISceneMatcher,
 ) core.IValidationStrategy {
 	return &ruleStrategy{
-		name:             "rule_strategy",
+		name:             "rule",
 		dependencyEngine: dependencyEngine,
 		typeInspector:    typeInspector,
 		sceneMatcher:     sceneMatcher,
@@ -47,7 +47,7 @@ func (s *ruleStrategy) Name() string {
 func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IErrorCollector) error {
 	// 检查类型信息
 	typeInfo := s.typeInspector.Inspect(target)
-	if typeInfo == nil {
+	if typeInfo == nil || !typeInfo.IsRuleValidator() {
 		return nil
 	}
 
@@ -55,12 +55,11 @@ func (s *ruleStrategy) Validate(target any, ctx core.IContext, collector core.IE
 	var rules map[string]string
 
 	// 优先从类型信息缓存获取
-	if typeInfo.IsRuleValidator() {
-		if provider, ok := target.(core.IRuleValidator); ok {
-			// TODO:GG 每次都获取，会不会影响性能？
-			sceneRules := provider.ValidateRules(ctx.Scene())
-			rules = sceneRules
-		}
+	if provider, ok := target.(core.IRuleValidator); ok {
+		// TODO:GG 每次都获取，会不会影响性能？
+		// TODO:GG 是不是还是应该缓存到 typeInfo 里？
+		sceneRules := provider.ValidateRules(ctx.Scene())
+		rules = sceneRules
 	}
 
 	// 如果没有规则，直接返回
@@ -163,12 +162,7 @@ func (s *ruleStrategy) convertAndCollectErrors(err error, collector core.IErrorC
 		}
 	} else {
 		// 其他类型的错误
-		fieldErr := errors.NewFieldError(
-			"",
-			"",
-			"error",
-			errors.WithMessage(err.Error()),
-		)
+		fieldErr := errors.NewFieldErrorWithMessage(err.Error())
 		collector.Collect(fieldErr)
 	}
 }

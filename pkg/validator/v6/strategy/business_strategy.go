@@ -15,7 +15,7 @@ type businessStrategy struct {
 // NewBusinessStrategy 创建业务验证策略
 func NewBusinessStrategy(inspector core.ITypeInspector) core.IValidationStrategy {
 	return &businessStrategy{
-		name:      "business_strategy",
+		name:      "business",
 		inspector: inspector,
 	}
 }
@@ -32,11 +32,13 @@ func (s *businessStrategy) Name() string {
 
 // Validate 执行业务验证
 func (s *businessStrategy) Validate(target any, ctx core.IContext, collector core.IErrorCollector) error {
-	// 检查类型信息
-	typeInfo := s.inspector.Inspect(target)
-	if typeInfo == nil || !typeInfo.IsBusinessValidator() {
-		return nil
-	}
+	//// 检查类型信息
+	//typeInfo := s.inspector.Inspect(target)
+	//if typeInfo == nil || !typeInfo.IsBusinessValidator() {
+	//	return nil
+	//}
+
+	// 已实现缓存，TODO:GG 能提升性能吗？
 
 	// 执行业务验证
 	if validator, ok := target.(core.IBusinessValidator); ok {
