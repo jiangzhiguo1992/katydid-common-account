@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"fmt"
 	"katydid-common-account/pkg/validator/v6/core"
 	"sort"
 	"sync"
@@ -74,9 +75,15 @@ func (o *strategyOrchestrator) GetStrategies() []core.IValidationStrategy {
 }
 
 // Execute 执行所有策略
-func (o *strategyOrchestrator) Execute(target any, ctx core.IContext, collector core.IErrorCollector) error {
+func (o *strategyOrchestrator) Execute(target any, ctx core.IContext, collector core.IErrorCollector) (err error) {
 	//o.mu.RLock()
 	//defer o.mu.RUnlock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("strategy panic: %v", r)
+		}
+	}()
 
 	if o.executionMode == core.ExecutionModeParallel {
 		return o.executeParallel(target, ctx, collector)
@@ -102,7 +109,7 @@ func (o *strategyOrchestrator) executeSequential(target any, ctx core.IContext, 
 }
 
 // executeParallel 并行执行策略
-func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, collector core.IErrorCollector) error {
+func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, collector core.IErrorCollector) (err error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -121,13 +128,19 @@ func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, co
 			}
 			mu.Unlock()
 
-			// 执行策略 TODO:GG err要中断执行
-			s.Validate(target, ctx, collector)
+			// 执行策略
+			err = s.Validate(target, ctx, collector)
 		}(entry.strategy)
+
+		// 策略执行出错，中断当前执行
+		// TODO:GG 能中断吗？
+		if err != nil {
+			break
+		}
 	}
 
 	wg.Wait()
-	return nil
+	return err
 }
 
 // SetExecutionMode 设置执行模式
