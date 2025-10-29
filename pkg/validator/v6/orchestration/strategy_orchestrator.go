@@ -18,7 +18,7 @@ type strategyEntry struct {
 type strategyOrchestrator struct {
 	strategies    []strategyEntry
 	executionMode core.ExecutionMode
-	mu            sync.RWMutex // TODO:GG ??
+	//mu            sync.RWMutex // 一般就初始化，不必枷锁
 }
 
 // NewStrategyOrchestrator 创建策略编排器
@@ -31,8 +31,8 @@ func NewStrategyOrchestrator() core.IStrategyOrchestrator {
 
 // Register 注册策略
 func (o *strategyOrchestrator) Register(strategy core.IValidationStrategy, priority int) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	//o.mu.Lock()
+	//defer o.mu.Unlock()
 
 	// 添加策略
 	o.strategies = append(o.strategies, strategyEntry{
@@ -48,8 +48,8 @@ func (o *strategyOrchestrator) Register(strategy core.IValidationStrategy, prior
 
 // Unregister 注销策略
 func (o *strategyOrchestrator) Unregister(strategyType core.StrategyType) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	//o.mu.Lock()
+	//defer o.mu.Unlock()
 
 	// 过滤掉指定类型的策略
 	filtered := make([]strategyEntry, 0, len(o.strategies))
@@ -63,8 +63,8 @@ func (o *strategyOrchestrator) Unregister(strategyType core.StrategyType) {
 
 // GetStrategies 获取所有策略
 func (o *strategyOrchestrator) GetStrategies() []core.IValidationStrategy {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
+	//o.mu.RLock()
+	//defer o.mu.RUnlock()
 
 	strategies := make([]core.IValidationStrategy, len(o.strategies))
 	for i, entry := range o.strategies {
@@ -75,8 +75,8 @@ func (o *strategyOrchestrator) GetStrategies() []core.IValidationStrategy {
 
 // Execute 执行所有策略
 func (o *strategyOrchestrator) Execute(target any, ctx core.IContext, collector core.IErrorCollector) error {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
+	//o.mu.RLock()
+	//defer o.mu.RUnlock()
 
 	if o.executionMode == core.ExecutionModeParallel {
 		return o.executeParallel(target, ctx, collector)
@@ -94,9 +94,8 @@ func (o *strategyOrchestrator) executeSequential(target any, ctx core.IContext, 
 
 		// 执行策略
 		if err := entry.strategy.Validate(target, ctx, collector); err != nil {
-			// 策略执行出错，但继续执行其他策略
-			// 可以根据需要修改为遇错即停
-			continue
+			// 策略执行出错，中断当前执行
+			return err
 		}
 	}
 	return nil
@@ -122,7 +121,7 @@ func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, co
 			}
 			mu.Unlock()
 
-			// 执行策略
+			// 执行策略 TODO:GG err要中断执行
 			s.Validate(target, ctx, collector)
 		}(entry.strategy)
 	}
@@ -133,7 +132,7 @@ func (o *strategyOrchestrator) executeParallel(target any, ctx core.IContext, co
 
 // SetExecutionMode 设置执行模式
 func (o *strategyOrchestrator) SetExecutionMode(mode core.ExecutionMode) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	//o.mu.Lock()
+	//defer o.mu.Unlock()
 	o.executionMode = mode
 }

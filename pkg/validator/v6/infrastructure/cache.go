@@ -72,7 +72,7 @@ func (c *simpleCache) Stats() core.CacheStats {
 
 // lruCache LRU 缓存实现
 type lruCache struct {
-	mu      sync.RWMutex // 全局的，所以可以加线程安全
+	mu      sync.RWMutex
 	data    map[any]*lruNode
 	head    *lruNode
 	tail    *lruNode
